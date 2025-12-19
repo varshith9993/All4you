@@ -138,10 +138,10 @@ export default function EditService() {
         const files = Array.from(e.target.files);
         if (files.length === 0) return;
 
-        // Validate file size (Max 15MB)
+        // Validate file size (Max 10MB)
         for (const file of files) {
-            if (file.size > 15 * 1024 * 1024) {
-                alert(`File "${file.name}" exceeds the 15MB limit.`);
+            if (file.size > 10 * 1024 * 1024) {
+                alert(`File "${file.name}" exceeds the 10MB limit.`);
                 return;
             }
         }
@@ -480,7 +480,7 @@ export default function EditService() {
                                 <span className="text-sm text-gray-600">
                                     Click to upload files
                                 </span>
-                                <p className="text-xs text-gray-500 mt-1">Images, PDFs, Docs (Max 15MB)</p>
+                                <p className="text-xs text-gray-500 mt-1">Images, PDFs, Docs (Max 10MB)</p>
                             </div>
                             <input
                                 type="file"

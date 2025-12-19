@@ -100,7 +100,7 @@ function getCloudinaryPdfViewUrl(url) {
 
 // Function to check if file can be viewed online based on size
 function canViewOnline(fileSize, extension) {
-    const MAX_VIEWABLE_SIZE = 15 * 1024 * 1024; // 15MB
+    const MAX_VIEWABLE_SIZE = 10 * 1024 * 1024; // 10MB
 
     // Check file size limit
     if (fileSize > MAX_VIEWABLE_SIZE) {
@@ -138,10 +138,10 @@ function getFileInfo(file, sizeInBytes = null) {
     // Calculate file size
     let fileSize = "Unknown size";
     let isOversized = false;
-    const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB in bytes
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
 
     if (sizeInBytes && sizeInBytes > 0) {
-        // Check if file exceeds 15MB limit
+        // Check if file exceeds 10MB limit
         if (sizeInBytes > MAX_FILE_SIZE) {
             isOversized = true;
         }
@@ -188,24 +188,8 @@ function openFileViewer(url, fileName, extension, fileSize = null) {
         return true;
     }
 
-    // For PDF files - optimized Cloudinary handling
-    if (extension === 'pdf') {
-        // Check if it's a Cloudinary URL
-        if (url.includes("cloudinary.com")) {
-            // Cloudinary PDFs usually work directly in browser
-            const viewUrl = getCloudinaryPdfViewUrl(url);
-            window.open(viewUrl, '_blank', 'noopener,noreferrer');
-            return true;
-        } else {
-            // Non-Cloudinary PDFs use Google Docs Viewer
-            const googleDocsViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
-            window.open(googleDocsViewerUrl, '_blank', 'noopener,noreferrer');
-            return true;
-        }
-    }
-
-    // For Office documents - use Google Docs Viewer
-    const officeExtensions = ['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'csv'];
+    // For ALL documents (PDFs, PPTX, DOCX, etc.) - use Google Docs Viewer
+    const officeExtensions = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'csv'];
     if (officeExtensions.includes(extension)) {
         const googleDocsViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
         window.open(googleDocsViewerUrl, '_blank', 'noopener,noreferrer');
@@ -420,30 +404,40 @@ function ServiceDetail() {
     }, [id]);
 
     // Self-healing: Update DB if calculated rating differs from stored rating
-    useEffect(() => {
-        if (service && typeof avgRating !== 'undefined') {
-            const storedRating = service.rating || 0;
-            const calculatedRating = parseFloat(avgRating);
-            // Allow small float difference
-            if (Math.abs(storedRating - calculatedRating) > 0.1) {
-                console.log("Syncing rating...", storedRating, calculatedRating);
-                updateServiceRating();
-            }
-        }
-    }, [service, avgRating, updateServiceRating]);
+    // DISABLED: This was causing permission errors because non-owners can't update service documents
+    // Rating is now only updated when reviews are submitted
+    // useEffect(() => {
+    //     if (service && typeof avgRating !== 'undefined') {
+    //         const storedRating = service.rating || 0;
+    //         const calculatedRating = parseFloat(avgRating);
+    //         // Allow small float difference
+    //         if (Math.abs(storedRating - calculatedRating) > 0.1) {
+    //             console.log("Syncing rating...", storedRating, calculatedRating);
+    //             updateServiceRating();
+    //         }
+    //     }
+    // }, [service, avgRating, updateServiceRating]);
 
     const toggleFavorite = async () => {
+        if (!currentUserId) { setToast("Please login to favorite!"); return; }
         const favDoc = doc(db, "serviceFavorites", `${currentUserId}_${id}`);
-        if (userHasFavorited) {
-            await deleteDoc(favDoc);
-            setUserHasFavorited(false);
-        } else {
-            await setDoc(favDoc, { serviceId: id, userId: currentUserId, createdAt: serverTimestamp() });
-            setUserHasFavorited(true);
+        try {
+            if (userHasFavorited) {
+                await deleteDoc(favDoc);
+                setUserHasFavorited(false);
+            } else {
+                await setDoc(favDoc, { serviceId: id, userId: currentUserId, createdAt: serverTimestamp() });
+                setUserHasFavorited(true);
+            }
+        } catch (error) {
+            console.error("Error toggling favorite:", error);
+            setToast("Failed to update favorites");
         }
     };
 
     const submitReview = async () => {
+        if (!currentUserId) { setToast("Please login to review!"); return; }
+
         if (rateModalOpen) {
             if (newRating === 0) { setToast("Please choose a rating!"); return; }
             if (userRatingDoc) {
@@ -467,8 +461,10 @@ function ServiceDetail() {
                             senderId: currentUserId,
                             type: "review",
                             title: "New Rating",
-                            message: `You received a ${newRating} star rating`,
+                            message: `Your service "${service.title}" received a ${newRating} star rating`,
                             link: `/service-detail/${id}`,
+                            postId: id,
+                            postType: "service",
                             read: false,
                             createdAt: serverTimestamp()
                         });
@@ -500,8 +496,10 @@ function ServiceDetail() {
                             senderId: currentUserId,
                             type: "review",
                             title: "New Review",
-                            message: `You received a new review: "${newReviewText.substring(0, 50)}${newReviewText.length > 50 ? '...' : ''}"`,
+                            message: `New review on your service "${service.title}": "${newReviewText.substring(0, 50)}${newReviewText.length > 50 ? '...' : ''}"`,
                             link: `/service-detail/${id}`,
+                            postId: id,
+                            postType: "service",
                             read: false,
                             createdAt: serverTimestamp()
                         });
@@ -989,12 +987,9 @@ function ServiceDetail() {
                                                 <div className="flex justify-between items-start">
                                                     <h4 className="font-semibold text-gray-900 truncate pr-2">
                                                         {user.username || "Unknown User"}
-                                                        <span className="text-xs text-gray-500 font-normal ml-2">
-                                                            {dt ? formatRelativeTime(dt) : ""}
-                                                        </span>
                                                     </h4>
 
-                                                    {isOwner && (
+                                                    {(isOwner || r.userId === currentUserId) && (
                                                         <div className="relative ml-auto">
                                                             <button
                                                                 onClick={(e) => {
@@ -1152,7 +1147,7 @@ function ServiceDetail() {
                                         </div>
                                         <h4 className="text-xl font-bold text-gray-900 mb-2">File Too Large for Online Viewing</h4>
                                         <p className="text-gray-600 mb-4">
-                                            This file ({currentFile.size}) exceeds the 15MB limit for online viewing.
+                                            This file ({currentFile.size}) exceeds the 10MB limit for online viewing.
                                         </p>
                                         <p className="text-gray-500 text-sm mb-6">
                                             Please download the file to view it on your device.
@@ -1251,7 +1246,7 @@ function ServiceDetail() {
                                     </div>
 
                                     <p className="text-sm text-gray-500 mt-4">
-                                        Google Docs Viewer supports: PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, TXT files up to 15MB
+                                        Google Docs Viewer supports: PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, TXT files up to 10MB
                                     </p>
                                 </div>
                             )}
@@ -1260,7 +1255,7 @@ function ServiceDetail() {
                         <div className="bg-gray-50 px-6 py-4 flex justify-between items-center">
                             <span className="text-sm text-gray-600">
                                 {currentFile.isOversized
-                                    ? 'File exceeds 15MB limit - download required'
+                                    ? 'File exceeds 10MB limit - download required'
                                     : currentFile.extension === 'pdf' && currentFile.url.includes("cloudinary.com")
                                         ? 'Cloudinary PDF - Opens directly in browser PDF viewer'
                                         : 'File will open in a new tab for better viewing experience'}

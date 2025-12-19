@@ -8,7 +8,7 @@ import { FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck, FiUser } 
 
 const suggestedTags = ["mechanic", "engineer", "tutor", "electrician", "driver", "teacher", "plumber", "carpenter", "painter", "cleaner", "cook", "gardener"];
 const OPENCAGE_API_KEY = "43ac78a805af4868b01f3dc9dcae8556";
-const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
+// const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/auto/upload"; // Deprecated global const
 
 export default function AddWorkers() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -49,13 +49,20 @@ export default function AddWorkers() {
     formData.append("file", file);
     formData.append("upload_preset", "ml_default");
 
-    const response = await fetch(CLOUDINARY_UPLOAD_URL, {
+    // Use 'auto' resource type for all files
+    // This allows Cloudinary to automatically detect the file type
+    // and handle PDFs better than 'raw' type (which has restrictions on free accounts)
+    const uploadUrl = `https://api.cloudinary.com/v1_1/devs4x2aa/auto/upload`;
+
+    const response = await fetch(uploadUrl, {
       method: "POST",
       body: formData,
     });
 
     if (!response.ok) {
-      throw new Error("Failed to upload file");
+      const errorData = await response.json();
+      console.error("Cloudinary upload error:", errorData);
+      throw new Error(`Failed to upload file: ${errorData.error?.message || 'Unknown error'}`);
     }
 
     const data = await response.json();
@@ -89,10 +96,10 @@ export default function AddWorkers() {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
 
-    // Validate file size (Max 15MB)
+    // Validate file size (Max 10MB)
     for (const file of files) {
-      if (file.size > 15 * 1024 * 1024) {
-        setError(`File "${file.name}" exceeds the 15MB limit.`);
+      if (file.size > 10 * 1024 * 1024) {
+        setError(`File "${file.name}" exceeds the 10MB limit.`);
         return;
       }
     }
@@ -452,7 +459,7 @@ export default function AddWorkers() {
                 <span className="text-sm text-gray-600">
                   {uploading ? "Uploading..." : "Click to upload work samples"}
                 </span>
-                <p className="text-xs text-gray-500 mt-1">Images, PDFs, PPTs, Docs (Max 15MB)</p>
+                <p className="text-xs text-gray-500 mt-1">Images, PDFs, PPTs, Docs (Max 10MB)</p>
               </div>
               <input
                 type="file"

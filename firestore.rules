@@ -8,120 +8,231 @@ service cloud.firestore {
     }
     
     function isOwner(userId) {
-      return request.auth.uid == userId;
+      return isAuthenticated() && request.auth.uid == userId;
     }
     
-    function getUserRole() {
-      return get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role;
+    function isDocOwner(resource) {
+      return isAuthenticated() && (request.auth.uid == resource.data.createdBy || request.auth.uid == resource.data.userId);
     }
     
-    function isAdmin() {
-      return isAuthenticated() && getUserRole() == 'admin';
-    }
-    
-    // Profiles collection - Users can read all profiles, only update their own
+    // Profiles collection
     match /profiles/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isOwner(userId);
-      allow update: if isAuthenticated() && isOwner(userId);
-      allow delete: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      // Anyone can read profiles (for viewing user info)
+      allow read: if true;
+      
+      // Only the user can create/update their own profile
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId) || (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating']));
+      
+      // Only the user can delete their own profile
+      allow delete: if isOwner(userId);
     }
     
     // Workers collection
     match /workers/{workerId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isAdmin());
-      allow delete: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isAdmin());
+      // Anyone can read workers (public posts)
+      allow read: if true;
+      
+      // Authenticated users can create workers
+      allow create: if isAuthenticated() && request.resource.data.createdBy == request.auth.uid;
+      
+      // Only the creator can update their worker post, or anyone can update ONLY the rating
+      allow update: if isDocOwner(resource) || (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating']));
+      
+      // Only the creator can delete their worker post
+      allow delete: if isDocOwner(resource);
     }
     
     // Services collection
     match /services/{serviceId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isAdmin());
-      allow delete: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isAdmin());
+      // Anyone can read services (public posts)
+      allow read: if true;
+      
+      // Authenticated users can create services
+      allow create: if isAuthenticated() && request.resource.data.createdBy == request.auth.uid;
+      
+      // Only the creator can update their service post, or anyone can update ONLY the rating
+      allow update: if isDocOwner(resource) || (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating']));
+      
+      // Only the creator can delete their service post
+      allow delete: if isDocOwner(resource);
     }
     
     // Ads collection
     match /ads/{adId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isAdmin());
-      allow delete: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isAdmin());
-    }
-    
-    // Favorites collections
-    match /workerFavorites/{favoriteId} {
-      allow read, create, delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || request.resource.data.userId == request.auth.uid);
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
-    }
-    
-    match /serviceFavorites/{favoriteId} {
-      allow read, create, delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || request.resource.data.userId == request.auth.uid);
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
-    }
-    
-    match /adFavorites/{favoriteId} {
-      allow read, create, delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || request.resource.data.userId == request.auth.uid);
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
-    }
-    
-    // Reviews collections
-    match /workerReviews/{reviewId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-    }
-    
-    match /serviceReviews/{reviewId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-    }
-
-    match /adReviews/{reviewId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-    }
-    
-    // Chats collection
-    match /chats/{chatId} {
-      allow read, create: if isAuthenticated();
-      allow update: if isAuthenticated() && (request.auth.uid in resource.data.participants || request.auth.uid in request.resource.data.participants);
-      allow delete: if isAuthenticated() && isAdmin();
+      // Anyone can read ads (public posts)
+      allow read: if true;
       
-      // Messages subcollection
+      // Authenticated users can create ads
+      allow create: if isAuthenticated() && request.resource.data.createdBy == request.auth.uid;
+      
+      // Only the creator can update their ad post, or anyone can update ONLY the rating
+      allow update: if isDocOwner(resource) || (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating']));
+      
+      // Only the creator can delete their ad post
+      allow delete: if isDocOwner(resource);
+    }
+    
+    // Worker Reviews
+    match /workerReviews/{reviewId} {
+      // Anyone can read reviews
+      allow read: if true;
+      
+      // Authenticated users can create reviews
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      
+      // Only the review creator can update their review
+      allow update: if isDocOwner(resource);
+      
+      // Only the review creator can delete their review
+      allow delete: if isDocOwner(resource);
+    }
+    
+    // Service Reviews
+    match /serviceReviews/{reviewId} {
+      // Anyone can read reviews
+      allow read: if true;
+      
+      // Authenticated users can create reviews
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      
+      // Only the review creator can update their review
+      allow update: if isDocOwner(resource);
+      
+      // Only the review creator can delete their review
+      allow delete: if isDocOwner(resource);
+    }
+    
+    // Ad Reviews
+    match /adReviews/{reviewId} {
+      // Anyone can read reviews
+      allow read: if true;
+      
+      // Authenticated users can create reviews
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      
+      // Only the review creator can update their review
+      allow update: if isDocOwner(resource);
+      
+      // Only the review creator can delete their review
+      allow delete: if isDocOwner(resource);
+    }
+    
+    // Worker Favorites
+    match /workerFavorites/{favoriteId} {
+      // Users can read their own favorites
+      allow read: if isAuthenticated();
+      
+      // Users can create favorites (favoriteId format: userId_workerId)
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      
+      // Users can delete their own favorites
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+    
+    // Service Favorites
+    match /serviceFavorites/{favoriteId} {
+      // Users can read their own favorites
+      allow read: if isAuthenticated();
+      
+      // Users can create favorites (favoriteId format: userId_serviceId)
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      
+      // Users can delete their own favorites
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+    
+    // Ad Favorites
+    match /adFavorites/{favoriteId} {
+      // Users can read their own favorites
+      allow read: if isAuthenticated();
+      
+      // Users can create favorites (favoriteId format: userId_adId)
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      
+      // Users can delete their own favorites
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+    
+    // Notifications
+    match /notifications/{notificationId} {
+      // Users can only read their own notifications
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      
+      // Anyone can create notifications (for system/app notifications)
+      allow create: if isAuthenticated();
+      
+      // Users can update their own notifications (e.g., mark as read)
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      
+      // Users can delete their own notifications
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+    
+    // Chats
+    match /chats/{chatId} {
+      // Users can read chats they're part of
+      allow read: if isAuthenticated() && request.auth.uid in resource.data.participants;
+      
+      // Authenticated users can create chats
+      allow create: if isAuthenticated() && request.auth.uid in request.resource.data.participants;
+      
+      // Participants can update chat (e.g., mute, block)
+      allow update: if isAuthenticated() && request.auth.uid in resource.data.participants;
+      
+      // Participants can delete chat
+      allow delete: if isAuthenticated() && request.auth.uid in resource.data.participants;
+      
+      // Chat messages subcollection
       match /messages/{messageId} {
+        // Participants can read messages
         allow read: if isAuthenticated() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
-        allow create: if isAuthenticated() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
-        allow update: if isAuthenticated() && (resource.data.senderId == request.auth.uid || isAdmin());
-        allow delete: if isAuthenticated() && (resource.data.senderId == request.auth.uid || isAdmin());
+        
+        // Participants can create messages
+        allow create: if isAuthenticated() && 
+                        request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants &&
+                        request.resource.data.senderId == request.auth.uid;
+        
+        // Sender can update their own messages (e.g., edit, mark as deleted)
+        allow update: if isAuthenticated() && 
+                        (resource.data.senderId == request.auth.uid || 
+                         request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants);
+        
+        // Sender can delete their own messages
+        allow delete: if isAuthenticated() && resource.data.senderId == request.auth.uid;
       }
     }
     
-    // Notifications collection
-    match /notifications/{notificationId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.userId);
-      allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-    }
-    
-    // Notes collection
+    // Notes
     match /notes/{noteId} {
-      allow read, create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Users can only read their own notes
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      
+      // Users can create their own notes
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      
+      // Users can update their own notes
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      
+      // Users can delete their own notes
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
     
-    // Feedback collection
+    // Feedback
     match /feedback/{feedbackId} {
-      allow read: if isAdmin();
+      // Only admins can read feedback (you can add admin check here)
+      allow read: if false; // Change to admin check if needed
+      
+      // Authenticated users can submit feedback
       allow create: if isAuthenticated();
-      allow update, delete: if isAdmin();
+      
+      // No updates or deletes allowed
+      allow update, delete: if false;
+    }
+    
+    // Default deny all other collections
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

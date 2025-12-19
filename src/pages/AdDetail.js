@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getAuth } from "firebase/auth";
 import {
   doc, getDoc, collection, query, where, onSnapshot, addDoc, setDoc, deleteDoc, serverTimestamp, getDocs, updateDoc
 } from "firebase/firestore";
 import { db } from "../firebase";
-import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin } from "react-icons/fi";
+import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiMoreVertical, FiTrash2, FiLoader, FiAlertCircle } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.png";
 
 function ManualStars({ value, onChange, size = 46 }) {
@@ -72,6 +72,7 @@ export default function AdDetail() {
   const [commentModalOpen, setCommentModalOpen] = useState(false);
   const [carouselIdx, setCarouselIdx] = useState(0);
   const [toast, setToast] = useState("");
+  const [activeMenuId, setActiveMenuId] = useState(null);
   const [viewingImage, setViewingImage] = useState(null);
 
   // Get auth user
@@ -80,6 +81,30 @@ export default function AdDetail() {
     const unsub = auth.onAuthStateChanged(u => setCurrentUserId(u?.uid ?? ""));
     return unsub;
   }, []);
+
+  // Update Ad Rating with useCallback
+  const updateAdRating = useCallback(async () => {
+    if (!adId) return;
+    try {
+      // Recalculate average rating from all reviews
+      const q = query(collection(db, "adReviews"), where("adId", "==", adId));
+      const snap = await getDocs(q);
+      let sum = 0;
+      let count = 0;
+      snap.forEach(doc => {
+        const data = doc.data();
+        if (typeof data.rating === "number" && data.rating > 0) {
+          sum += data.rating;
+          count++;
+        }
+      });
+      const newAvg = count > 0 ? sum / count : 0;
+      // Update the ad document with the new average rating
+      await updateDoc(doc(db, "ads", adId), { rating: newAvg });
+    } catch (error) {
+      console.error("Error updating ad rating:", error);
+    }
+  }, [adId]);
 
   // Fetch ad, reviews, user profiles
   useEffect(() => {
@@ -159,35 +184,25 @@ export default function AdDetail() {
   const avgRating = totalRatings ? (ratingSum / totalRatings).toFixed(1) : "0.0";
 
   const toggleFavorite = async () => {
+    if (!currentUserId) { setToast("Please login to favorite!"); return; }
     const favDoc = doc(db, "adFavorites", `${currentUserId}_${adId}`);
-    if (userHasFavorited) {
-      await deleteDoc(favDoc);
-      setUserHasFavorited(false);
-    } else {
-      await setDoc(favDoc, { adId, userId: currentUserId, createdAt: serverTimestamp() });
-      setUserHasFavorited(true);
+    try {
+      if (userHasFavorited) {
+        await deleteDoc(favDoc);
+        setUserHasFavorited(false);
+      } else {
+        await setDoc(favDoc, { adId, userId: currentUserId, createdAt: serverTimestamp() });
+        setUserHasFavorited(true);
+      }
+    } catch (error) {
+      console.error("Error toggling favorite:", error);
+      setToast("Failed to update favorites");
     }
   };
 
-  const updateAdRating = async () => {
-    // Recalculate average rating from all reviews
-    const q = query(collection(db, "adReviews"), where("adId", "==", adId));
-    const snap = await getDocs(q);
-    let sum = 0;
-    let count = 0;
-    snap.forEach(doc => {
-      const data = doc.data();
-      if (typeof data.rating === "number" && data.rating > 0) {
-        sum += data.rating;
-        count++;
-      }
-    });
-    const avgRating = count > 0 ? sum / count : 0;
-    // Update the ad document with the new average rating
-    await updateDoc(doc(db, "ads", adId), { rating: avgRating });
-  };
-
   const submitReview = async () => {
+    if (!currentUserId) { setToast("Please login to review!"); return; }
+
     if (rateModalOpen) {
       if (newRating === 0) { setToast("Please choose a rating!"); return; }
       if (userRatingDoc) {
@@ -195,25 +210,88 @@ export default function AdDetail() {
         setTimeout(() => setToast(""), 1500);
         return;
       }
-      await addDoc(collection(db, "adReviews"), {
-        adId, userId: currentUserId, rating: newRating, text: "", createdAt: serverTimestamp()
-      });
-      await updateAdRating(); // Update the ad's rating
-      setNewRating(0);
-      setRateModalOpen(false);
-      setToast("Rating submitted!");
+      try {
+        await addDoc(collection(db, "adReviews"), {
+          adId, userId: currentUserId, rating: newRating, text: "", createdAt: serverTimestamp()
+        });
+        await updateAdRating(); // Update the ad's rating
+
+        // Create notification
+        if (ad && ad.createdBy && ad.createdBy !== currentUserId) {
+          try {
+            await addDoc(collection(db, "notifications"), {
+              userId: ad.createdBy,
+              senderId: currentUserId,
+              type: "review",
+              title: "New Rating",
+              message: `Your ad "${ad.title}" received a ${newRating} star rating`,
+              link: `/ad-detail/${adId}`,
+              postId: adId,
+              postType: "ad",
+              read: false,
+              createdAt: serverTimestamp()
+            });
+          } catch (nErr) { console.error("Notif error", nErr); }
+        }
+
+        setNewRating(0);
+        setRateModalOpen(false);
+        setToast("Rating submitted!");
+      } catch (error) {
+        console.error("Error submitting rating:", error);
+        setToast("Failed to submit rating");
+      }
     }
     if (commentModalOpen) {
       if (!newReviewText.trim()) { setToast("Please write your review."); return; }
-      await addDoc(collection(db, "adReviews"), {
-        adId, userId: currentUserId, rating: null, text: newReviewText.trim(), createdAt: serverTimestamp()
-      });
-      setNewReviewText("");
-      setCommentModalOpen(false);
-      setToast("Review submitted!");
+      try {
+        await addDoc(collection(db, "adReviews"), {
+          adId, userId: currentUserId, rating: null, text: newReviewText.trim(), createdAt: serverTimestamp()
+        });
+
+        // Create notification
+        if (ad && ad.createdBy && ad.createdBy !== currentUserId) {
+          try {
+            await addDoc(collection(db, "notifications"), {
+              userId: ad.createdBy,
+              senderId: currentUserId,
+              type: "review",
+              title: "New Review",
+              message: `New review on your ad "${ad.title}": "${newReviewText.substring(0, 50)}${newReviewText.length > 50 ? '...' : ''}"`,
+              link: `/ad-detail/${adId}`,
+              postId: adId,
+              postType: "ad",
+              read: false,
+              createdAt: serverTimestamp()
+            });
+          } catch (nErr) { console.error("Notif error", nErr); }
+        }
+
+        setNewReviewText("");
+        setCommentModalOpen(false);
+        setToast("Review submitted!");
+      } catch (error) {
+        console.error("Error submitting review:", error);
+        setToast("Failed to submit review");
+      }
     }
     setTimeout(() => setToast(""), 1800);
   };
+
+  const deleteReview = async (reviewId, hasRating) => {
+    if (!window.confirm("Delete this review?")) return;
+    try {
+      await deleteDoc(doc(db, "adReviews", reviewId));
+      if (hasRating) await updateAdRating();
+      setToast("Review deleted");
+      setActiveMenuId(null);
+    } catch (error) {
+      console.error("Error deleting review:", error);
+      setToast("Failed to delete");
+    }
+    setTimeout(() => setToast(""), 1800);
+  };
+  const isOwner = ad && currentUserId === ad.createdBy;
 
   const shareAd = () => {
     if (!ad) return;
@@ -283,7 +361,7 @@ export default function AdDetail() {
   const displayUsername = creator?.username || ad.username || "Unknown User";
 
   return (
-    <div className="relative bg-white min-h-screen flex flex-col max-w-md mx-auto">
+    <div className="relative bg-white min-h-screen flex flex-col max-w-md mx-auto" onClick={() => setActiveMenuId(null)}>
       {/* Top bar */}
       <div className="flex items-center mb-1 pt-2 px-3 sticky top-0 bg-white z-20 shadow-sm py-2">
         <button className="mr-3 text-blue-600 rounded-full p-2 hover:bg-blue-50 transition-colors" onClick={() => navigate("/ads")} aria-label="Back">
@@ -443,8 +521,10 @@ export default function AdDetail() {
               {reviews.filter(r => r.text && r.text.trim()).map(r => {
                 const user = profiles[r.userId] || { username: "Unknown", profileImage: "" };
                 const dt = r.createdAt && r.createdAt.seconds ? new Date(r.createdAt.seconds * 1000) : null;
+                const isReviewOwner = r.userId === currentUserId;
+
                 return (
-                  <div key={r.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                  <div key={r.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm relative">
                     <div className="flex items-start gap-3">
                       <img
                         src={user.profileImage || defaultAvatar}
@@ -453,12 +533,35 @@ export default function AdDetail() {
                         onError={(e) => { e.target.src = defaultAvatar; }}
                       />
                       <div className="flex-1 min-w-0">
-                        <h4 className="font-semibold text-gray-900 truncate">
-                          {user.username || "Unknown User"}
-                          <span className="text-xs text-gray-500 font-normal ml-2">
-                            {dt ? formatRelativeTime(dt) : ""}
-                          </span>
-                        </h4>
+                        <div className="flex justify-between items-start">
+                          <h4 className="font-semibold text-gray-900 truncate pr-6">
+                            {user.username || "Unknown User"}
+                          </h4>
+                          {/* Three dots menu for owner or review creator */}
+                          {(isOwner || r.userId === currentUserId) && (
+                            <div className="relative ml-auto">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === r.id ? null : r.id); }}
+                                className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                              >
+                                <FiMoreVertical size={18} />
+                              </button>
+                              {activeMenuId === r.id && (
+                                <div className="absolute right-0 top-8 bg-white shadow-lg border border-gray-100 rounded-lg py-1 z-10 w-32 animate-scale-in">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      deleteReview(r.id, r.rating > 0);
+                                    }}
+                                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                  >
+                                    <FiTrash2 size={14} /> Delete
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
                         <div className="text-xs text-gray-500 mb-1">
                           {dt ? formatDateTime(dt) : ""}
                         </div>

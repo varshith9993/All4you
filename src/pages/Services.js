@@ -33,29 +33,29 @@ function getDistanceKm(lat1, lon1, lat2, lon2) {
 function formatLastSeen(lastSeen) {
   if (!lastSeen) return "Never online";
   try {
-    let date = lastSeen.toDate ? lastSeen.toDate() : 
-               lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : 
-               new Date(lastSeen);
-    
+    let date = lastSeen.toDate ? lastSeen.toDate() :
+      lastSeen.seconds ? new Date(lastSeen.seconds * 1000) :
+        new Date(lastSeen);
+
     const now = new Date();
-    
+
     // Check if timestamp is in the future (invalid)
     if (date > now) {
       return "Last Seen: Unknown";
     }
-    
+
     const diffMs = now - date;
     const diffSecs = Math.floor(diffMs / 1000);
     const diffMins = Math.floor(diffSecs / 60);
     const diffHours = Math.floor(diffMins / 60);
     const diffDays = Math.floor(diffHours / 24);
-    
+
     if (diffSecs < 60) return "Last Seen: just now";
     if (diffMins < 60) return `Last Seen: ${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
     if (diffHours < 24) return `Last Seen: ${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
     if (diffDays === 1) return "Last Seen: yesterday";
     if (diffDays < 7) return `Last Seen: ${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-    
+
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const year = date.getFullYear();
@@ -69,46 +69,46 @@ function formatLastSeen(lastSeen) {
 function isUserOnline(userId, currentUserId, online, lastSeen) {
   // Current user is always online
   if (userId === currentUserId) return true;
-  
+
   // If online field is explicitly true, check lastSeen timestamp
   if (online === true) {
     if (!lastSeen) return true;
-    
+
     try {
-      let date = lastSeen.toDate ? lastSeen.toDate() : 
-                 lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : 
-                 new Date(lastSeen);
-      
+      let date = lastSeen.toDate ? lastSeen.toDate() :
+        lastSeen.seconds ? new Date(lastSeen.seconds * 1000) :
+          new Date(lastSeen);
+
       // Check if timestamp is in the future (invalid)
       const now = new Date();
       if (date > now) {
         return false;
       }
-      
+
       // User is online only if lastSeen is within the last 5 seconds
       return (now.getTime() - date.getTime()) < 5000;
     } catch (error) {
       return true;
     }
   }
-  
+
   // If online field is explicitly false, user is offline
   if (online === false) return false;
-  
+
   // If online field is not set (undefined/null), use lastSeen
   if (!lastSeen) return false;
-  
+
   try {
-    let date = lastSeen.toDate ? lastSeen.toDate() : 
-               lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : 
-               new Date(lastSeen);
-    
+    let date = lastSeen.toDate ? lastSeen.toDate() :
+      lastSeen.seconds ? new Date(lastSeen.seconds * 1000) :
+        new Date(lastSeen);
+
     // Check if timestamp is in the future (invalid)
     const now = new Date();
     if (date > now) {
       return false;
     }
-    
+
     // User is online only if lastSeen is within the last 5 seconds
     return (now.getTime() - date.getTime()) < 5000;
   } catch (error) {
@@ -412,7 +412,7 @@ function FilterModal({ isOpen, onClose, filters, setFilters, applyFilters }) {
 
 function ServiceCard({ service, profile, userProfiles, currentUserId, navigate }) {
   const { title, location = {}, tags = [], latitude, longitude, createdBy, profilePhotoUrl, type, serviceType, expiry, rating = 0 } = service;
-  
+
   // Get profile data with fallbacks
   const getProfileData = () => {
     if (!createdBy) {
@@ -424,7 +424,7 @@ function ServiceCard({ service, profile, userProfiles, currentUserId, navigate }
         rating: 0
       };
     }
-    
+
     const profile = userProfiles[createdBy];
     if (!profile) {
       return {
@@ -435,7 +435,7 @@ function ServiceCard({ service, profile, userProfiles, currentUserId, navigate }
         rating: 0
       };
     }
-    
+
     return profile;
   };
 
@@ -735,15 +735,15 @@ export default function Services() {
     const unsubscribeServices = onSnapshot(
       q,
       (snapshot) => {
-        const allServices = snapshot.docs.map((doc) => ({ 
-          id: doc.id, 
-          ...doc.data() 
+        const allServices = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data()
         }));
         setServices(allServices);
 
         // Get unique creator IDs
         const creatorIds = Array.from(new Set(allServices.map(s => s.createdBy))).filter(Boolean);
-        
+
         if (creatorIds.length === 0) {
           setUserProfiles({});
           setLoading(false);
@@ -764,7 +764,7 @@ export default function Services() {
             console.error(`Error in profile listener for ${creatorId}:`, error);
           });
         });
-        
+
         setLoading(false);
       },
       (error) => {
@@ -830,13 +830,13 @@ export default function Services() {
       const searchLower = searchValue.toLowerCase();
       if (searchValue) {
         const creatorUsername = creatorProfile.username || "";
-        const matchesSearch = 
+        const matchesSearch =
           creatorUsername.toLowerCase().includes(searchLower) ||
           service.title?.toLowerCase().includes(searchLower) ||
           (service.tags || []).some(tag => tag.toLowerCase().includes(searchLower)) ||
           service.location?.city?.toLowerCase().includes(searchLower) ||
           service.location?.area?.toLowerCase().includes(searchLower);
-        
+
         if (!matchesSearch) return false;
       }
 

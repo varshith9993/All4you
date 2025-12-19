@@ -638,14 +638,26 @@ export default function ChatDetail() {
     const file = e.target.files[0];
     if (!file) return;
 
+    // Only allow images in chat
+    if (!file.type.startsWith("image/")) {
+      setToastMessage("Only images are allowed in chat");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    // Check file size (max 10MB for images)
+    if (file.size > 10 * 1024 * 1024) {
+      setToastMessage("Image size must be less than 10MB");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
     setUploading(true);
     try {
-      const type = file.type.startsWith("image/") ? "image" : "file";
-      const resourceType = type === "image" ? "image" : "auto";
-      const url = await uploadToCloudinary(file, resourceType);
-      await sendMessageInternal({ type, fileUrl: url, text: type === "image" ? "Image" : file.name });
+      const url = await uploadToCloudinary(file, "image");
+      await sendMessageInternal({ type: "image", fileUrl: url, text: "Image" });
     } catch (err) {
-      console.error("File upload failed", err);
+      console.error("Image upload failed", err);
       setToastMessage("Upload failed");
     } finally {
       setUploading(false);
@@ -825,7 +837,7 @@ export default function ChatDetail() {
         </div>
 
         <div className="flex items-center gap-1">
-          
+
           <button onClick={() => setShowOptions(!showOptions)} className="p-2 text-gray-800 hover:bg-gray-100 rounded-full transition-colors relative">
             <FiMoreVertical size={20} />
             {showOptions && (
@@ -1001,7 +1013,7 @@ export default function ChatDetail() {
           </div>
         ) : (
           <form onSubmit={handleTextSend} className="flex items-center gap-2">
-            <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" disabled={uploading} />
+            <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileSelect} className="hidden" disabled={uploading} />
 
             <button
               type="button"

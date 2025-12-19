@@ -1,0 +1,61 @@
+{
+    "indexes": [
+        {
+            "collectionGroup": "workerReviews",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "workerId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "serviceReviews",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "serviceId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "adReviews",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "adId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "notifications",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "userId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        }
+    ],
+    "fieldOverrides": []
+}

@@ -8,7 +8,7 @@ import { FiClock, FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck }
 
 const suggestedTags = ["note-taking", "delivery", "electrician", "repairs", "consulting", "cleaning", "plumbing", "tutoring", "moving", "gardening", "coding", "design", "writing"];
 const OPENCAGE_API_KEY = "43ac78a805af4868b01f3dc9dcae8556";
-const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
+// const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/auto/upload"; // Deprecated global const
 
 export default function AddServices() {
   const [title, setTitle] = useState("");
@@ -52,13 +52,20 @@ export default function AddServices() {
     formData.append("file", file);
     formData.append("upload_preset", "ml_default");
 
-    const response = await fetch(CLOUDINARY_UPLOAD_URL, {
+    // Use 'auto' resource type for all files
+    // This allows Cloudinary to automatically detect the file type
+    // and handle PDFs better than 'raw' type (which has restrictions on free accounts)
+    const uploadUrl = `https://api.cloudinary.com/v1_1/devs4x2aa/auto/upload`;
+
+    const response = await fetch(uploadUrl, {
       method: "POST",
       body: formData,
     });
 
     if (!response.ok) {
-      throw new Error("Failed to upload file");
+      const errorData = await response.json();
+      console.error("Cloudinary upload error:", errorData);
+      throw new Error(`Failed to upload file: ${errorData.error?.message || 'Unknown error'}`);
     }
 
     const data = await response.json();
@@ -118,10 +125,10 @@ export default function AddServices() {
 
     if (selectedFiles.length === 0) return;
 
-    // Validate file size (Max 15MB)
+    // Validate file size (Max 10MB)
     for (const file of selectedFiles) {
-      if (file.size > 15 * 1024 * 1024) {
-        setError(`File "${file.name}" exceeds the 15MB limit.`);
+      if (file.size > 10 * 1024 * 1024) {
+        setError(`File "${file.name}" exceeds the 10MB limit.`);
         return;
       }
     }
@@ -595,7 +602,7 @@ export default function AddServices() {
                 <span className="text-sm text-gray-600">
                   {uploading ? "Uploading..." : "Click to upload images or files"}
                 </span>
-                <p className="text-xs text-gray-500 mt-1">Images, PDFs, PPTs, Docs (Max 15MB)</p>
+                <p className="text-xs text-gray-500 mt-1">Images, PDFs, PPTs, Docs (Max 10MB)</p>
               </div>
               <input
                 type="file"

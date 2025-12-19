@@ -59,15 +59,31 @@ function formatRelativeTime(date) {
 // Function to get download URL with forced download
 function getDownloadUrl(url) {
   if (!url) return "";
-  if (url.includes("cloudinary.com") && url.includes("/upload/") && !url.includes("fl_attachment")) {
-    return url.replace("/upload/", "/upload/fl_attachment/");
+
+  // For Cloudinary URLs, we need to add fl_attachment flag properly
+  if (url.includes("cloudinary.com") && url.includes("/upload/")) {
+    // If fl_attachment is already present, return as is
+    if (url.includes("fl_attachment")) {
+      return url;
+    }
+
+    // Add fl_attachment flag to force download
+    // Find the position of '/upload/' and insert 'fl_attachment/' after it
+    const uploadIndex = url.indexOf("/upload/");
+    if (uploadIndex !== -1) {
+      const prefix = url.substring(0, uploadIndex + 8); // '/upload/' is 8 characters
+      const suffix = url.substring(uploadIndex + 8);
+      return `${prefix}fl_attachment/${suffix}`;
+    }
   }
+
+  // For Firebase Storage URLs, return as-is (they already have download tokens)
   return url;
 }
 
 // Function to check if file can be viewed online based on size
 function canViewOnline(fileSize, extension) {
-  const MAX_VIEWABLE_SIZE = 15 * 1024 * 1024; // 15MB
+  const MAX_VIEWABLE_SIZE = 10 * 1024 * 1024; // 10MB
 
   // Check file size limit
   if (fileSize > MAX_VIEWABLE_SIZE) {
@@ -105,10 +121,10 @@ function getFileInfo(url, sizeInBytes = null) {
   // Calculate file size
   let fileSize = "Unknown size";
   let isOversized = false;
-  const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB in bytes
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
 
   if (sizeInBytes && sizeInBytes > 0) {
-    // Check if file exceeds 15MB limit
+    // Check if file exceeds 10MB limit
     if (sizeInBytes > MAX_FILE_SIZE) {
       isOversized = true;
     }
@@ -156,14 +172,8 @@ function openFileViewer(url, fileName, extension, fileSize = null) {
     return true;
   }
 
-  // For PDF files - open in new tab (most browsers have built-in PDF viewers)
-  if (extension === 'pdf') {
-    window.open(url, '_blank');
-    return true;
-  }
-
-  // For Office documents - use Google Docs Viewer
-  const officeExtensions = ['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'csv'];
+  // For ALL documents (PDFs, PPTX, DOCX, etc.) - use Google Docs Viewer
+  const officeExtensions = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'csv'];
   if (officeExtensions.includes(extension)) {
     const googleDocsViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
     window.open(googleDocsViewerUrl, '_blank');
@@ -374,30 +384,40 @@ export default function WorkerDetail() {
   const avgRating = totalRatings ? (ratingSum / totalRatings).toFixed(1) : "0.0";
 
   // Self-healing: Update DB if calculated rating differs from stored rating
-  useEffect(() => {
-    if (worker && typeof avgRating !== 'undefined') {
-      const storedRating = worker.rating || 0;
-      const calculatedRating = parseFloat(avgRating);
-      // Allow small float difference
-      if (Math.abs(storedRating - calculatedRating) > 0.1) {
-        console.log("Syncing rating...", storedRating, calculatedRating);
-        updateWorkerRating();
-      }
-    }
-  }, [worker, avgRating, updateWorkerRating]); // Added updateWorkerRating to dependencies
+  // DISABLED: This was causing permission errors because non-owners can't update worker documents
+  // Rating is now only updated when reviews are submitted
+  // useEffect(() => {
+  //   if (worker && typeof avgRating !== 'undefined') {
+  //     const storedRating = worker.rating || 0;
+  //     const calculatedRating = parseFloat(avgRating);
+  //     // Allow small float difference
+  //     if (Math.abs(storedRating - calculatedRating) > 0.1) {
+  //       console.log("Syncing rating...", storedRating, calculatedRating);
+  //       updateWorkerRating();
+  //     }
+  //   }
+  // }, [worker, avgRating, updateWorkerRating]); // Added updateWorkerRating to dependencies
 
   const toggleFavorite = async () => {
+    if (!currentUserId) { setToast("Please login to favorite!"); return; }
     const favDoc = doc(db, "workerFavorites", `${currentUserId}_${id}`);
-    if (userHasFavorited) {
-      await deleteDoc(favDoc);
-      setUserHasFavorited(false);
-    } else {
-      await setDoc(favDoc, { workerId: id, userId: currentUserId, createdAt: serverTimestamp() });
-      setUserHasFavorited(true);
+    try {
+      if (userHasFavorited) {
+        await deleteDoc(favDoc);
+        setUserHasFavorited(false);
+      } else {
+        await setDoc(favDoc, { workerId: id, userId: currentUserId, createdAt: serverTimestamp() });
+        setUserHasFavorited(true);
+      }
+    } catch (error) {
+      console.error("Error toggling favorite:", error);
+      setToast("Failed to update favorites");
     }
   };
 
   const submitReview = async () => {
+    if (!currentUserId) { setToast("Please login to review!"); return; }
+
     if (rateModalOpen) {
       if (newRating === 0) { setToast("Please choose a rating!"); return; }
       if (userRatingDoc) {
@@ -422,8 +442,10 @@ export default function WorkerDetail() {
               senderId: currentUserId,
               type: "review",
               title: "New Rating",
-              message: `You received a ${newRating} star rating`,
+              message: `Your worker profile "${worker.title}" received a ${newRating} star rating`,
               link: `/worker-detail/${id}`,
+              postId: id,
+              postType: "worker",
               read: false,
               createdAt: serverTimestamp()
             });
@@ -455,8 +477,10 @@ export default function WorkerDetail() {
               senderId: currentUserId,
               type: "review",
               title: "New Review",
-              message: `You received a new review: "${newReviewText.substring(0, 50)}${newReviewText.length > 50 ? '...' : ''}"`,
+              message: `New review on your worker profile "${worker.title}": "${newReviewText.substring(0, 50)}${newReviewText.length > 50 ? '...' : ''}"`,
               link: `/worker-detail/${id}`,
+              postId: id,
+              postType: "worker",
               read: false,
               createdAt: serverTimestamp()
             });
@@ -592,6 +616,18 @@ export default function WorkerDetail() {
       setToast("Failed to start chat");
       setTimeout(() => setToast(""), 2000);
     }
+  };
+
+  const handleDownload = async (url, fileName) => {
+    // Standard download for all files (including PDFs) using the force-download URL
+    // This relies on Cloudinary's "fl_attachment" flag which works correctly for raw files now
+    const downloadUrl = getDownloadUrl(url);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = fileName; // Hint to browser, though Cloudinary header takes precedence
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const openFilePreview = (url) => {
@@ -811,15 +847,12 @@ export default function WorkerDetail() {
                           >
                             <FiEye size={14} /> View
                           </button>
-                          <a
-                            href={fileInfo.downloadUrl}
-                            download={fileInfo.name}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            onClick={() => handleDownload(url, fileInfo.name)}
                             className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition-colors shadow-sm whitespace-nowrap flex items-center gap-2"
                           >
                             <FiDownload size={14} /> Save
-                          </a>
+                          </button>
                         </>
                       )}
                     </div>
@@ -893,13 +926,10 @@ export default function WorkerDetail() {
                         <div className="flex justify-between items-start">
                           <h4 className="font-semibold text-gray-900 truncate pr-2">
                             {user.username || "Unknown User"}
-                            <span className="text-xs text-gray-500 font-normal ml-2">
-                              {dt ? formatRelativeTime(dt) : ""}
-                            </span>
                           </h4>
 
-                          {/* Three dots menu for owner */}
-                          {isOwner && (
+                          {/* Three dots menu for owner or review creator */}
+                          {(isOwner || r.userId === currentUserId) && (
                             <div className="relative ml-auto">
                               <button
                                 onClick={(e) => {
@@ -1054,7 +1084,7 @@ export default function WorkerDetail() {
                     </div>
                     <h4 className="text-xl font-bold text-gray-900 mb-2">File Too Large for Online Viewing</h4>
                     <p className="text-gray-600 mb-4">
-                      This file ({currentFile.size}) exceeds the 15MB limit for online viewing.
+                      This file ({currentFile.size}) exceeds the 10MB limit for online viewing.
                     </p>
                     <p className="text-gray-500 text-sm mb-6">
                       Please download the file to view it on your device.
@@ -1062,19 +1092,18 @@ export default function WorkerDetail() {
                   </div>
 
                   <div className="flex justify-center">
-                    <a
-                      href={currentFile.downloadUrl}
-                      download={currentFile.name}
+                    <button
+                      onClick={() => handleDownload(currentFile.url, currentFile.name)}
                       className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
                     >
                       <FiDownload size={18} /> Download File ({currentFile.size})
-                    </a>
+                    </button>
                   </div>
                 </div>
-              ) : currentFile.extension === 'pdf' ? (
+              ) : (currentFile.extension === 'pdf' || ['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'].includes(currentFile.extension)) ? (
                 <div className="w-full h-[60vh]">
                   <iframe
-                    src={currentFile.url}
+                    src={`https://docs.google.com/viewer?url=${encodeURIComponent(currentFile.url)}&embedded=true`}
                     className="w-full h-full border-0 rounded-lg"
                     title={currentFile.name}
                     onLoad={() => setFileLoadErrors(prev => ({ ...prev, [currentFile.url]: false }))}
@@ -1084,10 +1113,10 @@ export default function WorkerDetail() {
                     <div className="mt-4 p-4 bg-red-50 rounded-lg border border-red-200">
                       <div className="flex items-center gap-2 text-red-700">
                         <FiAlertCircle size={20} />
-                        <span className="font-medium">Failed to load PDF</span>
+                        <span className="font-medium">Failed to load document</span>
                       </div>
                       <p className="text-red-600 text-sm mt-1">
-                        The PDF viewer failed to load. Please try downloading the file instead.
+                        The document viewer failed to load. Please try downloading the file instead.
                       </p>
                     </div>
                   )}
@@ -1115,17 +1144,16 @@ export default function WorkerDetail() {
                       <FiExternalLink size={18} /> Open in Google Docs Viewer
                     </button>
 
-                    <a
-                      href={currentFile.downloadUrl}
-                      download={currentFile.name}
+                    <button
+                      onClick={() => handleDownload(currentFile.url, currentFile.name)}
                       className="px-6 py-3 bg-gray-100 text-gray-700 font-bold rounded-lg hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
                     >
                       <FiDownload size={18} /> Download File
-                    </a>
+                    </button>
                   </div>
 
                   <p className="text-sm text-gray-500 mt-4">
-                    Google Docs Viewer supports: PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, TXT files up to 15MB
+                    Google Docs Viewer supports: PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, TXT files up to 10MB
                   </p>
                 </div>
               )}
@@ -1134,7 +1162,7 @@ export default function WorkerDetail() {
             <div className="bg-gray-50 px-6 py-4 flex justify-between items-center">
               <span className="text-sm text-gray-600">
                 {currentFile.isOversized
-                  ? 'File exceeds 15MB limit - download required'
+                  ? 'File exceeds 10MB limit - download required'
                   : 'File will open in a new tab for better viewing experience'}
               </span>
               <button

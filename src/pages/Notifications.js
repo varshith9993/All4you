@@ -58,7 +58,7 @@ const NotificationItem = ({ notif }) => {
                     service: "/service-detail/",
                     ad: "/ad-detail/"
                 }[notif.postType];
-                
+
                 if (route) {
                     navigate(route + notif.postId);
                 }
@@ -75,7 +75,7 @@ const NotificationItem = ({ notif }) => {
     };
 
     return (
-        <div 
+        <div
             className={`p-4 rounded-xl bg-white border border-gray-100 shadow-sm flex gap-4 relative overflow-hidden cursor-pointer hover:shadow-md transition-shadow ${notif.type === 'post_status' ? 'bg-orange-50 border-orange-100' : ''}`}
             onClick={handleClick}
         >
@@ -170,42 +170,42 @@ export default function Notifications() {
             collection(db, "adFavorites")
         ];
 
-        const unsubFavorites = userFavoritesRef.map(favCollection => 
+        const unsubFavorites = userFavoritesRef.map(favCollection =>
             onSnapshot(
                 query(favCollection, where("userId", "==", user.uid)),
                 async (favSnapshot) => {
                     const favoritePostIds = favSnapshot.docs.map(doc => doc.data());
-                    
+
                     // For each type of post, listen for changes
                     const postCollections = [
                         { name: "workers", idField: "workerId", type: "worker" },
                         { name: "services", idField: "serviceId", type: "service" },
                         { name: "ads", idField: "adId", type: "ad" }
                     ];
-                    
+
                     for (const postCollection of postCollections) {
                         const postIds = favoritePostIds
                             .filter(fav => fav[postCollection.idField])
                             .map(fav => fav[postCollection.idField]);
-                        
+
                         if (postIds.length > 0) {
                             // Listen for changes to favorited posts
                             const postQuery = query(
                                 collection(db, postCollection.name),
                                 where("__name__", "in", postIds)
                             );
-                            
+
                             onSnapshot(postQuery, (postSnapshot) => {
                                 postSnapshot.docChanges().forEach(change => {
                                     const postData = change.doc.data();
                                     const postId = change.doc.id;
                                     const oldData = change.type === 'modified' ? change.doc.data() : null;
-                                    
+
                                     // Check for status changes
                                     if (change.type === 'modified') {
                                         const oldStatus = oldData?.status || 'active';
                                         const newStatus = postData?.status || 'active';
-                                        
+
                                         // Notify on status change
                                         if (oldStatus !== newStatus) {
                                             const statusMessages = {
@@ -214,7 +214,7 @@ export default function Notifications() {
                                                 'expired': `A favorited ${postCollection.type} has expired`,
                                                 'deleted': `A favorited ${postCollection.type} has been deleted`
                                             };
-                                            
+
                                             const date = new Date();
                                             notificationsMap.current.set(`status_${postId}_${newStatus}`, {
                                                 id: `status_${postId}_${newStatus}`,
@@ -259,7 +259,7 @@ export default function Notifications() {
             // Get user's posts
             const postCollections = ['workers', 'services', 'ads'];
             const userPosts = {};
-            
+
             for (const collectionName of postCollections) {
                 const snapshot = await getDocs(
                     query(collection(db, collectionName), where("createdBy", "==", user.uid))
@@ -269,7 +269,7 @@ export default function Notifications() {
                     ...doc.data()
                 }));
             }
-            
+
             // Listen for reviews on workers
             const workerIds = userPosts.workers.map(w => w.id);
             let unsubWorkerReviews;
@@ -288,7 +288,7 @@ export default function Notifications() {
 
                             const name = await getUserName(r.userId);
                             const date = r.createdAt?.toDate() || new Date();
-                            
+
 
                             let message = "";
                             if (r.rating && r.text) {
@@ -319,7 +319,7 @@ export default function Notifications() {
                     }
                 );
             }
-            
+
             // Listen for reviews on services
             const serviceIds = userPosts.services.map(s => s.id);
             let unsubServiceReviews;
@@ -338,7 +338,7 @@ export default function Notifications() {
 
                             const name = await getUserName(r.userId);
                             const date = r.createdAt?.toDate() || new Date();
-                            
+
 
                             let message = "";
                             if (r.rating && r.text) {
@@ -369,7 +369,7 @@ export default function Notifications() {
                     }
                 );
             }
-            
+
             // Listen for reviews on ads
             const adIds = userPosts.ads.map(a => a.id);
             let unsubAdReviews;
@@ -388,7 +388,7 @@ export default function Notifications() {
 
                             const name = await getUserName(r.userId);
                             const date = r.createdAt?.toDate() || new Date();
-                            
+
 
                             let message = "";
                             if (r.rating && r.text) {
@@ -419,7 +419,7 @@ export default function Notifications() {
                     }
                 );
             }
-            
+
             return () => {
                 if (unsubWorkerReviews) unsubWorkerReviews();
                 if (unsubServiceReviews) unsubServiceReviews();
