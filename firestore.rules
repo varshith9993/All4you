@@ -82,10 +82,11 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       
       // Only the review creator can update their review
-      allow update: if isDocOwner(resource);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
       
-      // Only the review creator can delete their review
-      allow delete: if isDocOwner(resource);
+      // Review creator OR the post owner can delete reviews
+      allow delete: if isDocOwner(resource) || 
+                       ('workerId' in resource.data && get(/databases/$(database)/documents/workers/$(resource.data.workerId)).data.createdBy == request.auth.uid);
     }
     
     // Service Reviews
@@ -97,10 +98,11 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       
       // Only the review creator can update their review
-      allow update: if isDocOwner(resource);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
       
-      // Only the review creator can delete their review
-      allow delete: if isDocOwner(resource);
+      // Review creator OR the post owner can delete reviews
+      allow delete: if isDocOwner(resource) || 
+                       ('serviceId' in resource.data && get(/databases/$(database)/documents/services/$(resource.data.serviceId)).data.createdBy == request.auth.uid);
     }
     
     // Ad Reviews
@@ -112,10 +114,11 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       
       // Only the review creator can update their review
-      allow update: if isDocOwner(resource);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
       
-      // Only the review creator can delete their review
-      allow delete: if isDocOwner(resource);
+      // Review creator OR the post owner can delete reviews
+      allow delete: if isDocOwner(resource) || 
+                       ('adId' in resource.data && get(/databases/$(database)/documents/ads/$(resource.data.adId)).data.createdBy == request.auth.uid);
     }
     
     // Worker Favorites

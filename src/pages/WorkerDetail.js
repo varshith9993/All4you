@@ -243,32 +243,44 @@ export default function WorkerDetail() {
   const updateWorkerRating = useCallback(async () => {
     if (!worker || !id) return;
 
-    // Recalculate average rating including the new one
-    // We fetch all reviews again to be safe and accurate
-    const q = query(collection(db, "workerReviews"), where("workerId", "==", id));
-    const snap = await getDocs(q);
-    let sum = 0;
-    let count = 0;
-    snap.forEach(doc => {
-      const data = doc.data();
-      if (typeof data.rating === "number" && data.rating > 0) {
-        sum += data.rating;
-        count++;
-      }
-    });
-
-    const newAvg = count > 0 ? sum / count : 0;
-
-    // Update the worker document
-    await updateDoc(doc(db, "workers", id), {
-      rating: newAvg
-    });
-
-    // ALSO update the creator's profile rating
-    if (worker && worker.createdBy) {
-      await updateDoc(doc(db, "profiles", worker.createdBy), {
-        rating: newAvg
+    try {
+      // Recalculate average rating including the new one
+      // We fetch all reviews again to be safe and accurate
+      const q = query(collection(db, "workerReviews"), where("workerId", "==", id));
+      const snap = await getDocs(q);
+      let sum = 0;
+      let count = 0;
+      snap.forEach(doc => {
+        const data = doc.data();
+        if (typeof data.rating === "number" && data.rating > 0) {
+          sum += data.rating;
+          count++;
+        }
       });
+
+      const newAvg = count > 0 ? sum / count : 0;
+
+      // Update the worker document
+      try {
+        await updateDoc(doc(db, "workers", id), {
+          rating: newAvg
+        });
+      } catch (e) {
+        console.warn("Failed to update worker document rating (likely permission error):", e);
+      }
+
+      // ALSO update the creator's profile rating
+      if (worker && worker.createdBy) {
+        try {
+          await updateDoc(doc(db, "profiles", worker.createdBy), {
+            rating: newAvg
+          });
+        } catch (e) {
+          console.warn("Failed to update creator profile rating (likely permission error):", e);
+        }
+      }
+    } catch (error) {
+      console.error("Error calculating average rating:", error);
     }
   }, [id, worker]);
 
@@ -500,7 +512,7 @@ export default function WorkerDetail() {
   };
 
   const deleteReview = async (reviewId, hasRating) => {
-    if (!window.confirm("Are you sure you want to delete this review?")) return;
+    if (!window.confirm("Are you sure you want to delete this review? This action cannot be undone.")) return;
 
     try {
       await deleteDoc(doc(db, "workerReviews", reviewId));
@@ -534,28 +546,31 @@ export default function WorkerDetail() {
         // Optional: Show success message
         // setToast("Shared successfully!");
       } catch (error) {
-        // Only show error if it's NOT a user cancellation
-        if (error.name !== 'AbortError') {
+        // Silently handle user cancellation or minor errors
+        if (error.name !== 'AbortError' && error.name !== 'NotAllowedError') {
           console.error("Error sharing:", error);
-          // Optional: Show error message
-          // setToast("Failed to share");
         }
-        // If it's AbortError (user cancelled), do nothing
       }
     } else {
       // Fallback: Copy to clipboard
       try {
         await navigator.clipboard.writeText(window.location.href);
         setToast("Link copied to clipboard!");
+        setTimeout(() => setToast(""), 2200);
       } catch (copyError) {
         // Fallback to old method
-        const textArea = document.createElement('textarea');
-        textArea.value = window.location.href;
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-        setToast("Link copied to clipboard!");
+        try {
+          const textArea = document.createElement('textarea');
+          textArea.value = window.location.href;
+          document.body.appendChild(textArea);
+          textArea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textArea);
+          setToast("Link copied to clipboard!");
+          setTimeout(() => setToast(""), 2200);
+        } catch (e) {
+          console.error("Fallback copy failed:", e);
+        }
       }
     }
   };
@@ -683,9 +698,11 @@ export default function WorkerDetail() {
           <button onClick={shareWorker} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
             <FiShare2 size={20} className="text-gray-600" />
           </button>
-          <button onClick={toggleFavorite} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-            <FiHeart size={20} className={userHasFavorited ? "text-red-600 fill-red-600" : "text-gray-600"} />
-          </button>
+          {!isOwner && (
+            <button onClick={toggleFavorite} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+              <FiHeart size={20} className={userHasFavorited ? "text-red-600 fill-red-600" : "text-gray-600"} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -983,35 +1000,43 @@ export default function WorkerDetail() {
       {/* Action bar */}
       <div className="fixed left-0 right-0 bottom-0 bg-white px-4 py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t z-30"
         style={{ maxWidth: 480, margin: "0 auto" }}>
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <button
-            disabled={!!userRatingDoc}
-            onClick={() => setRateModalOpen(true)}
-            className={`rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors ${!!userRatingDoc ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-yellow-400 text-black hover:bg-yellow-500"}`}
-          >
-            <FiStar className={!!userRatingDoc ? "fill-gray-400" : "fill-black"} />
-            {!!userRatingDoc ? "Rated" : "Rate"}
+        {!isOwner ? (
+          <>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <button
+                disabled={!!userRatingDoc}
+                onClick={() => setRateModalOpen(true)}
+                className={`rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors ${!!userRatingDoc ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-yellow-400 text-black hover:bg-yellow-500"}`}
+              >
+                <FiStar className={!!userRatingDoc ? "fill-gray-400" : "fill-black"} />
+                {!!userRatingDoc ? "Rated" : "Rate"}
+              </button>
+              <button
+                onClick={() => setCommentModalOpen(true)}
+                className="bg-blue-600 text-white rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors"
+              >
+                <FiMessageSquare /> Review
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <button onClick={toggleFavorite}
+                className={`rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors ${userHasFavorited ? "bg-red-50 text-red-600 border border-red-200" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
+                <FiHeart className={userHasFavorited ? "fill-current" : ""} /> {userHasFavorited ? "Saved" : "Save"}
+              </button>
+              <button className="bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors" onClick={shareWorker}>
+                <FiShare2 /> Share
+              </button>
+              <button onClick={startChat}
+                className="bg-green-600 text-white hover:bg-green-700 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors">
+                <FiMessageSquare /> Chat
+              </button>
+            </div>
+          </>
+        ) : (
+          <button className="w-full bg-blue-600 text-white hover:bg-blue-700 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-md" onClick={shareWorker}>
+            <FiShare2 /> Share Your Profile
           </button>
-          <button
-            onClick={() => setCommentModalOpen(true)}
-            className="bg-blue-600 text-white rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors"
-          >
-            <FiMessageSquare /> Review
-          </button>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <button onClick={toggleFavorite}
-            className={`rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors ${userHasFavorited ? "bg-red-50 text-red-600 border border-red-200" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
-            <FiHeart className={userHasFavorited ? "fill-current" : ""} /> {userHasFavorited ? "Saved" : "Save"}
-          </button>
-          <button className="bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors" onClick={shareWorker}>
-            <FiShare2 /> Share
-          </button>
-          <button onClick={startChat}
-            className="bg-green-600 text-white hover:bg-green-700 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors">
-            <FiMessageSquare /> Chat
-          </button>
-        </div>
+        )}
       </div>
 
       {/* Rate Modal */}

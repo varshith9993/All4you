@@ -99,10 +99,15 @@ export default function AdDetail() {
         }
       });
       const newAvg = count > 0 ? sum / count : 0;
+
       // Update the ad document with the new average rating
-      await updateDoc(doc(db, "ads", adId), { rating: newAvg });
+      try {
+        await updateDoc(doc(db, "ads", adId), { rating: newAvg });
+      } catch (e) {
+        console.warn("Failed to update ad document rating (permission?):", e);
+      }
     } catch (error) {
-      console.error("Error updating ad rating:", error);
+      console.error("Error calculating average ad rating:", error);
     }
   }, [adId]);
 
@@ -279,7 +284,7 @@ export default function AdDetail() {
   };
 
   const deleteReview = async (reviewId, hasRating) => {
-    if (!window.confirm("Delete this review?")) return;
+    if (!window.confirm("Are you sure you want to delete this review? This action cannot be undone.")) return;
     try {
       await deleteDoc(doc(db, "adReviews", reviewId));
       if (hasRating) await updateAdRating();
@@ -293,11 +298,43 @@ export default function AdDetail() {
   };
   const isOwner = ad && currentUserId === ad.createdBy;
 
-  const shareAd = () => {
+  const shareAd = async () => {
     if (!ad) return;
-    const shareData = { title: ad.title, text: ad.description, url: window.location.href };
-    if (navigator.share) navigator.share(shareData);
-    else alert("Sharing not supported.");
+
+    const shareData = {
+      title: ad.title || "Ad",
+      text: ad.description || "Check out this ad",
+      url: window.location.href
+    };
+
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+      } catch (error) {
+        // Silently handle user cancellation or minor errors
+        if (error.name !== 'AbortError' && error.name !== 'NotAllowedError') {
+          console.error("Error sharing:", error);
+        }
+      }
+    } else {
+      try {
+        await navigator.clipboard.writeText(window.location.href);
+        setToast("Link copied to clipboard!");
+      } catch (err) {
+        try {
+          const textArea = document.createElement('textarea');
+          textArea.value = window.location.href;
+          document.body.appendChild(textArea);
+          textArea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textArea);
+          setToast("Link copied to clipboard!");
+        } catch (e) {
+          console.error("Fallback copy failed:", e);
+        }
+      }
+      setTimeout(() => setToast(""), 2200);
+    }
   };
 
   const startChat = async () => {
@@ -372,9 +409,11 @@ export default function AdDetail() {
           <button onClick={shareAd} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
             <FiShare2 size={20} className="text-gray-600" />
           </button>
-          <button onClick={toggleFavorite} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-            <FiHeart size={20} className={userHasFavorited ? "text-red-600 fill-red-600" : "text-gray-600"} />
-          </button>
+          {!isOwner && (
+            <button onClick={toggleFavorite} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+              <FiHeart size={20} className={userHasFavorited ? "text-red-600 fill-red-600" : "text-gray-600"} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -586,35 +625,43 @@ export default function AdDetail() {
       {/* Action bar */}
       <div className="fixed left-0 right-0 bottom-0 bg-white px-4 py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t z-30"
         style={{ maxWidth: 480, margin: "0 auto" }}>
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <button
-            disabled={!!userRatingDoc}
-            onClick={() => setRateModalOpen(true)}
-            className={`rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors ${!!userRatingDoc ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-yellow-400 text-black hover:bg-yellow-500"}`}
-          >
-            <FiStar className={!!userRatingDoc ? "fill-gray-400" : "fill-black"} />
-            {!!userRatingDoc ? "Rated" : "Rate"}
+        {!isOwner ? (
+          <>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <button
+                disabled={!!userRatingDoc}
+                onClick={() => setRateModalOpen(true)}
+                className={`rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors ${!!userRatingDoc ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-yellow-400 text-black hover:bg-yellow-500"}`}
+              >
+                <FiStar className={!!userRatingDoc ? "fill-gray-400" : "fill-black"} />
+                {!!userRatingDoc ? "Rated" : "Rate"}
+              </button>
+              <button
+                onClick={() => setCommentModalOpen(true)}
+                className="bg-blue-600 text-white rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors"
+              >
+                <FiMessageSquare /> Review
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <button onClick={toggleFavorite}
+                className={`rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors ${userHasFavorited ? "bg-red-50 text-red-600 border border-red-200" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
+                <FiHeart className={userHasFavorited ? "fill-current" : ""} /> {userHasFavorited ? "Saved" : "Save"}
+              </button>
+              <button className="bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors" onClick={shareAd}>
+                <FiShare2 /> Share
+              </button>
+              <button onClick={startChat}
+                className="bg-green-600 text-white hover:bg-green-700 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors">
+                <FiMessageSquare /> Chat
+              </button>
+            </div>
+          </>
+        ) : (
+          <button className="w-full bg-blue-600 text-white hover:bg-blue-700 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-md" onClick={shareAd}>
+            <FiShare2 /> Share Your Ad
           </button>
-          <button
-            onClick={() => setCommentModalOpen(true)}
-            className="bg-blue-600 text-white rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors"
-          >
-            <FiMessageSquare /> Review
-          </button>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <button onClick={toggleFavorite}
-            className={`rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors ${userHasFavorited ? "bg-red-50 text-red-600 border border-red-200" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
-            <FiHeart className={userHasFavorited ? "fill-current" : ""} /> {userHasFavorited ? "Saved" : "Save"}
-          </button>
-          <button className="bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors" onClick={shareAd}>
-            <FiShare2 /> Share
-          </button>
-          <button onClick={startChat}
-            className="bg-green-600 text-white hover:bg-green-700 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-colors">
-            <FiMessageSquare /> Chat
-          </button>
-        </div>
+        )}
       </div>
 
       {/* Rate Modal */}
