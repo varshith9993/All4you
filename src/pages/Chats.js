@@ -3,8 +3,9 @@ import { getAuth } from "firebase/auth";
 import { db } from "../firebase";
 import { collection, query, where, onSnapshot, doc, updateDoc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
-import { FiStar, FiBell, FiSettings, FiMessageCircle, FiUser, FiList, FiGrid, FiSearch, FiWifi } from "react-icons/fi";
+import { FiStar, FiSearch, FiWifi } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.png";
+import Layout from "../components/Layout";
 
 const TABS = [
   { key: "all", label: "All" },
@@ -101,11 +102,11 @@ function ChatCard({ chat, uid, profiles, navigate }) {
       className="flex w-full items-center py-3 px-3 mb-2 rounded-lg bg-white border border-gray-100 shadow-sm cursor-pointer hover:shadow-md transition-all"
       onClick={handleChatClick}
     >
-      <div className="relative mr-3">
+      <div className="relative mr-3 flex-shrink-0">
         <img
           src={prof.photoURL || prof.profileImage || defaultAvatar}
           alt={prof.username || "User"}
-          className="h-12 w-12 rounded-full border-2 border-white object-cover flex-shrink-0 shadow-sm"
+          className="h-12 w-12 rounded-full border-2 border-white object-cover shadow-sm"
           onError={(e) => { e.target.src = defaultAvatar; }}
         />
         {isOnline && (
@@ -211,7 +212,9 @@ export default function Chats() {
       // Clean up listeners for users who are no longer in the list
       Object.keys(profileUnsubscribes.current).forEach(id => {
         if (!otherIds.includes(id)) {
-          profileUnsubscribes.current[id]();
+          if (typeof profileUnsubscribes.current[id] === 'function') {
+            profileUnsubscribes.current[id]();
+          }
           delete profileUnsubscribes.current[id];
         }
       });
@@ -240,7 +243,9 @@ export default function Chats() {
 
     return () => {
       unsubscribeChats();
-      Object.values(profileUnsubscribes.current).forEach(unsub => unsub());
+      Object.values(profileUnsubscribes.current).forEach(unsub => {
+        if (typeof unsub === 'function') unsub();
+      });
       profileUnsubscribes.current = {};
     };
   }, [uid]);
@@ -304,27 +309,11 @@ export default function Chats() {
   });
 
   return (
-    <div className="flex flex-col min-h-screen bg-white" style={{ maxWidth: 480, margin: "0 auto" }}>
-
-      {/* Header */}
-      <header className="flex flex-col px-4 py-3 border-b bg-white shadow-sm sticky top-0 z-10">
-        <div className="flex items-center justify-between mb-3">
-          <h1 className="font-bold text-xl text-blue-600 tracking-tight">Chats</h1>
-          <div className="flex items-center space-x-4">
-            <button onClick={() => navigate('/favorites')} className="hover:text-blue-600 transition-colors">
-              <FiStar size={22} />
-            </button>
-            <button onClick={() => navigate('/notifications')} className="hover:text-blue-600 transition-colors">
-              <FiBell size={22} />
-            </button>
-            <button onClick={() => navigate('/settings')} className="hover:text-blue-600 transition-colors">
-              <FiSettings size={22} />
-            </button>
-          </div>
-        </div>
-
-        {/* Search Bar */}
-        <div className="relative mb-3">
+    <Layout
+      title="Chats"
+      activeTab="chats"
+      headerExtra={
+        <div className="relative w-full">
           <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
           <input
             type="text"
@@ -334,50 +323,50 @@ export default function Chats() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+      }
+      subHeader={
+        <>
+          <div className="flex space-x-2 mt-3 overflow-x-auto pb-1">
+            {TABS.map(tabItem => (
+              <button
+                key={tabItem.key}
+                onClick={() => setTab(tabItem.key)}
+                className={`flex-shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${tab === tabItem.key
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+              >
+                {tabItem.label} ({tabCount(tabItem.key)})
+              </button>
+            ))}
+          </div>
 
-        {/* Tabs */}
-        <div className="flex space-x-2 mb-3 overflow-x-auto">
-          {TABS.map(tabItem => (
-            <button
-              key={tabItem.key}
-              onClick={() => setTab(tabItem.key)}
-              className={`flex-shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${tab === tabItem.key
-                ? "bg-blue-600 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-            >
-              {tabItem.label} ({tabCount(tabItem.key)})
-            </button>
-          ))}
-        </div>
-
-        {/* Filters */}
-        <div className="flex space-x-2 overflow-x-auto">
-          {FILTERS.map(filter => (
-            <button
-              key={filter.key}
-              onClick={() => setActiveFilter(filter.key)}
-              className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${activeFilter === filter.key
-                ? filter.key === "favorites"
-                  ? "bg-yellow-100 text-yellow-700 border border-yellow-300"
-                  : filter.key === "unread"
-                    ? "bg-blue-100 text-blue-700 border border-blue-300"
-                    : filter.key === "muted"
-                      ? "bg-yellow-100 text-yellow-700 border border-yellow-300"
-                      : filter.key === "blocked"
-                        ? "bg-red-100 text-red-700 border border-red-300"
-                        : "bg-blue-100 text-blue-700 border border-blue-300"
-                : "bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200"
-                }`}
-            >
-              {filter.label}
-            </button>
-          ))}
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="flex-1 px-4 py-3 pb-20 overflow-y-auto">
+          <div className="flex space-x-2 mt-2 overflow-x-auto pb-1">
+            {FILTERS.map(filter => (
+              <button
+                key={filter.key}
+                onClick={() => setActiveFilter(filter.key)}
+                className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${activeFilter === filter.key
+                  ? filter.key === "favorites"
+                    ? "bg-yellow-100 text-yellow-700 border border-yellow-300"
+                    : filter.key === "unread"
+                      ? "bg-blue-100 text-blue-700 border border-blue-300"
+                      : filter.key === "muted"
+                        ? "bg-yellow-100 text-yellow-700 border border-yellow-300"
+                        : filter.key === "blocked"
+                          ? "bg-red-100 text-red-700 border border-red-300"
+                          : "bg-blue-100 text-blue-700 border border-blue-300"
+                  : "bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200"
+                  }`}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+        </>
+      }
+    >
+      <div className="px-4 py-3 pb-20">
         {shownChats.length === 0 ? (
           <div className="text-center text-gray-500 mt-10">
             <p className="text-lg">No chats found</p>
@@ -396,29 +385,7 @@ export default function Chats() {
             ))}
           </div>
         )}
-      </main>
-
-      {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around items-center py-2 shadow-md"
-        style={{ maxWidth: 480, margin: "0 auto" }}>
-        {[
-          { path: "/workers", icon: FiUser, label: "Workers" },
-          { path: "/services", icon: FiList, label: "Services" },
-          { path: "/ads", icon: FiGrid, label: "Ads" },
-          { path: "/chats", icon: FiMessageCircle, label: "Chats" },
-          { path: "/profile", icon: FiUser, label: "Profile" }
-        ].map(({ path, icon: Icon, label }) => (
-          <button
-            key={path}
-            onClick={() => navigate(path)}
-            className={`flex flex-col items-center transition-colors ${window.location.pathname === path ? "text-blue-600 font-bold" : "text-gray-400 hover:text-gray-600"
-              }`}
-          >
-            <Icon size={24} />
-            <span className="text-xs mt-1">{label}</span>
-          </button>
-        ))}
-      </nav>
-    </div>
+      </div>
+    </Layout>
   );
 }

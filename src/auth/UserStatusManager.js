@@ -1,6 +1,6 @@
 // src/auth/UserStatusManager.js
 import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, updateDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 
 class UserStatusManager {
@@ -26,13 +26,11 @@ class UserStatusManager {
       if (user) {
         console.log('User signed in:', user.uid);
         this.currentUserId = user.uid;
-        await this.setUserOnline(user.uid); // User is ONLINE when signed in
+        await this.setUserOnline(user.uid);
         this.setupProfileListener(user.uid);
       } else {
         console.log('User signed out');
-        if (this.currentUserId) {
-          await this.setUserOffline(this.currentUserId); // User is OFFLINE when signed out
-        }
+        // No need to call setUserOffline here because permissions will fail if auth is already null
         this.currentUserId = null;
         if (this.unsubscribeProfile) {
           this.unsubscribeProfile();
@@ -42,7 +40,7 @@ class UserStatusManager {
 
     // Handle page visibility changes
     document.addEventListener('visibilitychange', this.handleVisibilityChange.bind(this));
-    
+
     // Handle beforeunload (browser/tab close)
     window.addEventListener('beforeunload', this.handleBeforeUnload.bind(this));
 
@@ -50,28 +48,35 @@ class UserStatusManager {
   }
 
   async setUserOnline(userId) {
+    if (!this.auth.currentUser) return;
     try {
       const userRef = doc(db, 'profiles', userId);
-      await updateDoc(userRef, {
-        online: true, // CORRECT: true means user is ONLINE
+      // Use setDoc with merge: true to avoid "No document to update" error if profile doesn't exist
+      await setDoc(userRef, {
+        online: true,
         lastSeen: serverTimestamp()
-      });
+      }, { merge: true });
       console.log('✅ User set ONLINE:', userId);
     } catch (error) {
-      console.error('Error setting user online:', error);
+      if (error.code !== 'permission-denied') {
+        console.error('Error setting user online:', error);
+      }
     }
   }
 
   async setUserOffline(userId) {
+    if (!this.auth.currentUser) return;
     try {
       const userRef = doc(db, 'profiles', userId);
-      await updateDoc(userRef, {
-        online: false, // CORRECT: false means user is OFFLINE
+      await setDoc(userRef, {
+        online: false,
         lastSeen: serverTimestamp()
-      });
+      }, { merge: true });
       console.log('✅ User set OFFLINE:', userId);
     } catch (error) {
-      console.error('Error setting user offline:', error);
+      if (error.code !== 'permission-denied') {
+        console.error('Error setting user offline:', error);
+      }
     }
   }
 
@@ -85,13 +90,11 @@ class UserStatusManager {
   }
 
   handleVisibilityChange() {
-    if (this.currentUserId) {
+    if (this.currentUserId && this.auth.currentUser) {
       if (document.hidden) {
-        // User switched tabs or minimized window - they are now OFFLINE
         console.log('📱 App backgrounded, setting user OFFLINE');
         this.setUserOffline(this.currentUserId);
       } else {
-        // User returned to the app - they are now ONLINE
         console.log('📱 App foregrounded, setting user ONLINE');
         this.setUserOnline(this.currentUserId);
       }
@@ -99,14 +102,14 @@ class UserStatusManager {
   }
 
   async handleBeforeUnload() {
-    if (this.currentUserId) {
+    if (this.currentUserId && this.auth.currentUser) {
       console.log('❌ App closing, setting user OFFLINE');
       await this.setUserOffline(this.currentUserId);
     }
   }
 
   async signOut() {
-    if (this.currentUserId) {
+    if (this.currentUserId && this.auth.currentUser) {
       await this.setUserOffline(this.currentUserId);
     }
     await signOut(this.auth);

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from "./firebase";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgetPassword from "./pages/ForgetPassword";
@@ -27,9 +29,21 @@ import ServiceDetail from "./pages/ServiceDetail";
 import GetUserId from "./pages/GetUserId";
 import NoInternet from "./components/NoInternet";
 import Notes from "./pages/Notes";
+import TermsAndConditions from "./pages/TermsAndConditions";
+import VerifyEmail from "./pages/VerifyEmail";
 
 export default function App() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthLoading(false);
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     const checkConnection = async () => {
@@ -79,9 +93,17 @@ export default function App() {
     return <NoInternet onRefresh={handleRefresh} />;
   }
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="w-10 h-10 border-4 border-indigo-600/20 border-t-indigo-600 rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/login" replace />} />
+      <Route path="/" element={user ? <Navigate to="/workers" replace /> : <Navigate to="/login" replace />} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route path="/worker-detail/:id" element={<WorkerDetail />} />
@@ -108,6 +130,9 @@ export default function App() {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/get-user-id" element={<GetUserId />} />
       <Route path="/notes" element={<Notes />} />
+      <Route path="/notes" element={<Notes />} />
+      <Route path="/terms" element={<TermsAndConditions />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="*" element={<div>404 Page Not Found</div>} />
     </Routes>
   );

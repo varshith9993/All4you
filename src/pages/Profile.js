@@ -1,11 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  FiUser,
-  FiBell,
-  FiSettings,
-  FiGrid,
-  FiMessageCircle,
   FiEdit2,
   FiCamera,
   FiMoreVertical,
@@ -42,6 +37,7 @@ import {
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { useLocationWithAddress } from "../hooks/useLocationWithAddress";
+import Layout from "../components/Layout";
 import defaultAvatar from "../assets/images/default_profile.png";
 
 const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
@@ -1321,44 +1317,10 @@ export default function Profile() {
     })
   );
 
-  return React.createElement("div", {
-    className: "flex flex-col min-h-screen bg-white",
-    style: { maxWidth: 480, margin: "0 auto" }
+  return React.createElement(Layout, {
+    title: "My Profile",
+    activeTab: "profile"
   },
-    // Header
-    React.createElement("header", {
-      className: "flex flex-col px-4 py-3 border-b bg-white shadow-sm sticky top-0 z-30"
-    },
-      React.createElement("div", {
-        className: "flex items-center justify-between"
-      },
-        React.createElement("h1", {
-          className: "font-bold text-xl text-blue-600"
-        }, "My Profile"),
-        React.createElement("div", {
-          className: "flex items-center space-x-4"
-        },
-          React.createElement("button", {
-            onClick: () => navigate('/favorites'),
-            className: "hover:text-blue-600 transition-colors"
-          },
-            React.createElement(FiStar, { size: 22 })
-          ),
-          React.createElement("button", {
-            onClick: () => navigate('/notifications'),
-            className: "hover:text-blue-600 transition-colors"
-          },
-            React.createElement(FiBell, { size: 22 })
-          ),
-          React.createElement("button", {
-            onClick: () => navigate('/settings'),
-            className: "hover:text-blue-600 transition-colors"
-          },
-            React.createElement(FiSettings, { size: 22 })
-          )
-        )
-      )
-    ),
 
     // Main Content
     React.createElement("main", {
@@ -1573,30 +1535,6 @@ export default function Profile() {
       )
     ),
 
-    // Bottom Navigation
-    React.createElement("nav", {
-      className: "fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around items-center py-2 shadow-md",
-      style: { maxWidth: 480, margin: "0 auto" }
-    },
-      [
-        { path: "/workers", icon: FiUser, label: "Workers" },
-        { path: "/services", icon: FiList, label: "Services" },
-        { path: "/ads", icon: FiGrid, label: "Ads" },
-        { path: "/chats", icon: FiMessageCircle, label: "Chats" },
-        { path: "/profile", icon: FiUser, label: "Profile" }
-      ].map(({ path, icon: Icon, label }) =>
-        React.createElement("button", {
-          key: path,
-          onClick: () => navigate(path),
-          className: "flex flex-col items-center transition-colors " + ((window.location.pathname === path || (path === "/profile")) ? "text-blue-600 font-bold" : "text-gray-400 hover:text-gray-600")
-        },
-          React.createElement(Icon, { size: 24 }),
-          React.createElement("span", {
-            className: "text-xs mt-1"
-          }, label)
-        )
-      )
-    ),
 
     // Post Menu Modal
     menuPostId && React.createElement(PostMenu, {

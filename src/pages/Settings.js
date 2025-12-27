@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { getAuth, signOut } from "firebase/auth";
+import { getAuth } from "firebase/auth";
+import { userStatusManager } from "../auth/UserStatusManager";
 import { collection, addDoc, serverTimestamp, doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import {
@@ -23,7 +24,6 @@ import {
 export default function Settings() {
   const navigate = useNavigate();
   const auth = getAuth();
-  const [showTerms, setShowTerms] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackType, setFeedbackType] = useState("feedback"); // "feedback" or "bug"
@@ -61,7 +61,7 @@ export default function Settings() {
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
+      await userStatusManager.signOut();
       navigate("/login");
     } catch (error) {
       console.error("Error signing out:", error);
@@ -222,13 +222,13 @@ export default function Settings() {
             <SettingItem
               icon={FiFileText}
               label="Terms and Conditions"
-              onClick={() => setShowTerms(true)}
+              onClick={() => navigate("/terms")}
               color="text-purple-600"
             />
             <SettingItem
               icon={FiShield}
               label="Privacy Policy"
-              onClick={() => setShowTerms(true)}
+              onClick={() => navigate("/terms")}
               color="text-green-600"
             />
           </div>
@@ -359,42 +359,6 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Terms Modal */}
-      {showTerms && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowTerms(false)}>
-          <div className="bg-white rounded-2xl w-full max-w-sm max-h-[80vh] flex flex-col shadow-xl" onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b flex justify-between items-center">
-              <h3 className="font-bold text-lg">Terms & Conditions</h3>
-              <button onClick={() => setShowTerms(false)} className="p-1 hover:bg-gray-100 rounded-full">
-                <FiX size={24} />
-              </button>
-            </div>
-            <div className="p-4 overflow-y-auto">
-              <p className="text-gray-600 text-sm leading-relaxed mb-4">
-                <strong>1. Introduction</strong><br />
-                Welcome to ServePure. By using our app, you agree to these terms.
-              </p>
-              <p className="text-gray-600 text-sm leading-relaxed mb-4">
-                <strong>2. User Conduct</strong><br />
-                Users must behave respectfully. Harassment, hate speech, and inappropriate content are strictly prohibited.
-              </p>
-              <p className="text-gray-600 text-sm leading-relaxed mb-4">
-                <strong>3. Privacy</strong><br />
-                We respect your privacy. Your data is used to improve your experience and is not sold to third parties.
-              </p>
-              <p className="text-gray-600 text-sm leading-relaxed">
-                <strong>4. Termination</strong><br />
-                We reserve the right to ban users who violate these terms.
-              </p>
-            </div>
-            <div className="p-4 border-t">
-              <button onClick={() => setShowTerms(false)} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold">
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Logout Confirmation Modal */}
       {showLogoutConfirm && (

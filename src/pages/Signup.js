@@ -1,22 +1,15 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { auth, db } from "../firebase";
 import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
+  onAuthStateChanged,
+  fetchSignInMethodsForEmail,
 } from "firebase/auth";
 import { collection, query, where, getDocs, doc, setDoc } from "firebase/firestore";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { FiEye, FiEyeOff, FiMapPin, FiUser, FiMail, FiLock, FiNavigation } from "react-icons/fi";
 
-const sampleTerms = `
-Servepure Terms and Conditions:
-1. Service Usage
-2. User Content
-3. Privacy
-4. No Guarantees
-5. Account Security
-6. Modifications
-`;
 
 export default function Signup() {
   const [email, setEmail] = useState("");
@@ -36,12 +29,73 @@ export default function Signup() {
   const [gettingLocation, setGettingLocation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [locationEdited, setLocationEdited] = useState(false);
+  const [waitingForVerification, setWaitingForVerification] = useState(false);
 
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Handle pre-fill data from Login redirect
+  useEffect(() => {
+    if (location.state?.prefill) {
+      const { email, username } = location.state.prefill;
+      if (email) setEmail(email);
+      if (username) setUsername(username);
+    }
+    if (location.state?.message) {
+      setError(location.state.message); // Show as error/alert to be visible
+      // Clear state to avoid persistent message
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
+
+  // Auto-redirect if already logged in AND verified (skip logic if waiting for verification to start polling)
+  useEffect(() => {
+    if (waitingForVerification) return;
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user && user.emailVerified) {
+        navigate("/workers");
+      }
+    });
+    return () => unsubscribe();
+  }, [navigate, waitingForVerification]);
+
+  // Polling for email verification
+  useEffect(() => {
+    let interval;
+    if (waitingForVerification) {
+      interval = setInterval(async () => {
+        try {
+          if (auth.currentUser) {
+            await auth.currentUser.reload();
+            if (auth.currentUser.emailVerified) {
+              clearInterval(interval);
+              navigate("/workers");
+            }
+          }
+        } catch (error) {
+          console.log("Error reloading user:", error);
+        }
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [waitingForVerification, navigate]);
+
 
   const validatePassword = () => {
-    if (password.length < 6) return "Password must be at least 6 characters.";
-    if (/\s/.test(password)) return "Password must not contain spaces.";
+    // 6 to 12 chars
+    if (password.length < 6 || password.length > 12) {
+      return "Password must be 6-12 characters long.";
+    }
+
+    // Must contain at least one letter and one number
+    const hasLetter = /[a-zA-Z]/.test(password);
+    const hasNumber = /[0-9]/.test(password);
+
+    if (!hasLetter || !hasNumber) {
+      return "Password must contain at least one letter and one number.";
+    }
+
     return "";
   };
 
@@ -54,6 +108,15 @@ export default function Signup() {
     const q = query(collection(db, "profiles"), where("username", "==", un));
     const snap = await getDocs(q);
     return !snap.empty;
+  };
+
+  const validateUsername = (un) => {
+    // Greater than 5 and less than 13 letters -> 6 to 12 characters
+    const re = /^[a-zA-Z0-9_]{6,12}$/;
+    if (!re.test(un)) {
+      return "Username must be 6-12 characters long and contain only letters, numbers, or underscores.";
+    }
+    return "";
   };
 
   const autofillLocation = () => {
@@ -74,7 +137,7 @@ export default function Signup() {
 
         if (!locationEdited) {
           try {
-            const locationIQKey = "pk.c46b235dc808aed78cb86bd70c83fab0";
+            const locationIQKey = process.env.REACT_APP_LOCATIONIQ_KEY || "pk.c46b235dc808aed78cb86bd70c83fab0";
             const url = `https://us1.locationiq.com/v1/reverse.php?key=${locationIQKey}&lat=${lat}&lon=${lon}&format=json`;
             const res = await fetch(url);
             const data = await res.json();
@@ -105,7 +168,8 @@ export default function Signup() {
     );
   };
 
-  const onSubmit = async (e) => {
+
+  const handleStartSignup = async (e) => {
     e.preventDefault();
     if (submitting) return;
     setSubmitting(true);
@@ -143,7 +207,28 @@ export default function Signup() {
       return;
     }
 
+    try {
+      const methods = await fetchSignInMethodsForEmail(auth, email.trim());
+      if (methods && methods.length > 0) {
+        setError("The email already exists. One mail, one account.");
+        setSubmitting(false);
+        return;
+      }
+    } catch (err) {
+      console.log("Email existence check failed:", err);
+    }
+
     setMessage("Checking username availability...");
+
+    // Validate format first
+    const unError = validateUsername(username.trim());
+    if (unError) {
+      setError(unError);
+      setMessage("");
+      setSubmitting(false);
+      return;
+    }
+
     if (await isUsernameTaken(username.trim())) {
       setError("Username is already taken.");
       setMessage("");
@@ -151,40 +236,54 @@ export default function Signup() {
       return;
     }
 
+    setMessage("Creating account...");
     try {
       const cleanEmail = email.trim();
       const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+      const user = userCredential.user;
 
-      await sendEmailVerification(userCredential.user);
+      // 1. Send Verification Email (Native Firebase Link)
+      await sendEmailVerification(user);
 
-      try {
-        await setDoc(doc(db, "profiles", userCredential.user.uid), {
-          username: username.trim(),
-          place: place.trim(),
-          landmark: landmark.trim(),
-          city: city.trim(),
-          pincode: pincode.trim(),
-          latitude: parseFloat(latitude),
-          longitude: parseFloat(longitude),
-          createdAt: new Date(),
-        });
-      } catch (firestoreErr) {
-        console.error("Profile creation failed:", firestoreErr);
-      }
+      // 2. Save Profile to Firestore
+      await setDoc(doc(db, "profiles", user.uid), {
+        username: username.trim(),
+        place: place.trim(),
+        landmark: landmark.trim(),
+        city: city.trim(),
+        pincode: pincode.trim(),
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
+        createdAt: new Date(),
+        uid: user.uid,
+        email: cleanEmail
+      });
 
-      setMessage("Signup successful! Verification email sent.");
-      setSubmitting(false);
-      // Redirect to workers page after successful signup
-      setTimeout(() => navigate("/workers"), 2000);
+      // 3. Do NOT sign out. Wait for them to click the link.
+      setWaitingForVerification(true);
+      setMessage("Verification link sent! Waiting for you to click it...");
+      setError("");
+
     } catch (err) {
-      setError(err.message || "Signup failed");
-      setMessage("");
+      if (err.code === "auth/email-already-in-use") {
+        setError("The email already exists. One mail, one account.");
+      } else {
+        setError(err.message || "Signup failed. Please try again.");
+      }
+    } finally {
       setSubmitting(false);
     }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 p-4 py-10">
+      {/* Hide browser default password reveal button to prevent double icons */}
+      <style>{`
+        input[type="password"]::-ms-reveal,
+        input[type="password"]::-ms-clear {
+          display: none;
+        }
+      `}</style>
       <div className="w-full max-w-lg bg-white/90 backdrop-blur-lg rounded-3xl shadow-2xl p-8 animate-fade-in">
         <div className="text-center mb-6">
           <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-pink-600 bg-clip-text text-transparent">
@@ -193,7 +292,7 @@ export default function Signup() {
           <p className="text-gray-500 text-sm mt-1">Join ServePure today!</p>
         </div>
 
-        <form onSubmit={onSubmit} className="space-y-4">
+        <form onSubmit={handleStartSignup} className="space-y-4">
           {/* Username */}
           <div className="relative">
             <FiUser className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
@@ -204,6 +303,7 @@ export default function Signup() {
               onChange={(e) => setUsername(e.target.value)}
               className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
               required
+              disabled={submitting}
             />
           </div>
 
@@ -217,6 +317,7 @@ export default function Signup() {
               onChange={(e) => setEmail(e.target.value)}
               className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
               required
+              disabled={submitting}
             />
           </div>
 
@@ -231,17 +332,19 @@ export default function Signup() {
               autoComplete="new-password"
               className="w-full pl-12 pr-12 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
               required
+              disabled={submitting}
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
               className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
               tabIndex="-1"
+              disabled={submitting}
             >
               {showPassword ? <FiEye size={20} /> : <FiEyeOff size={20} />}
             </button>
           </div>
-          <p className="text-xs text-gray-500 mt-1 ml-12">Password must contain at least 6 characters</p>
+          <p className="text-xs text-gray-500 mt-1 ml-4">Password must be 6-12 chars (include letters & numbers)</p>
 
           {/* Location Section */}
           <div className="space-y-3 pt-2">
@@ -250,8 +353,8 @@ export default function Signup() {
               <button
                 type="button"
                 onClick={autofillLocation}
-                disabled={gettingLocation}
-                className="flex items-center gap-1 text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full hover:bg-indigo-100 transition-colors"
+                disabled={gettingLocation || submitting}
+                className="flex items-center gap-1 text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full hover:bg-indigo-100 transition-colors disabled:opacity-50"
               >
                 <FiNavigation size={12} />
                 {gettingLocation ? "Locating..." : "Get Current Location"}
@@ -266,6 +369,7 @@ export default function Signup() {
                 onChange={(e) => setLatitude(e.target.value)}
                 className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all text-sm"
                 required
+                disabled={submitting}
               />
               <input
                 type="text"
@@ -274,6 +378,7 @@ export default function Signup() {
                 onChange={(e) => setLongitude(e.target.value)}
                 className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all text-sm"
                 required
+                disabled={submitting}
               />
             </div>
 
@@ -289,6 +394,7 @@ export default function Signup() {
                 }}
                 className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
                 required
+                disabled={submitting}
               />
             </div>
 
@@ -303,6 +409,7 @@ export default function Signup() {
                   setLandmark(e.target.value);
                 }}
                 className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
+                disabled={submitting}
               />
             </div>
 
@@ -317,6 +424,7 @@ export default function Signup() {
                 }}
                 className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
                 required
+                disabled={submitting}
               />
               <input
                 type="text"
@@ -328,6 +436,7 @@ export default function Signup() {
                 }}
                 className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
                 required
+                disabled={submitting}
               />
             </div>
 
@@ -348,13 +457,15 @@ export default function Signup() {
               checked={acceptedTerms}
               onChange={(e) => setAcceptedTerms(e.target.checked)}
               className="mt-1 mr-2 w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+              disabled={submitting}
             />
             <label htmlFor="terms" className="text-xs text-gray-600">
               I accept the{" "}
               <button
                 type="button"
                 className="text-indigo-600 font-bold hover:underline"
-                onClick={() => alert(sampleTerms)}
+                onClick={() => navigate("/terms")}
+                disabled={submitting}
               >
                 Terms and Conditions
               </button>
@@ -388,6 +499,24 @@ export default function Signup() {
             Login here
           </Link>
         </p>
+
+        {/* Polling/Waiting Overlay */}
+        {waitingForVerification && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center text-white p-6 text-center animate-fade-in">
+            <div className="w-16 h-16 border-4 border-indigo-500 border-t-white rounded-full animate-spin mb-6"></div>
+            <h2 className="text-2xl font-bold mb-2">Check Your Email</h2>
+            <p className="text-gray-300 mb-6 max-w-xs">
+              We sent a link to <span className="text-indigo-400 font-mono">{email}</span>.
+              Please click it to verify your account.
+            </p>
+            <p className="text-sm text-gray-400 animate-pulse">
+              Waiting for verification...
+            </p>
+            <p className="text-xs text-gray-500 mt-8">
+              App will automatically update once verified.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

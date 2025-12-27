@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { db } from "../firebase";
 import { collection, query, onSnapshot, doc, getDoc } from "firebase/firestore";
-import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiSettings, FiList, FiGrid, FiMessageCircle, FiUser, FiBell, FiPlus, FiWifi } from "react-icons/fi";
+import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiPlus, FiWifi, FiSearch } from "react-icons/fi";
 import Layout from "../components/Layout";
 import defaultAvatar from "../assets/images/default_profile.png";
 
@@ -652,34 +652,21 @@ export default function Workers() {
   const displayedWorkers = getDisplayedWorkers();
 
   return (
-    <div className="flex flex-col min-h-screen bg-white" style={{ maxWidth: 480, margin: "0 auto" }}>
-
-      {/* Header */}
-      <header className="flex flex-col px-4 py-3 border-b bg-white shadow-sm sticky top-0 z-30">
-        <div className="flex items-center justify-between mb-3">
-          <h1 className="font-bold text-xl text-blue-600">Servepure Workers</h1>
-          <div className="flex items-center space-x-4">
-            <button onClick={() => navigate('/favorites')} className="hover:text-blue-600 transition-colors">
-              <FiStar size={22} />
-            </button>
-            <button onClick={() => navigate('/notifications')} className="hover:text-blue-600 transition-colors">
-              <FiBell size={22} />
-            </button>
-            <button onClick={() => navigate('/settings')} className="hover:text-blue-600 transition-colors">
-              <FiSettings size={22} />
-            </button>
+    <Layout
+      title="Servepure Workers"
+      activeTab="workers"
+      headerExtra={
+        <>
+          <div className="relative flex-grow">
+            <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="search"
+              placeholder="Search workers, skills, location..."
+              className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              value={searchValue}
+              onChange={(e) => setSearchValue(e.target.value)}
+            />
           </div>
-        </div>
-
-        {/* Search and Filter Bar */}
-        <div className="flex items-center gap-2">
-          <input
-            type="search"
-            placeholder="Search workers, skills, location..."
-            className="flex-grow border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            value={searchValue}
-            onChange={(e) => setSearchValue(e.target.value)}
-          />
 
           {/* Filter Button */}
           <button
@@ -699,86 +686,86 @@ export default function Workers() {
             showSort={showSort}
             setShowSort={setShowSort}
           />
-        </div>
-      </header>
-
-      {/* Active Filters Display */}
-      {hasActiveFilters && (
-        <div className="px-4 py-2 bg-blue-50 border-b">
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-sm text-blue-700 font-medium">Active Filters:</span>
-            {filters.distance.min > 0 && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                Min {filters.distance.min}{filters.distanceUnit}
-              </span>
-            )}
-            {filters.distance.max && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                Max {filters.distance.max}{filters.distanceUnit}
-              </span>
-            )}
-            {filters.rating.min > 0 && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                Min {filters.rating.min}★
-              </span>
-            )}
-            {filters.rating.max < 5 && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                Max {filters.rating.max}★
-              </span>
-            )}
-            {filters.onlineStatus !== "all" && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                {filters.onlineStatus === "online" ? "Online Only" : "Offline Only"}
-              </span>
-            )}
-            {filters.area && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                Area: {filters.area}
-              </span>
-            )}
-            {filters.city && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                City: {filters.city}
-              </span>
-            )}
-            {filters.landmark && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                Landmark: {filters.landmark}
-              </span>
-            )}
-            {filters.pincode && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                Pincode: {filters.pincode}
-              </span>
-            )}
-            {filters.tags && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                Tags: {filters.tags}
-              </span>
-            )}
-            <button
-              onClick={() => setFilters({
-                distance: { min: 0, max: null },
-                distanceUnit: 'km',
-                rating: { min: 0, max: 5 },
-                onlineStatus: "all",
-                area: "",
-                city: "",
-                landmark: "",
-                pincode: "",
-                tags: ""
-              })}
-              className="text-red-500 text-xs hover:text-red-700 font-medium transition-colors"
-            >
-              Clear All
-            </button>
+        </>
+      }
+      subHeader={
+        hasActiveFilters && (
+          <div className="mt-3">
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-sm text-blue-700 font-medium">Active Filters:</span>
+              {filters.distance.min > 0 && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Min {filters.distance.min}{filters.distanceUnit}
+                </span>
+              )}
+              {filters.distance.max && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Max {filters.distance.max}{filters.distanceUnit}
+                </span>
+              )}
+              {filters.rating.min > 0 && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Min {filters.rating.min}★
+                </span>
+              )}
+              {filters.rating.max < 5 && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Max {filters.rating.max}★
+                </span>
+              )}
+              {filters.onlineStatus !== "all" && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  {filters.onlineStatus === "online" ? "Online Only" : "Offline Only"}
+                </span>
+              )}
+              {filters.area && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Area: {filters.area}
+                </span>
+              )}
+              {filters.city && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  City: {filters.city}
+                </span>
+              )}
+              {filters.landmark && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Landmark: {filters.landmark}
+                </span>
+              )}
+              {filters.pincode && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Pincode: {filters.pincode}
+                </span>
+              )}
+              {filters.tags && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Tags: {filters.tags}
+                </span>
+              )}
+              <button
+                onClick={() => setFilters({
+                  distance: { min: 0, max: null },
+                  distanceUnit: 'km',
+                  rating: { min: 0, max: 5 },
+                  onlineStatus: "all",
+                  area: "",
+                  city: "",
+                  landmark: "",
+                  pincode: "",
+                  tags: ""
+                })}
+                className="text-red-500 text-xs hover:text-red-700 font-medium transition-colors"
+              >
+                Clear All
+              </button>
+            </div>
           </div>
-        </div>
-      )}
-
+        )
+      }
+    >
       {/* Main Content */}
-      <main className="flex-1 px-4 py-3 pb-20">
+      <div className="px-4 py-3 pb-20">
         {displayedWorkers.length === 0 ? (
           <div className="text-center text-gray-500 mt-10">
             <p className="text-lg">No workers found.</p>
@@ -812,7 +799,7 @@ export default function Workers() {
             ))}
           </div>
         )}
-      </main>
+      </div>
 
       {/* Filter Modal */}
       <FilterModal
@@ -834,28 +821,6 @@ export default function Workers() {
         </button>
       </div>
 
-      {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around items-center py-2 shadow-md"
-        style={{ maxWidth: 480, margin: "0 auto" }}>
-        {[
-          { path: "/workers", icon: FiUser, label: "Workers" },
-          { path: "/services", icon: FiList, label: "Services" },
-          { path: "/ads", icon: FiGrid, label: "Ads" },
-          { path: "/chats", icon: FiMessageCircle, label: "Chats" },
-          { path: "/profile", icon: FiUser, label: "Profile" }
-        ].map(({ path, icon: Icon, label }) => (
-          <button
-            key={path}
-            onClick={() => navigate(path)}
-            className={`flex flex-col items-center transition-colors ${window.location.pathname === path ? "text-blue-600 font-bold" : "text-gray-400 hover:text-gray-600"
-              }`}
-          >
-            <Icon size={24} />
-            <span className="text-xs mt-1">{label}</span>
-          </button>
-        ))}
-      </nav>
-
       {/* Close sort dropdown when clicking outside */}
       {showSort && (
         <div
@@ -863,6 +828,6 @@ export default function Workers() {
           onClick={() => setShowSort(false)}
         />
       )}
-    </div>
+    </Layout>
   );
 }

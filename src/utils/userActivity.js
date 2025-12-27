@@ -1,5 +1,5 @@
 import { getAuth } from "firebase/auth";
-import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 
 let activityInterval;
@@ -7,21 +7,27 @@ let activityInterval;
 export const startUserActivityTracking = () => {
   const auth = getAuth();
   const user = auth.currentUser;
-  
+
   if (!user) return;
 
-  // Update online status immediately
-  updateDoc(doc(db, "profiles", user.uid), {
+  // Use setDoc with merge: true to avoid "No document to update" error
+  setDoc(doc(db, "profiles", user.uid), {
     online: true,
     lastSeen: serverTimestamp()
+  }, { merge: true }).catch(err => {
+    if (err.code !== 'permission-denied') console.error("Error starting activity tracking:", err);
   });
 
   // Set up periodic updates (every 30 seconds)
+  if (activityInterval) clearInterval(activityInterval);
   activityInterval = setInterval(() => {
-    if (auth.currentUser) {
-      updateDoc(doc(db, "profiles", auth.currentUser.uid), {
+    const currentUser = getAuth().currentUser;
+    if (currentUser) {
+      setDoc(doc(db, "profiles", currentUser.uid), {
         online: true,
         lastSeen: serverTimestamp()
+      }, { merge: true }).catch(err => {
+        if (err.code !== 'permission-denied') console.error("Error updating activity:", err);
       });
     }
   }, 30000);
@@ -30,13 +36,15 @@ export const startUserActivityTracking = () => {
 export const stopUserActivityTracking = () => {
   const auth = getAuth();
   const user = auth.currentUser;
-  
+
   if (!user) return;
 
   // Update offline status
-  updateDoc(doc(db, "profiles", user.uid), {
+  setDoc(doc(db, "profiles", user.uid), {
     online: false,
     lastSeen: serverTimestamp()
+  }, { merge: true }).catch(err => {
+    if (err.code !== 'permission-denied') console.error("Error stopping activity tracking:", err);
   });
 
   // Clear interval

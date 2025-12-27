@@ -5,7 +5,7 @@ import {
   doc, getDoc, collection, query, where, onSnapshot, addDoc, setDoc, deleteDoc, serverTimestamp, getDocs, updateDoc
 } from "firebase/firestore";
 import { db } from "../firebase";
-import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiMoreVertical, FiTrash2, FiLoader, FiAlertCircle } from "react-icons/fi";
+import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiMoreVertical, FiTrash2 } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.png";
 
 function ManualStars({ value, onChange, size = 46 }) {
@@ -38,22 +38,6 @@ function formatDateTime(dateObj) {
     minute: 'numeric',
     hour12: true
   });
-}
-
-function formatRelativeTime(date) {
-  if (!date) return "";
-  const now = new Date();
-  const diff = now - date;
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  if (seconds < 60) return "Just now";
-  if (minutes < 60) return `${minutes} mins ago`;
-  if (hours < 24) return `${hours} hours ago`;
-  if (days === 1) return "Yesterday";
-  return `${days} days ago`;
 }
 
 export default function AdDetail() {
@@ -560,7 +544,6 @@ export default function AdDetail() {
               {reviews.filter(r => r.text && r.text.trim()).map(r => {
                 const user = profiles[r.userId] || { username: "Unknown", profileImage: "" };
                 const dt = r.createdAt && r.createdAt.seconds ? new Date(r.createdAt.seconds * 1000) : null;
-                const isReviewOwner = r.userId === currentUserId;
 
                 return (
                   <div key={r.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm relative">

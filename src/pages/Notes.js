@@ -19,7 +19,6 @@ import {
     FiInfo,
     FiX,
     FiCalendar,
-    FiChevronRight,
 } from "react-icons/fi";
 
 export default function Notes() {
@@ -205,8 +204,6 @@ export default function Notes() {
                     ) : (
                         <div className="space-y-3">
                             {filteredNotes.map((note) => {
-                                const isEdited = note.createdAt && note.updatedAt && note.createdAt.toMillis() !== note.updatedAt.toMillis();
-                                const wordCount = note.content ? note.content.trim().split(/\s+/).length : 0;
 
                                 return (
                                     <div

@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { auth, db } from "../firebase";
-import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
+import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, sendEmailVerification } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useLocation } from "react-router-dom";
 import { FiEye, FiEyeOff, FiMail, FiLock } from "react-icons/fi";
 import { FcGoogle } from "react-icons/fc";
 
@@ -11,26 +11,101 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  const [successMessage, setSuccessMessage] = useState(location.state?.message || "");
+
+  // Auto-redirect if already logged in AND verified
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user && user.emailVerified) {
+        navigate("/workers");
+      }
+    });
+    return () => unsubscribe();
+  }, [navigate]);
+
+  useEffect(() => {
+    if (location.state?.message) {
+      setSuccessMessage(location.state.message);
+      // Clear location state to prevent message showing again on refresh
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   const onSubmit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     setError("");
+    setSuccessMessage("");
+    setSubmitting(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      navigate("/workers");
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      if (!user.emailVerified) {
+        setError("Please verify your email address before logging in. Check your inbox.");
+        await signOut(auth);
+      } else {
+        navigate("/workers");
+      }
     } catch (err) {
       if (err.code === "auth/user-not-found" || err.code === "auth/invalid-credential") {
-        setError("There is no account try sign up/create account");
+        // Redirect to signup if account not found
+        // Note: 'invalid-credential' can sometimes be ambiguous, but for this specific flow request we will prioritize the redirect if it looks like they don't exist.
+        // However, invalid-credential usually means wrong password too.
+        // To be safe, we only redirect on user-not-found, but Firebase unified errors recently.
+        // Let's rely on the explicit error message if possible or just use the catch-all for now as per request.
+        // Actually, for better UX, let's keep the error text for wrong password, but redirect for no account.
+        // Since Firebase now masks existence, 'invalid-credential' is common.
+        // But the user specifically asked: "If no account exists, redirect to signup".
+        // The most reliable way is fetchSignInMethodsForEmail, but we can't always enable that given security rules.
+        // Let's stick to the error handling requested: 
+        if (err.code === "auth/user-not-found") {
+          navigate("/signup", { state: { message: "Account not found. Please create an account first." } });
+        } else {
+          setError("Incorrect email or password.");
+        }
       } else if (err.code === "auth/wrong-password") {
         setError("Incorrect password.");
       } else {
         setError(err.message);
       }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleResendLink = async () => {
+    if (!email) {
+      setError("Please enter your email address first.");
+      return;
+    }
+    setResending(true);
+    setError("");
+    setSuccessMessage("");
+    try {
+      // We need to sign in temporarily to resend, or just sign in with the user we just tried to login as
+      // Simplest: just warn them they need to check their mail, or if they just tried to login, we can use that user
+      // But if they are logged out, we can't call sendEmailVerification on null.
+      // So we have to sign them in, send, then sign out.
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      await sendEmailVerification(userCredential.user);
+      await signOut(auth);
+      setSuccessMessage("Verification link resent! Please check your inbox.");
+    } catch (err) {
+      setError("Failed to resend link: " + err.message);
+    } finally {
+      setResending(false);
     }
   };
 
   const handleGoogleSignIn = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setError("");
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
@@ -43,12 +118,25 @@ export default function Login() {
       if (docSnap.exists()) {
         navigate("/workers");
       } else {
+        // If Google user has no profile, delete the auth user to prevent "half-created" state 
+        // and redirect to signup to complete the formatted profile creation.
+        const email = user.email;
+        const displayName = user.displayName;
+        await user.delete();
         await signOut(auth);
-        setError("Does not have an account. Please sign up first or create an account.");
+
+        navigate("/signup", {
+          state: {
+            message: "Please complete your signup to continue.",
+            prefill: { email, username: displayName }
+          }
+        });
       }
     } catch (err) {
       console.error(err);
       setError("Failed to sign in with Google.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -72,6 +160,7 @@ export default function Login() {
               onChange={(e) => setEmail(e.target.value)}
               className="w-full pl-12 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
               required
+              disabled={submitting}
             />
           </div>
 
@@ -84,11 +173,13 @@ export default function Login() {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full pl-12 pr-12 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
               required
+              disabled={submitting}
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
               className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              disabled={submitting}
             >
               {showPassword ? <FiEye size={20} /> : <FiEyeOff size={20} />}
             </button>
@@ -99,21 +190,45 @@ export default function Login() {
               to="/forgot-password"
               className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
             >
-              Forgot Password?
+              Reset Password?
             </Link>
           </div>
 
           {error && (
-            <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg text-center border border-red-100">
+            <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg text-center border border-red-100 animate-shake">
               {error}
+              {error.includes("verify your email") && (
+                <button
+                  type="button"
+                  onClick={handleResendLink}
+                  disabled={resending}
+                  className="block w-full mt-2 text-indigo-600 font-bold hover:underline"
+                >
+                  {resending ? "Resending..." : "Resend Link"}
+                </button>
+              )}
+            </div>
+          )}
+
+          {successMessage && (
+            <div className="p-3 bg-green-50 text-green-600 text-sm rounded-lg text-center border border-green-100 italic">
+              {successMessage}
             </div>
           )}
 
           <button
             type="submit"
-            className="w-full bg-gradient-to-r from-indigo-600 to-pink-600 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-indigo-500/30 hover:opacity-90 transition-all active:scale-[0.98]"
+            disabled={submitting}
+            className="w-full bg-gradient-to-r from-indigo-600 to-pink-600 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-indigo-500/30 hover:opacity-90 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
           >
-            Login
+            {submitting ? (
+              <>
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                <span>Logging in...</span>
+              </>
+            ) : (
+              "Login"
+            )}
           </button>
         </form>
 
@@ -125,10 +240,17 @@ export default function Login() {
 
         <button
           onClick={handleGoogleSignIn}
-          className="w-full flex items-center justify-center gap-3 bg-white border border-gray-200 text-gray-700 font-medium py-3.5 rounded-xl hover:bg-gray-50 transition-all active:scale-[0.98]"
+          disabled={submitting}
+          className="w-full flex items-center justify-center gap-3 bg-white border border-gray-200 text-gray-700 font-medium py-3.5 rounded-xl hover:bg-gray-50 transition-all active:scale-[0.98] disabled:opacity-70"
         >
-          <FcGoogle size={24} />
-          Sign in with Google
+          {submitting ? (
+            <div className="w-5 h-5 border-2 border-gray-300 border-t-indigo-600 rounded-full animate-spin"></div>
+          ) : (
+            <>
+              <FcGoogle size={24} />
+              Sign in with Google
+            </>
+          )}
         </button>
 
         <p className="mt-8 text-center text-gray-600">
@@ -137,6 +259,17 @@ export default function Login() {
             Signup
           </Link>
         </p>
+
+        <style>{`
+          @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+          }
+          .animate-shake {
+            animation: shake 0.2s ease-in-out 0s 2;
+          }
+        `}</style>
       </div>
     </div>
   );

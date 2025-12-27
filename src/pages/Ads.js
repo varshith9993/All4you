@@ -3,8 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { db } from "../firebase";
 import { collection, query, onSnapshot, doc, getDoc } from "firebase/firestore";
-import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiSettings, FiList, FiGrid, FiMessageCircle, FiUser, FiBell, FiPlus, FiWifi, FiChevronLeft, FiChevronRight } from "react-icons/fi";
+import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiPlus, FiWifi, FiChevronLeft, FiChevronRight, FiSearch } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.png";
+import Layout from "../components/Layout";
 
 // --- Helper Functions ---
 
@@ -194,8 +195,64 @@ function AdCard({ ad, profile, userProfiles, currentUserId, navigate }) {
   );
 }
 
-// Filter Modal Component
-// Filter Modal Component
+// Sort Dropdown Component
+function SortDropdown({ sortBy, setSortBy, showSort, setShowSort }) {
+  const sortOptions = [
+    { value: "distance-low-high", label: "Distance: Near to Far" },
+    { value: "distance-high-low", label: "Distance: Far to Near" },
+    { value: "rating-low-high", label: "Rating: Low to High" },
+    { value: "rating-high-low", label: "Rating: High to Low" },
+    { value: "random", label: "Random" }
+  ];
+
+  const handleSortSelect = (value) => {
+    setSortBy(value);
+    setShowSort(false);
+  };
+
+  return (
+    <>
+      <div className="relative">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowSort(!showSort);
+          }}
+          className="flex items-center gap-1 text-gray-600 hover:text-blue-600 px-3 py-2 border border-gray-300 rounded-lg transition-colors text-sm"
+        >
+          Sort <FiChevronDown />
+        </button>
+
+        {showSort && (
+          <div className="absolute top-full right-0 mt-1 bg-white border rounded-lg shadow-lg z-50 min-w-48 py-1">
+            {sortOptions.map(option => (
+              <button
+                key={option.value}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSortSelect(option.value);
+                }}
+                className={`w-full text-left px-4 py-2 hover:bg-gray-50 text-sm transition-colors ${sortBy === option.value ? "bg-blue-50 text-blue-600 font-medium" : "text-gray-700"
+                  }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showSort && (
+        <div
+          className="fixed inset-0 z-40"
+          onClick={() => setShowSort(false)}
+        />
+      )}
+    </>
+  );
+}
+
+// --- Main Ads Component ---
 function FilterModal({ isOpen, onClose, filters, setFilters, applyFilters }) {
   const [localFilters, setLocalFilters] = useState(filters);
 
@@ -577,91 +634,141 @@ export default function Ads() {
     return result;
   }, [ads, searchValue, filters, sortBy, profile, userProfiles, currentUserId]);
 
-  const currentPath = window.location.pathname;
   const hasActiveFilters = filters.distance.min > 0 || filters.distance.max || filters.rating.min > 0 || filters.rating.max < 5 || filters.onlineStatus !== "all" || filters.area || filters.city || filters.landmark || filters.pincode || filters.tags;
 
   return (
-    <div className="flex flex-col min-h-screen bg-white" style={{ maxWidth: 480, margin: "0 auto" }}>
-      <header className="flex flex-col px-4 py-3 border-b bg-white shadow-sm sticky top-0 z-10">
-        <div className="flex items-center justify-between mb-3">
-          <h1 className="font-bold text-xl text-blue-600">Servepure Ads</h1>
-          <div className="flex items-center space-x-4">
-            <button onClick={() => navigate('/favorites')} className="hover:text-blue-600 transition-colors"><FiStar size={22} /></button>
-            <button onClick={() => navigate('/notifications')} className="hover:text-blue-600 transition-colors"><FiBell size={22} /></button>
-            <button onClick={() => navigate('/settings')} className="hover:text-blue-600 transition-colors"><FiSettings size={22} /></button>
+    <Layout
+      title="Servepure Ads"
+      activeTab="ads"
+      headerExtra={
+        <>
+          <div className="relative flex-grow">
+            <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="search"
+              placeholder="Search ads, tags, location..."
+              className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              value={searchValue}
+              onChange={(e) => setSearchValue(e.target.value)}
+            />
           </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <input type="search" placeholder="Search ads, tags, location..." className="flex-grow border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" value={searchValue} onChange={(e) => setSearchValue(e.target.value)} />
-          <button onClick={() => setShowFilters(true)} className={`p-3 rounded-lg border transition-colors ${hasActiveFilters ? "text-blue-600 bg-blue-50 border-blue-200" : "text-gray-600 border-gray-300 hover:border-gray-400"}`}><FiFilter size={20} /></button>
-          <div className="relative">
-            <button onClick={() => setShowSort(!showSort)} className="flex items-center gap-1 text-gray-600 hover:text-blue-600 px-3 py-2 border border-gray-300 rounded-lg transition-colors text-sm">Sort <FiChevronDown /></button>
-            {showSort && (
-              <>
-                <div className="absolute top-full right-0 mt-1 bg-white border rounded-lg shadow-lg z-20 min-w-48 py-1">
-                  {[
-                    { value: "distance-low-high", label: "Distance: Near to Far" },
-                    { value: "distance-high-low", label: "Distance: Far to Near" },
-                    { value: "rating-low-high", label: "Rating: Low to High" },
-                    { value: "rating-high-low", label: "Rating: High to Low" },
-                    { value: "random", label: "Random" }
-                  ].map(option => (
-                    <button key={option.value} onClick={() => { setSortBy(option.value); setShowSort(false); }} className={`w-full text-left px-4 py-2 hover:bg-gray-50 text-sm ${sortBy === option.value ? 'bg-blue-50 text-blue-600 font-medium' : 'text-gray-700'}`}>{option.label}</button>
-                  ))}
-                </div>
-                <div className="fixed inset-0 z-10" onClick={() => setShowSort(false)} />
-              </>
-            )}
-          </div>
-        </div>
-
-        {hasActiveFilters && (
-          <div className="mt-3 flex flex-wrap gap-2 items-center">
-            <span className="text-xs text-gray-600 font-medium">Filters:</span>
-            {filters.distance.min > 0 && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">Min {filters.distance.min}{filters.distanceUnit}</span>}
-            {filters.distance.max && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">Max {filters.distance.max}{filters.distanceUnit}</span>}
-            {filters.rating.min > 0 && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">Min {filters.rating.min}★</span>}
-            {filters.rating.max < 5 && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">Max {filters.rating.max}★</span>}
-            {filters.onlineStatus !== "all" && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">{filters.onlineStatus === "online" ? "Online Only" : "Offline Only"}</span>}
-            {filters.area && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">Area: {filters.area}</span>}
-            {filters.city && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">City: {filters.city}</span>}
-            {filters.landmark && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">Landmark: {filters.landmark}</span>}
-            {filters.pincode && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">Pincode: {filters.pincode}</span>}
-            {filters.tags && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">Tags: {filters.tags}</span>}
-            <button onClick={() => setFilters({ distance: { min: 0, max: null }, distanceUnit: 'km', rating: { min: 0, max: 5 }, onlineStatus: "all", area: "", city: "", landmark: "", pincode: "", tags: "" })} className="text-xs text-blue-600 hover:underline ml-1">Clear all</button>
-          </div>
-        )}
-      </header>
-
-      <main className="flex-1 p-4 pb-20">
-        {loading ? (
-          <div className="flex justify-center items-center py-20"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div></div>
-        ) : filteredAds.length === 0 ? (
-          <div className="text-center py-20"><p className="text-gray-500">No ads found</p></div>
-        ) : (
-          filteredAds.map(ad => <AdCard key={ad.id} ad={ad} profile={profile} userProfiles={userProfiles} currentUserId={currentUserId} navigate={navigate} />)
-        )}
-      </main>
-
-      <button onClick={() => navigate('/add-ads')} className="fixed bottom-20 right-4 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 z-10"><FiPlus size={24} /></button>
-
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around items-center py-2 shadow-md z-10" style={{ maxWidth: 480, margin: "0 auto" }}>
-        {[
-          { path: "/workers", icon: FiUser, label: "Workers" },
-          { path: "/services", icon: FiList, label: "Services" },
-          { path: "/ads", icon: FiGrid, label: "Ads" },
-          { path: "/chats", icon: FiMessageCircle, label: "Chats" },
-          { path: "/profile", icon: FiUser, label: "Profile" }
-        ].map(({ path, icon: Icon, label }) => (
-          <button key={path} onClick={() => navigate(path)} className={`flex flex-col items-center ${currentPath === path ? "text-blue-600 font-bold" : "text-gray-400"}`}>
-            <Icon size={24} />
-            <span className="text-xs mt-1">{label}</span>
+          <button
+            onClick={() => setShowFilters(true)}
+            className={`p-2.5 rounded-lg border transition-colors ${hasActiveFilters ? "text-blue-600 bg-blue-50 border-blue-200" : "text-gray-600 border-gray-300 hover:border-gray-400"}`}
+          >
+            <FiFilter size={20} />
           </button>
-        ))}
-      </nav>
+          <SortDropdown
+            sortBy={sortBy}
+            setSortBy={setSortBy}
+            showSort={showSort}
+            setShowSort={setShowSort}
+          />
+        </>
+      }
+      subHeader={
+        hasActiveFilters && (
+          <div className="mt-3">
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-sm text-blue-700 font-medium">Active Filters:</span>
+              {filters.distance.min > 0 && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Min {filters.distance.min}{filters.distanceUnit}
+                </span>
+              )}
+              {filters.distance.max && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Max {filters.distance.max}{filters.distanceUnit}
+                </span>
+              )}
+              {filters.rating.min > 0 && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Min {filters.rating.min}★
+                </span>
+              )}
+              {filters.rating.max < 5 && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Max {filters.rating.max}★
+                </span>
+              )}
+              {filters.onlineStatus !== "all" && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  {filters.onlineStatus === "online" ? "Online Only" : "Offline Only"}
+                </span>
+              )}
+              {filters.area && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Area: {filters.area}
+                </span>
+              )}
+              {filters.city && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  City: {filters.city}
+                </span>
+              )}
+              {filters.landmark && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Landmark: {filters.landmark}
+                </span>
+              )}
+              {filters.pincode && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Pincode: {filters.pincode}
+                </span>
+              )}
+              {filters.tags && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Tags: {filters.tags}
+                </span>
+              )}
+              <button
+                onClick={() => setFilters({ distance: { min: 0, max: null }, distanceUnit: 'km', rating: { min: 0, max: 5 }, onlineStatus: "all", area: "", city: "", landmark: "", pincode: "", tags: "" })}
+                className="text-red-500 text-xs hover:text-red-700 font-medium transition-colors"
+              >
+                Clear All
+              </button>
+            </div>
+          </div>
+        )
+      }
+    >
+      <div className="p-4 pb-20">
+        {loading ? (
+          <div className="flex justify-center items-center py-20">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
+        ) : filteredAds.length === 0 ? (
+          <div className="text-center py-20">
+            <p className="text-gray-500">No ads found</p>
+          </div>
+        ) : (
+          filteredAds.map(ad => (
+            <AdCard
+              key={ad.id}
+              ad={ad}
+              profile={profile}
+              userProfiles={userProfiles}
+              currentUserId={currentUserId}
+              navigate={navigate}
+            />
+          ))
+        )}
+      </div>
 
-      <FilterModal isOpen={showFilters} onClose={() => setShowFilters(false)} filters={filters} setFilters={setFilters} applyFilters={applyFilters} />
-    </div>
+      <button
+        onClick={() => navigate('/add-ads')}
+        className="fixed bottom-20 right-4 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 z-10"
+      >
+        <FiPlus size={24} />
+      </button>
+
+      <FilterModal
+        isOpen={showFilters}
+        onClose={() => setShowFilters(false)}
+        filters={filters}
+        setFilters={setFilters}
+        applyFilters={applyFilters}
+      />
+    </Layout>
   );
 }

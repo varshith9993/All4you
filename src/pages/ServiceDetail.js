@@ -5,27 +5,10 @@ import {
     doc, getDoc, collection, query, where, onSnapshot, addDoc, setDoc, deleteDoc, serverTimestamp, getDocs, updateDoc
 } from "firebase/firestore";
 import { db } from "../firebase";
-import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiCalendar, FiMoreVertical, FiTrash2, FiFile, FiFileText, FiDownload, FiAlertCircle, FiInfo, FiExternalLink, FiEye, FiLoader } from "react-icons/fi";
+import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiCalendar, FiMoreVertical, FiTrash2, FiFile, FiFileText, FiDownload, FiAlertCircle, FiExternalLink, FiEye, FiLoader } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.png";
 
-// Format relative time function
-function formatRelativeTime(date) {
-    if (!date) return "";
-    const now = new Date();
-    const diff = now - date;
-    const seconds = Math.floor(diff / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
 
-    if (seconds < 60) return "just now";
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    if (days < 7) return `${days}d ago`;
-    if (days < 30) return `${Math.floor(days / 7)}w ago`;
-    if (days < 365) return `${Math.floor(days / 30)}mo ago`;
-    return `${Math.floor(days / 365)}y ago`;
-}
 
 function ManualStars({ value, onChange, size = 46 }) {
     const [hover, setHover] = useState(0);
@@ -73,30 +56,6 @@ function getDownloadUrl(url) {
     return url;
 }
 
-// Function to get optimized Cloudinary PDF URL for viewing
-function getCloudinaryPdfViewUrl(url) {
-    if (!url || !url.includes("cloudinary.com")) return url;
-
-    try {
-        // Remove existing fl_attachment flag for viewing
-        let viewUrl = url;
-        if (viewUrl.includes("fl_attachment")) {
-            viewUrl = viewUrl.replace("fl_attachment", "fl_immutable");
-        }
-
-        // Ensure proper format for PDF viewing
-        if (!viewUrl.includes("f_pdf") && !viewUrl.includes("f_auto")) {
-            if (viewUrl.includes("/upload/")) {
-                viewUrl = viewUrl.replace("/upload/", "/upload/f_pdf/");
-            }
-        }
-
-        return viewUrl;
-    } catch (error) {
-        console.error("Error optimizing Cloudinary URL:", error);
-        return url;
-    }
-}
 
 // Function to check if file can be viewed online based on size
 function canViewOnline(fileSize, extension) {

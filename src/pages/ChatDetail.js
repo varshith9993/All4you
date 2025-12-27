@@ -35,7 +35,6 @@ import {
 } from "react-icons/fi";
 import { MdDone, MdDoneAll, MdAdd, MdMic } from "react-icons/md";
 import { uploadToCloudinary } from "../utils/cloudinaryUpload";
-import { initializeUserActivity } from "../utils/userActivity";
 import defaultProfile from "../assets/images/default_profile.png";
 
 
@@ -321,7 +320,6 @@ export default function ChatDetail() {
 
   // Initialize
   useEffect(() => {
-    initializeUserActivity();
     const auth = getAuth();
     return auth.onAuthStateChanged((user) => setUid(user ? user.uid : ""));
   }, []);

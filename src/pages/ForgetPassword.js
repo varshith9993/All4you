@@ -65,10 +65,10 @@ export default function ForgetPassword() {
             <FiMail className="text-white" size={28} />
           </div>
           <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-pink-600 bg-clip-text text-transparent">
-            Forgot Password?
+            Reset Password
           </h1>
           <p className="text-gray-500 text-sm mt-2">
-            No worries! Enter your email and we'll send you reset instructions.
+            Enter your email to receive a password reset link.
           </p>
         </div>
 

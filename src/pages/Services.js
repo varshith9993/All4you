@@ -3,8 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { db } from "../firebase";
 import { collection, query, onSnapshot, doc, getDoc } from "firebase/firestore";
-import { FiMapPin, FiWifi, FiFilter, FiChevronDown, FiX, FiPlus, FiUser, FiList, FiGrid, FiMessageCircle, FiBell, FiSettings, FiStar } from "react-icons/fi";
+import { FiMapPin, FiWifi, FiFilter, FiChevronDown, FiX, FiPlus, FiStar, FiSearch } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.png";
+import Layout from "../components/Layout";
 
 // Calculate Haversine distance in km
 function getDistanceKm(lat1, lon1, lat2, lon2) {
@@ -971,39 +972,26 @@ export default function Services() {
   const displayedServices = getDisplayedServices();
 
   return (
-    <div className="flex flex-col min-h-screen bg-white" style={{ maxWidth: 480, margin: "0 auto" }}>
-
-      {/* Header */}
-      <header className="flex flex-col px-4 py-3 border-b bg-white shadow-sm sticky top-0 z-30">
-        <div className="flex items-center justify-between mb-3">
-          <h1 className="font-bold text-xl text-blue-600">Servepure Services</h1>
-          <div className="flex items-center space-x-4">
-            <button onClick={() => navigate('/favorites')} className="hover:text-blue-600 transition-colors">
-              <FiStar size={22} />
-            </button>
-            <button onClick={() => navigate('/notifications')} className="hover:text-blue-600 transition-colors">
-              <FiBell size={22} />
-            </button>
-            <button onClick={() => navigate('/settings')} className="hover:text-blue-600 transition-colors">
-              <FiSettings size={22} />
-            </button>
+    <Layout
+      title="Servepure Services"
+      activeTab="services"
+      headerExtra={
+        <>
+          <div className="relative flex-grow">
+            <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="search"
+              placeholder="Search services, skills, location..."
+              className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              value={searchValue}
+              onChange={(e) => setSearchValue(e.target.value)}
+            />
           </div>
-        </div>
-
-        {/* Search and Filter Bar */}
-        <div className="flex items-center gap-2">
-          <input
-            type="search"
-            placeholder="Search services, tags, location..."
-            className="flex-grow border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            value={searchValue}
-            onChange={(e) => setSearchValue(e.target.value)}
-          />
 
           {/* Filter Button */}
           <button
             onClick={() => setShowFilters(true)}
-            className={`p-3 rounded-lg border transition-colors ${hasActiveFilters
+            className={`p-2.5 rounded-lg border transition-colors ${hasActiveFilters
               ? "text-blue-600 bg-blue-50 border-blue-200"
               : "text-gray-600 border-gray-300 hover:border-gray-400"
               }`}
@@ -1018,106 +1006,109 @@ export default function Services() {
             showSort={showSort}
             setShowSort={setShowSort}
           />
-        </div>
-      </header>
+        </>
+      }
+      subHeader={
+        <>
+          {/* Active Filters Display */}
+          {hasActiveFilters && (
+            <div className="mt-3">
+              <div className="flex flex-wrap gap-2 items-center">
+                <span className="text-sm text-blue-700 font-medium">Active Filters:</span>
+                {filters.distance.min > 0 && (
+                  <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                    Min {filters.distance.min}{filters.distanceUnit}
+                  </span>
+                )}
+                {filters.distance.max && (
+                  <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                    Max {filters.distance.max}{filters.distanceUnit}
+                  </span>
+                )}
+                {filters.onlineStatus !== "all" && (
+                  <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                    {filters.onlineStatus === "online" ? "Online Only" : "Offline Only"}
+                  </span>
+                )}
+                {filters.area && (
+                  <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                    Area: {filters.area}
+                  </span>
+                )}
+                {filters.city && (
+                  <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                    City: {filters.city}
+                  </span>
+                )}
+                {filters.landmark && (
+                  <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                    Landmark: {filters.landmark}
+                  </span>
+                )}
+                {filters.pincode && (
+                  <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                    Pincode: {filters.pincode}
+                  </span>
+                )}
+                {filters.tags && (
+                  <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                    Tags: {filters.tags}
+                  </span>
+                )}
+                {filters.expiryType !== "all" && (
+                  <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                    {filters.expiryType === "noExpiry" ? "Expiry: NA Only" : "With Expiry Dates Only"}
+                  </span>
+                )}
+                {filters.expiryDate && (
+                  <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                    {filters.expiryDirection === "above" ? "After" : "Before"} {filters.expiryDate}
+                  </span>
+                )}
+                <button
+                  onClick={() => setFilters({
+                    distance: { min: 0, max: null },
+                    distanceUnit: 'km',
+                    onlineStatus: "all",
+                    area: "",
+                    city: "",
+                    landmark: "",
+                    pincode: "",
+                    tags: "",
+                    expiryType: "all",
+                    expiryDate: "",
+                    expiryDirection: "above"
+                  })}
+                  className="text-red-500 text-xs hover:text-red-700 font-medium transition-colors"
+                >
+                  Clear All
+                </button>
+              </div>
+            </div>
+          )}
 
-      {/* Active Filters Display */}
-      {hasActiveFilters && (
-        <div className="px-4 py-2 bg-blue-50 border-b">
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-sm text-blue-700 font-medium">Active Filters:</span>
-            {filters.distance.min > 0 && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                Min {filters.distance.min}{filters.distanceUnit}
-              </span>
-            )}
-            {filters.distance.max && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                Max {filters.distance.max}{filters.distanceUnit}
-              </span>
-            )}
-            {filters.onlineStatus !== "all" && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                {filters.onlineStatus === "online" ? "Online Only" : "Offline Only"}
-              </span>
-            )}
-            {filters.area && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                Area: {filters.area}
-              </span>
-            )}
-            {filters.city && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                City: {filters.city}
-              </span>
-            )}
-            {filters.landmark && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                Landmark: {filters.landmark}
-              </span>
-            )}
-            {filters.pincode && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                Pincode: {filters.pincode}
-              </span>
-            )}
-            {filters.tags && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                Tags: {filters.tags}
-              </span>
-            )}
-            {filters.expiryType !== "all" && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                {filters.expiryType === "noExpiry" ? "Expiry: NA Only" : "With Expiry Dates Only"}
-              </span>
-            )}
-            {filters.expiryDate && (
-              <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                {filters.expiryDirection === "above" ? "After" : "Before"} {filters.expiryDate}
-              </span>
-            )}
-            <button
-              onClick={() => setFilters({
-                distance: { min: 0, max: null },
-                distanceUnit: 'km',
-                onlineStatus: "all",
-                area: "",
-                city: "",
-                landmark: "",
-                pincode: "",
-                tags: "",
-                expiryType: "all",
-                expiryDate: "",
-                expiryDirection: "above"
-              })}
-              className="text-red-500 text-xs hover:text-red-700 font-medium transition-colors"
-            >
-              Clear All
-            </button>
+          {/* Phase Tabs */}
+          <div className="pt-4 pb-2">
+            <div className="flex p-1 bg-gray-100 rounded-lg border border-gray-200">
+              {["all", "provide", "ask"].map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPhase(p)}
+                  className={`flex-1 py-1.5 rounded-md text-sm font-semibold capitalize transition-all ${phase === p
+                    ? "bg-white text-blue-600 shadow-sm border border-gray-100"
+                    : "text-gray-500 hover:text-gray-700"
+                    }`}
+                >
+                  {p === "provide" ? "Providing" : p === "ask" ? "Asking" : "All"}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
-
-      {/* Phase Tabs */}
-      <div className="px-4 pt-4 pb-2">
-        <div className="flex p-1 bg-gray-100 rounded-lg border border-gray-200">
-          {["all", "provide", "ask"].map((p) => (
-            <button
-              key={p}
-              onClick={() => setPhase(p)}
-              className={`flex-1 py-1.5 rounded-md text-sm font-semibold capitalize transition-all ${phase === p
-                ? "bg-white text-blue-600 shadow-sm border border-gray-100"
-                : "text-gray-500 hover:text-gray-700"
-                }`}
-            >
-              {p === "provide" ? "Providing" : p === "ask" ? "Asking" : "All"}
-            </button>
-          ))}
-        </div>
-      </div>
-
+        </>
+      }
+    >
       {/* Main Content */}
-      <main className="flex-1 px-4 py-3 pb-20">
+      <div className="px-4 py-3 pb-20">
         {displayedServices.length === 0 ? (
           <div className="text-center text-gray-500 mt-10">
             <p className="text-lg">No services found.</p>
@@ -1151,7 +1142,7 @@ export default function Services() {
             ))}
           </div>
         )}
-      </main>
+      </div>
 
       {/* Filter Modal */}
       <FilterModal
@@ -1172,28 +1163,6 @@ export default function Services() {
           <FiPlus size={24} />
         </button>
       </div>
-
-      {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around items-center py-2 shadow-md"
-        style={{ maxWidth: 480, margin: "0 auto" }}>
-        {[
-          { path: "/workers", icon: FiUser, label: "Workers" },
-          { path: "/services", icon: FiList, label: "Services" },
-          { path: "/ads", icon: FiGrid, label: "Ads" },
-          { path: "/chats", icon: FiMessageCircle, label: "Chats" },
-          { path: "/profile", icon: FiUser, label: "Profile" }
-        ].map(({ path, icon: Icon, label }) => (
-          <button
-            key={path}
-            onClick={() => navigate(path)}
-            className={`flex flex-col items-center transition-colors ${window.location.pathname === path ? "text-blue-600 font-bold" : "text-gray-400 hover:text-gray-600"
-              }`}
-          >
-            <Icon size={24} />
-            <span className="text-xs mt-1">{label}</span>
-          </button>
-        ))}
-      </nav>
-    </div>
+    </Layout>
   );
 }
