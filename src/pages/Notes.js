@@ -8,8 +8,8 @@ import {
     deleteDoc,
     doc,
 } from "firebase/firestore";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { db } from "../firebase";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth, db } from "../firebase";
 import {
     FiArrowLeft,
     FiSearch,
@@ -47,7 +47,6 @@ export default function Notes() {
 
     // Handle Auth State
     useEffect(() => {
-        const auth = getAuth();
         const unsubscribe = onAuthStateChanged(auth, (user) => {
             if (user) {
                 setCurrentUserId(user.uid);

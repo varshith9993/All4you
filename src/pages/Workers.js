@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { db } from "../firebase";
-import { collection, query, onSnapshot, doc, getDoc } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+import { db, auth } from "../firebase";
+import { collection, query, onSnapshot, doc } from "firebase/firestore";
 import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiPlus, FiWifi, FiSearch } from "react-icons/fi";
 import Layout from "../components/Layout";
 import defaultAvatar from "../assets/images/default_profile.png";
@@ -318,7 +318,13 @@ function WorkerCard({ worker, profile, userProfiles, currentUserId, navigate }) 
         {/* Left Column: Image & Rating */}
         <div className="flex flex-col items-center flex-shrink-0 w-16">
           <div className="relative mb-1.5">
-            <img src={displayProfileImage} alt={displayUsername} className="w-14 h-14 rounded-full object-cover border-2 border-gray-300" onError={(e) => { e.target.src = defaultAvatar; }} />
+            <img
+              src={displayProfileImage}
+              alt={displayUsername}
+              className="w-14 h-14 rounded-full object-cover border-2 border-gray-300"
+              onError={(e) => { e.target.src = defaultAvatar; }}
+              crossOrigin="anonymous"
+            />
             {isOnline && <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>}
           </div>
           <div className="flex items-center gap-0.5 bg-yellow-50 px-1.5 py-0.5 rounded border border-yellow-200">
@@ -453,43 +459,37 @@ export default function Workers() {
   });
   const navigate = useNavigate();
 
-  // 1. Authentication
+  // 1. Authentication & Current User Profile
   useEffect(() => {
-    const auth = getAuth();
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
         setCurrentUserId(user.uid);
+        // Listen to current user profile in real-time
+        const profileRef = doc(db, 'profiles', user.uid);
+        const unsubscribeProfile = onSnapshot(profileRef, (docSnap) => {
+          if (docSnap.exists()) {
+            setUserProfile(docSnap.data());
+          }
+          // We don't set loading false here because workers need to load too
+        }, (error) => {
+          console.error("Error listening to user profile:", error);
+        });
+
+        return () => unsubscribeProfile();
       } else {
         setCurrentUserId(null);
         setLoading(false);
       }
     });
-    return () => unsubscribe();
+    return () => unsubscribeAuth();
   }, []);
 
-  // 2. Fetch Current User Profile
-  useEffect(() => {
-    if (!currentUserId) return;
-    const fetchProfile = async () => {
-      try {
-        const profileDoc = await getDoc(doc(db, 'profiles', currentUserId));
-        if (profileDoc.exists()) {
-          setUserProfile(profileDoc.data());
-        }
-      } catch (error) {
-        console.error("Error fetching user profile:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchProfile();
-  }, [currentUserId]);
-
-  // 3. Fetch Workers (Real-time)
+  // 2. Fetch Workers (Real-time) and their Creator Profiles
   useEffect(() => {
     const q = query(collection(db, 'workers'));
+    let creatorUnsubs = {};
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribeWorkers = onSnapshot(q, (snapshot) => {
       const workerList = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setWorkers(workerList);
 
@@ -497,22 +497,33 @@ export default function Workers() {
       const creatorIds = Array.from(new Set(workerList.map(worker => worker.createdBy))).filter(Boolean);
 
       creatorIds.forEach(creatorId => {
-        onSnapshot(doc(db, 'profiles', creatorId), (profileSnap) => {
-          if (profileSnap.exists()) {
-            setUserProfiles(prev => ({
-              ...prev,
-              [creatorId]: profileSnap.data()
-            }));
-          }
-        });
+        // Only start a new listener if we don't already have one for this creator
+        if (!creatorUnsubs[creatorId]) {
+          creatorUnsubs[creatorId] = onSnapshot(doc(db, 'profiles', creatorId), (profileSnap) => {
+            if (profileSnap.exists()) {
+              setUserProfiles(prev => ({
+                ...prev,
+                [creatorId]: profileSnap.data()
+              }));
+            }
+          });
+        }
       });
 
-      if (!currentUserId) setLoading(false);
+      // Set loading to false once we have the workers
+      // If we are logged in, we wait for both workers and (ideally) profile, 
+      // but workers are the main content.
+      setLoading(false);
     }, (error) => {
       console.error("Error loading workers:", error);
       setLoading(false);
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribeWorkers();
+      // Clean up all creator profile listeners
+      Object.values(creatorUnsubs).forEach(unsub => unsub());
+    };
   }, [currentUserId]);
 
   // Process and display workers with filtering and sorting - SIMPLIFIED

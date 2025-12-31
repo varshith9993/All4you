@@ -81,8 +81,11 @@ service cloud.firestore {
       // Authenticated users can create reviews
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       
-      // Only the review creator can update their review
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Only the review creator or the post owner can update (for replies)
+      allow update: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        ('workerId' in resource.data && get(/databases/$(database)/documents/workers/$(resource.data.workerId)).data.createdBy == request.auth.uid)
+      );
       
       // Review creator OR the post owner can delete reviews
       allow delete: if isDocOwner(resource) || 
@@ -97,8 +100,11 @@ service cloud.firestore {
       // Authenticated users can create reviews
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       
-      // Only the review creator can update their review
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Only the review creator or the post owner can update (for replies)
+      allow update: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        ('serviceId' in resource.data && get(/databases/$(database)/documents/services/$(resource.data.serviceId)).data.createdBy == request.auth.uid)
+      );
       
       // Review creator OR the post owner can delete reviews
       allow delete: if isDocOwner(resource) || 
@@ -113,8 +119,11 @@ service cloud.firestore {
       // Authenticated users can create reviews
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       
-      // Only the review creator can update their review
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Only the review creator or the post owner can update (for replies)
+      allow update: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        ('adId' in resource.data && get(/databases/$(database)/documents/ads/$(resource.data.adId)).data.createdBy == request.auth.uid)
+      );
       
       // Review creator OR the post owner can delete reviews
       allow delete: if isDocOwner(resource) || 

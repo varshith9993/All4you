@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { getAuth } from "firebase/auth";
-import { db } from "../firebase";
+import { auth, db } from "../firebase";
 import { collection, query, where, onSnapshot, doc, updateDoc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { FiStar, FiSearch, FiWifi } from "react-icons/fi";
@@ -108,6 +107,7 @@ function ChatCard({ chat, uid, profiles, navigate }) {
           alt={prof.username || "User"}
           className="h-12 w-12 rounded-full border-2 border-white object-cover shadow-sm"
           onError={(e) => { e.target.src = defaultAvatar; }}
+          crossOrigin="anonymous"
         />
         {isOnline && (
           <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
@@ -172,7 +172,6 @@ export default function Chats() {
   const profileUnsubscribes = useRef({});
 
   useEffect(() => {
-    const auth = getAuth();
     return auth.onAuthStateChanged(u => setUid(u ? u.uid : ""));
   }, []);
 

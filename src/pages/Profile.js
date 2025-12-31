@@ -703,7 +703,8 @@ export default function Profile() {
               src: displayProfileImage,
               alt: displayUsername,
               className: "w-14 h-14 rounded-full object-cover border-2 border-gray-300",
-              onError: (e) => { e.target.src = defaultAvatar; }
+              onError: (e) => { e.target.src = defaultAvatar; },
+              crossOrigin: "anonymous"
             }),
             // Status dot
             React.createElement("div", {
@@ -936,7 +937,8 @@ export default function Profile() {
               src: displayProfileImage,
               alt: displayUsername,
               className: "w-14 h-14 rounded-full object-cover border-2 border-gray-300",
-              onError: (e) => { e.target.src = defaultAvatar; }
+              onError: (e) => { e.target.src = defaultAvatar; },
+              crossOrigin: "anonymous"
             }),
             // Status dot
             React.createElement("div", {
@@ -1137,7 +1139,8 @@ export default function Profile() {
             src: displayProfileImage,
             alt: displayUsername,
             className: "w-10 h-10 rounded-full object-cover",
-            onError: (e) => { e.target.src = defaultAvatar; }
+            onError: (e) => { e.target.src = defaultAvatar; },
+            crossOrigin: "anonymous"
           }),
           // Status dot
           React.createElement("div", {
@@ -1192,34 +1195,44 @@ export default function Profile() {
 
       // Ad content
       React.createElement("div", {
-        className: "relative w-full h-48 bg-gray-100"
+        className: "relative w-full h-56 md:h-72 bg-gray-100 overflow-hidden"
       },
         photos && photos.length > 0 ? React.createElement(React.Fragment, null,
+          // Blurred background for vertical/odd aspect ratio images
+          React.createElement("img", {
+            src: photos[currentPhotoIndex],
+            alt: "",
+            className: "absolute inset-0 w-full h-full object-cover blur-2xl scale-125 opacity-60",
+            "aria-hidden": "true",
+            crossOrigin: "anonymous"
+          }),
+          // Main authentic image
           React.createElement("img", {
             src: photos[currentPhotoIndex],
             alt: title,
-            className: "w-full h-full object-cover",
-            onError: (e) => { e.target.style.display = 'none'; }
+            className: "relative w-full h-full object-contain z-10",
+            onError: (e) => { e.target.style.display = 'none'; },
+            crossOrigin: "anonymous"
           }),
 
           photos.length > 1 && React.createElement(React.Fragment, null,
             React.createElement("button", {
               onClick: handlePrevPhoto,
-              className: "absolute left-1 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white p-1 rounded-full transition-colors",
+              className: "absolute left-1 top-1/2 -translate-y-1/2 bg-white/60 hover:bg-white/90 text-gray-800 p-1 rounded-full transition-all z-20",
               "aria-label": "Previous photo"
             },
-              React.createElement(FiChevronLeft, { size: 14 })
+              React.createElement(FiChevronLeft, { size: 16 })
             ),
             React.createElement("button", {
               onClick: handleNextPhoto,
-              className: "absolute right-1 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white p-1 rounded-full transition-colors",
+              className: "absolute right-1 top-1/2 -translate-y-1/2 bg-white/60 hover:bg-white/90 text-gray-800 p-1 rounded-full transition-all z-20",
               "aria-label": "Next photo"
             },
-              React.createElement(FiChevronRight, { size: 14 })
+              React.createElement(FiChevronRight, { size: 16 })
             ),
 
             React.createElement("div", {
-              className: "absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5"
+              className: "absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-20"
             },
               photos.map((_, index) =>
                 React.createElement("div", {
@@ -1340,7 +1353,8 @@ export default function Profile() {
           React.createElement("img", {
             src: editMode ? imagePreview || editingProfile.profileImage || defaultAvatar : profile?.profileImage || defaultAvatar,
             alt: "Profile",
-            className: "w-28 h-28 rounded-full border-4 border-white shadow-lg object-cover"
+            className: "w-28 h-28 rounded-full border-4 border-white shadow-lg object-cover",
+            crossOrigin: "anonymous"
           }),
           editMode && React.createElement("label", {
             className: "absolute bottom-1 right-1 bg-indigo-600 text-white p-2 rounded-full cursor-pointer shadow-md hover:bg-indigo-700 transition-colors"

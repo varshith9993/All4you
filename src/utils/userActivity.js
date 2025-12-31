@@ -1,11 +1,8 @@
-import { getAuth } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase";
+import { auth, db } from "../firebase";
 
 let activityInterval;
 
 export const startUserActivityTracking = () => {
-  const auth = getAuth();
   const user = auth.currentUser;
 
   if (!user) return;
@@ -21,7 +18,7 @@ export const startUserActivityTracking = () => {
   // Set up periodic updates (every 30 seconds)
   if (activityInterval) clearInterval(activityInterval);
   activityInterval = setInterval(() => {
-    const currentUser = getAuth().currentUser;
+    const currentUser = auth.currentUser;
     if (currentUser) {
       setDoc(doc(db, "profiles", currentUser.uid), {
         online: true,
@@ -34,7 +31,6 @@ export const startUserActivityTracking = () => {
 };
 
 export const stopUserActivityTracking = () => {
-  const auth = getAuth();
   const user = auth.currentUser;
 
   if (!user) return;

@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
 import { db } from "../firebase";
 import axios from "axios";
 import { FiArrowLeft, FiX, FiMapPin, FiUploadCloud, FiRotateCcw } from "react-icons/fi";
-import defaultAvatar from "../assets/images/default_profile.png";
 
 const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
 const CLOUDINARY_UPLOAD_PRESET = "ml_default";
@@ -294,7 +292,7 @@ export default function EditAd() {
             <div className="flex flex-wrap gap-2 mb-3">
               {photoPreviews.map((src, idx) => (
                 <div key={idx} className="relative group">
-                  <img src={src} alt={`preview-${idx}`} className="w-20 h-20 object-cover rounded-lg border border-gray-200 shadow-sm" />
+                  <img src={src} alt={`preview-${idx}`} className="w-20 h-20 object-cover rounded-lg border border-gray-200 shadow-sm" crossOrigin="anonymous" />
                   <button
                     type="button"
                     onClick={() => removePhoto(idx)}

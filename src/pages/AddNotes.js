@@ -7,8 +7,8 @@ import {
     doc,
     serverTimestamp,
 } from "firebase/firestore";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { db } from "../firebase";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth, db } from "../firebase";
 import {
     FiArrowLeft,
     FiSave,
@@ -57,7 +57,6 @@ export default function AddNotes() {
 
     // Handle Auth State
     useEffect(() => {
-        const auth = getAuth();
         const unsubscribe = onAuthStateChanged(auth, (user) => {
             if (user) {
                 setCurrentUserId(user.uid);
@@ -146,7 +145,7 @@ export default function AddNotes() {
     // Format current date to dd/mm/yyyy hh:mm AM/PM
     const formatCurrentDateTime = () => {
         const now = new Date();
-        
+
         const day = now.getDate().toString().padStart(2, '0');
         const month = (now.getMonth() + 1).toString().padStart(2, '0');
         const year = now.getFullYear();
@@ -265,14 +264,14 @@ export default function AddNotes() {
                             <FiClock size={10} />
                             <span>{formatCurrentDateTime()}</span>
                         </div>
-                        
+
                         {!isReadOnly && hasUnsavedChanges && (
                             <>
                                 <span>•</span>
                                 <span className="text-amber-500 font-medium">Unsaved changes</span>
                             </>
                         )}
-                        
+
                         <span>•</span>
                         <span>{noteForm.content.length} characters</span>
                     </div>

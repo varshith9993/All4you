@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { getAuth } from "firebase/auth";
+import { auth } from "../firebase";
 
 export default function GetUserId() {
     const [userId, setUserId] = useState("");
     const [copied, setCopied] = useState(false);
 
     useEffect(() => {
-        const auth = getAuth();
         const unsubscribe = auth.onAuthStateChanged((user) => {
             if (user) {
                 setUserId(user.uid);

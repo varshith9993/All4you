@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { getAuth } from "firebase/auth";
+import { auth, db } from "../firebase";
 import { userStatusManager } from "../auth/UserStatusManager";
 import { collection, addDoc, serverTimestamp, doc, getDoc } from "firebase/firestore";
-import { db } from "../firebase";
 import {
   FiArrowLeft,
   FiUser,
@@ -23,7 +22,6 @@ import {
 
 export default function Settings() {
   const navigate = useNavigate();
-  const auth = getAuth();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackType, setFeedbackType] = useState("feedback"); // "feedback" or "bug"
@@ -57,7 +55,7 @@ export default function Settings() {
     };
 
     fetchUserName();
-  }, [auth.currentUser]);
+  }, []);
 
   const handleLogout = async () => {
     try {

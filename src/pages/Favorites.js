@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { getAuth } from "firebase/auth";
-import { db } from "../firebase";
+import { auth, db } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import { collection, query, where, onSnapshot, doc, getDoc, deleteDoc } from "firebase/firestore";
 import {
@@ -94,7 +93,6 @@ export default function Favorites() {
 
   // Auth state
   useEffect(() => {
-    const auth = getAuth();
     return auth.onAuthStateChanged(u => {
       setUid(u?.uid || "");
       setCurrentUserId(u?.uid || null);
@@ -276,7 +274,7 @@ export default function Favorites() {
           {/* Left Column: Image & Rating */}
           <div className="flex flex-col items-center flex-shrink-0 w-16">
             <div className="relative mb-1.5">
-              <img src={displayProfileImage} alt={displayUsername} className="w-14 h-14 rounded-full object-cover border-2 border-gray-300" onError={(e) => { e.target.src = defaultAvatar; }} />
+              <img src={displayProfileImage} alt={displayUsername} className="w-14 h-14 rounded-full object-cover border-2 border-gray-300" onError={(e) => { e.target.src = defaultAvatar; }} crossOrigin="anonymous" />
               {isOnline && <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>}
             </div>
             <div className="flex items-center gap-0.5 bg-yellow-50 px-1.5 py-0.5 rounded border border-yellow-200">
@@ -458,7 +456,7 @@ export default function Favorites() {
           {/* Left Column: Image & Type Badge */}
           <div className="flex flex-col items-center flex-shrink-0 w-16">
             <div className="relative mb-1.5">
-              <img src={displayProfileImage} alt={displayUsername} className="w-14 h-14 rounded-full object-cover border-2 border-gray-300" onError={(e) => { e.target.src = defaultAvatar; }} />
+              <img src={displayProfileImage} alt={displayUsername} className="w-14 h-14 rounded-full object-cover border-2 border-gray-300" onError={(e) => { e.target.src = defaultAvatar; }} crossOrigin="anonymous" />
               {isOnline && <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>}
             </div>
             <div className={`flex items-center justify-center px-1.5 py-0.5 rounded border w-full mb-1 ${isProviding ? "bg-green-50 border-green-200 text-green-700" : "bg-orange-50 border-orange-200 text-orange-700"}`}>
@@ -607,7 +605,7 @@ export default function Favorites() {
             </div>
           )}
           <div className="relative flex-shrink-0">
-            <img src={displayProfileImage} alt={displayUsername} className="w-10 h-10 rounded-full object-cover" onError={(e) => { e.target.src = defaultAvatar; }} />
+            <img src={displayProfileImage} alt={displayUsername} className="w-10 h-10 rounded-full object-cover" onError={(e) => { e.target.src = defaultAvatar; }} crossOrigin="anonymous" />
             {isOnline && <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>}
           </div>
           <div className="flex-1 min-w-0">
@@ -635,34 +633,44 @@ export default function Favorites() {
         </div>
 
         {/* Ad content */}
-        <div className="relative w-full h-48 bg-gray-100">
+        <div className="relative w-full h-56 md:h-72 bg-gray-100 overflow-hidden">
           {photos && photos.length > 0 ? (
             <>
+              {/* Blurred background for vertical/odd aspect ratio images */}
+              <img
+                src={photos[currentPhotoIndex]}
+                alt=""
+                className="absolute inset-0 w-full h-full object-cover blur-2xl scale-125 opacity-60"
+                aria-hidden="true"
+                crossOrigin="anonymous"
+              />
+              {/* Main authentic image */}
               <img
                 src={photos[currentPhotoIndex]}
                 alt={title}
-                className="w-full h-full object-cover"
+                className="relative w-full h-full object-contain z-10"
                 onError={(e) => { e.target.style.display = 'none'; }}
+                crossOrigin="anonymous"
               />
 
               {photos.length > 1 && (
                 <>
                   <button
                     onClick={handlePrevPhoto}
-                    className="absolute left-1 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white p-1 rounded-full transition-colors"
+                    className="absolute left-1 top-1/2 -translate-y-1/2 bg-white/60 hover:bg-white/90 text-gray-800 p-1 rounded-full transition-all z-20"
                     aria-label="Previous photo"
                   >
-                    <FiChevronLeft size={14} />
+                    <FiChevronLeft size={16} />
                   </button>
                   <button
                     onClick={handleNextPhoto}
-                    className="absolute right-1 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white p-1 rounded-full transition-colors"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 bg-white/60 hover:bg-white/90 text-gray-800 p-1 rounded-full transition-all z-20"
                     aria-label="Next photo"
                   >
-                    <FiChevronRight size={14} />
+                    <FiChevronRight size={16} />
                   </button>
 
-                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
+                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-20">
                     {photos.map((_, index) => (
                       <div
                         key={index}

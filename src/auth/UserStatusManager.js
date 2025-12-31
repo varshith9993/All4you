@@ -1,11 +1,10 @@
-// src/auth/UserStatusManager.js
-import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 
 class UserStatusManager {
   constructor() {
-    this.auth = getAuth();
+    this.auth = auth;
     this.currentUserId = null;
     this.unsubscribeAuth = null;
     this.unsubscribeProfile = null;

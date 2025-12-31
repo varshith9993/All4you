@@ -1,11 +1,22 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getAuth } from "firebase/auth";
+import { auth, db } from "../firebase";
 import {
-    doc, getDoc, collection, query, where, onSnapshot, addDoc, setDoc, deleteDoc, serverTimestamp, getDocs, updateDoc
+    onSnapshot,
+    doc,
+    getDoc,
+    query,
+    collection,
+    where,
+    getDocs,
+    updateDoc,
+    deleteDoc,
+    setDoc,
+    serverTimestamp,
+    addDoc,
+    arrayUnion
 } from "firebase/firestore";
-import { db } from "../firebase";
-import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiCalendar, FiMoreVertical, FiTrash2, FiFile, FiFileText, FiDownload, FiAlertCircle, FiExternalLink, FiEye, FiLoader } from "react-icons/fi";
+import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiCalendar, FiMoreVertical, FiTrash2, FiFile, FiFileText, FiDownload, FiAlertCircle, FiExternalLink, FiEye, FiLoader, FiChevronLeft, FiChevronRight } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.png";
 
 
@@ -219,10 +230,12 @@ function ServiceDetail() {
     const [fileSizes, setFileSizes] = useState({});
     const [loadingFiles, setLoadingFiles] = useState({});
     const [fileLoadErrors, setFileLoadErrors] = useState({});
+    const [replyingTo, setReplyingTo] = useState(null);
+    const [replyText, setReplyText] = useState("");
+    const [expandedReplies, setExpandedReplies] = useState({});
 
     // Get auth user
     useEffect(() => {
-        const auth = getAuth();
         const unsub = auth.onAuthStateChanged(u => setCurrentUserId(u?.uid ?? ""));
         return unsub;
     }, []);
@@ -506,6 +519,44 @@ function ServiceDetail() {
         setTimeout(() => setToast(""), 2000);
     };
 
+    const submitReply = async (reviewId, reviewerId) => {
+        if (!replyText.trim()) return;
+        try {
+            await updateDoc(doc(db, "serviceReviews", reviewId), {
+                replies: arrayUnion({
+                    text: replyText.trim(),
+                    createdAt: new Date().getTime()
+                })
+            });
+
+            // Notification for the reviewer
+            if (reviewerId !== currentUserId) {
+                try {
+                    await addDoc(collection(db, "notifications"), {
+                        userId: reviewerId,
+                        senderId: currentUserId,
+                        type: "review_reply",
+                        title: "New Reply",
+                        message: `Owner replied to your review on ${service?.title || "their service"}`,
+                        link: `/service-detail/${id}`,
+                        postId: id,
+                        postType: "service",
+                        read: false,
+                        createdAt: serverTimestamp()
+                    });
+                } catch (nErr) { console.error("Notif error", nErr); }
+            }
+
+            setReplyText("");
+            setReplyingTo(null);
+            setToast("Reply posted!");
+            setTimeout(() => setToast(""), 2000);
+        } catch (error) {
+            console.error("Error replying:", error);
+            setToast("Failed to post reply");
+        }
+    };
+
     // Fixed share function with proper error handling
     const shareService = async () => {
         if (!service) return;
@@ -676,6 +727,7 @@ function ServiceDetail() {
                         alt={displayUsername}
                         className="w-20 h-20 rounded-full object-cover border-2 border-white shadow-md"
                         onError={(e) => { e.target.src = defaultAvatar; }}
+                        crossOrigin="anonymous"
                     />
                 </div>
 
@@ -787,17 +839,31 @@ function ServiceDetail() {
                                 {imageFiles.length > 1 && (
                                     <>
                                         <button onClick={(e) => { e.stopPropagation(); setCarouselIdx(i => (i - 1 + imageFiles.length) % imageFiles.length); }}
-                                            className="absolute left-2 top-1/2 transform -translate-y-1/2 bg-white bg-opacity-80 p-2 rounded-full text-gray-800 shadow-md hover:bg-white z-10">‹</button>
+                                            className="absolute left-2 top-1/2 -translate-y-1/2 bg-white/60 hover:bg-white/90 text-gray-800 p-1 rounded-full transition-all z-20">
+                                            <FiChevronLeft size={16} />
+                                        </button>
                                         <button onClick={(e) => { e.stopPropagation(); setCarouselIdx(i => (i + 1) % imageFiles.length); }}
-                                            className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-white bg-opacity-80 p-2 rounded-full text-gray-800 shadow-md hover:bg-white z-10">›</button>
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/60 hover:bg-white/90 text-gray-800 p-1 rounded-full transition-all z-20">
+                                            <FiChevronRight size={16} />
+                                        </button>
                                     </>
                                 )}
+
+                                <img
+                                    src={imageFiles[carouselIdx]?.url}
+                                    alt=""
+                                    className="absolute inset-0 w-full h-full object-cover blur-2xl scale-125 opacity-60"
+                                    aria-hidden="true"
+                                    crossOrigin="anonymous"
+                                />
+
                                 <img
                                     src={imageFiles[carouselIdx]?.url}
                                     alt={imageFiles[carouselIdx]?.name || "Service Image"}
-                                    className="w-full h-full object-cover cursor-pointer"
+                                    className="relative w-full h-full object-contain cursor-pointer z-10"
                                     onClick={() => setViewingImage(imageFiles[carouselIdx]?.url)}
                                     onError={() => handleFileLoadError(imageFiles[carouselIdx]?.url)}
+                                    crossOrigin="anonymous"
                                 />
 
                                 {loadingFiles[imageFiles[carouselIdx]?.url] && (
@@ -954,6 +1020,7 @@ function ServiceDetail() {
                                                 alt={user.username}
                                                 className="w-10 h-10 rounded-full object-cover border border-gray-200 flex-shrink-0"
                                                 onError={(e) => { e.target.src = defaultAvatar; }}
+                                                crossOrigin="anonymous"
                                             />
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex justify-between items-start">
@@ -975,15 +1042,29 @@ function ServiceDetail() {
 
                                                             {activeMenuId === r.id && (
                                                                 <div className="absolute right-0 top-8 bg-white shadow-lg border border-gray-100 rounded-lg py-1 z-10 w-32 animate-scale-in">
-                                                                    <button
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            deleteReview(r.id, r.rating > 0);
-                                                                        }}
-                                                                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
-                                                                    >
-                                                                        <FiTrash2 size={14} /> Delete
-                                                                    </button>
+                                                                    {isOwner && (
+                                                                        <button
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                setReplyingTo(r.id);
+                                                                                setActiveMenuId(null);
+                                                                            }}
+                                                                            className="w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-2"
+                                                                        >
+                                                                            <FiMessageSquare size={14} /> Reply
+                                                                        </button>
+                                                                    )}
+                                                                    {(isOwner || r.userId === currentUserId) && (
+                                                                        <button
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                deleteReview(r.id, r.rating > 0);
+                                                                            }}
+                                                                            className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                                                        >
+                                                                            <FiTrash2 size={14} /> Delete
+                                                                        </button>
+                                                                    )}
                                                                 </div>
                                                             )}
                                                         </div>
@@ -1002,6 +1083,72 @@ function ServiceDetail() {
                                                     </div>
                                                 )}
                                                 <p className="text-gray-700 text-sm leading-normal mt-1 tracking-normal" style={{ wordSpacing: '0.05em' }}>{r.text}</p>
+
+                                                {/* Display Replies Toggle */}
+                                                {(r.reply || (r.replies && r.replies.length > 0)) && (
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setExpandedReplies(prev => ({ ...prev, [r.id]: !prev[r.id] }));
+                                                        }}
+                                                        className="mt-2 text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                                                    >
+                                                        <FiMessageSquare size={12} />
+                                                        {expandedReplies[r.id] ? "Hide Replies" : `View Replies (${(r.replies?.length || 0) + (r.reply ? 1 : 0)})`}
+                                                    </button>
+                                                )}
+
+                                                {/* Display Replies List */}
+                                                {expandedReplies[r.id] && (
+                                                    <div className="mt-2 space-y-2 ml-2">
+                                                        {/* Support legacy single reply */}
+                                                        {r.reply && (
+                                                            <div className="p-2 border-l-2 border-blue-200 bg-gray-50/50 rounded-r-lg">
+                                                                <p className="text-sm text-gray-700">{r.reply}</p>
+                                                                <div className="text-[10px] text-gray-400 mt-1">
+                                                                    {r.replyCreatedAt ? formatDateTime(new Date(r.replyCreatedAt.seconds * 1000)) : ""}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {/* Support multiple replies */}
+                                                        {r.replies && r.replies.map((reply, index) => (
+                                                            <div key={index} className="p-2 border-l-2 border-blue-200 bg-gray-50/50 rounded-r-lg">
+                                                                <p className="text-sm text-gray-700">{reply.text}</p>
+                                                                <div className="text-[10px] text-gray-400 mt-1">
+                                                                    {reply.createdAt ? formatDateTime(new Date(reply.createdAt)) : ""}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+
+                                                {/* Reply Input */}
+                                                {replyingTo === r.id && (
+                                                    <div className="mt-3 ml-2 animate-fade-in" onClick={e => e.stopPropagation()}>
+                                                        <textarea
+                                                            value={replyText}
+                                                            onChange={(e) => setReplyText(e.target.value)}
+                                                            placeholder="Write your reply..."
+                                                            className="w-full border border-gray-300 p-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                                                            rows={2}
+                                                            autoFocus
+                                                        />
+                                                        <div className="flex justify-end gap-2 mt-2">
+                                                            <button
+                                                                onClick={() => { setReplyingTo(null); setReplyText(""); }}
+                                                                className="px-3 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded font-medium"
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                            <button
+                                                                onClick={() => submitReply(r.id, r.userId)}
+                                                                className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 font-bold"
+                                                            >
+                                                                Post Reply
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -1267,16 +1414,47 @@ function ServiceDetail() {
                 <div className="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center p-4 animate-fade-in" onClick={() => setViewingImage(null)}>
                     <button
                         onClick={() => setViewingImage(null)}
-                        className="absolute top-4 right-4 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors"
+                        className="absolute top-4 right-4 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors z-[70]"
                     >
                         <FiX size={24} />
                     </button>
+
+                    {imageFiles.length > 1 && (
+                        <>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    const urls = imageFiles.map(f => f.url);
+                                    const currentIdx = urls.indexOf(viewingImage);
+                                    const newIdx = (currentIdx - 1 + urls.length) % urls.length;
+                                    setViewingImage(urls[newIdx]);
+                                }}
+                                className="absolute left-4 top-1/2 -translate-y-1/2 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors z-[70]"
+                            >
+                                <FiChevronLeft size={24} />
+                            </button>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    const urls = imageFiles.map(f => f.url);
+                                    const currentIdx = urls.indexOf(viewingImage);
+                                    const newIdx = (currentIdx + 1) % urls.length;
+                                    setViewingImage(urls[newIdx]);
+                                }}
+                                className="absolute right-4 top-1/2 -translate-y-1/2 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors z-[70]"
+                            >
+                                <FiChevronRight size={24} />
+                            </button>
+                        </>
+                    )}
+
                     <img
                         src={viewingImage}
                         alt="Full view"
-                        className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+                        className="max-w-full max-h-full object-contain rounded-lg shadow-2xl relative z-[65]"
                         onClick={(e) => e.stopPropagation()}
                         onError={() => handleFileLoadError(viewingImage)}
+                        crossOrigin="anonymous"
                     />
                     {fileLoadErrors[viewingImage] && (
                         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 p-4">

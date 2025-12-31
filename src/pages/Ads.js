@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { db } from "../firebase";
-import { collection, query, onSnapshot, doc, getDoc } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+import { db, auth } from "../firebase";
+import { collection, query, onSnapshot, doc } from "firebase/firestore";
 import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiPlus, FiWifi, FiChevronLeft, FiChevronRight, FiSearch } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.png";
 import Layout from "../components/Layout";
@@ -107,7 +107,13 @@ function AdCard({ ad, profile, userProfiles, currentUserId, navigate }) {
     <div onClick={() => navigate(`/ad-detail/${ad.id}`)} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden mb-4 cursor-pointer hover:shadow-md transition-shadow">
       <div className="flex items-center gap-3 p-3 border-b border-gray-100">
         <div className="relative flex-shrink-0">
-          <img src={displayProfileImage} alt={displayUsername} className="w-10 h-10 rounded-full object-cover" onError={(e) => { e.target.src = defaultAvatar; }} />
+          <img
+            src={displayProfileImage}
+            alt={displayUsername}
+            className="w-10 h-10 rounded-full object-cover"
+            onError={(e) => { e.target.src = defaultAvatar; }}
+            crossOrigin="anonymous"
+          />
           {isOnline && <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>}
         </div>
         <div className="flex-1 min-w-0">
@@ -126,32 +132,43 @@ function AdCard({ ad, profile, userProfiles, currentUserId, navigate }) {
       </div>
 
       {photos && photos.length > 0 && (
-        <div className="relative w-full h-48 bg-gray-100">
+        <div className="relative w-full h-56 md:h-72 bg-gray-100 overflow-hidden">
+          {/* Blurred background for vertical/odd aspect ratio images */}
+          <img
+            src={photos[currentPhotoIndex]}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover blur-2xl scale-125 opacity-60"
+            aria-hidden="true"
+            crossOrigin="anonymous"
+          />
+
+          {/* Main authentic image */}
           <img
             src={photos[currentPhotoIndex]}
             alt={title}
-            className="w-full h-full object-cover"
+            className="relative w-full h-full object-contain z-10"
             onError={(e) => { e.target.style.display = 'none'; }}
+            crossOrigin="anonymous"
           />
 
           {photos.length > 1 && (
             <>
               <button
                 onClick={handlePrevPhoto}
-                className="absolute left-1 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white p-1 rounded-full transition-colors"
+                className="absolute left-1 top-1/2 -translate-y-1/2 bg-white/60 hover:bg-white/90 text-gray-800 p-1 rounded-full transition-all z-20"
                 aria-label="Previous photo"
               >
-                <FiChevronLeft size={14} />
+                <FiChevronLeft size={16} />
               </button>
               <button
                 onClick={handleNextPhoto}
-                className="absolute right-1 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white p-1 rounded-full transition-colors"
+                className="absolute right-1 top-1/2 -translate-y-1/2 bg-white/60 hover:bg-white/90 text-gray-800 p-1 rounded-full transition-all z-20"
                 aria-label="Next photo"
               >
-                <FiChevronRight size={14} />
+                <FiChevronRight size={16} />
               </button>
 
-              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
+              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-20">
                 {photos.map((_, index) => (
                   <div
                     key={index}
@@ -497,40 +514,68 @@ export default function Ads() {
   const [currentUserId, setCurrentUserId] = useState(null);
   const navigate = useNavigate();
 
+  // 1. Authentication & Current User Profile
   useEffect(() => {
-    const auth = getAuth();
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
         setCurrentUserId(user.uid);
-        getDoc(doc(db, 'profiles', user.uid)).then(profileDoc => {
-          if (profileDoc.exists()) setProfile(profileDoc.data());
+        // Listen to current user profile in real-time
+        const profileRef = doc(db, 'profiles', user.uid);
+        const unsubscribeProfile = onSnapshot(profileRef, (docSnap) => {
+          if (docSnap.exists()) {
+            setProfile(docSnap.data());
+          }
+        }, (error) => {
+          console.error("Error listening to user profile:", error);
         });
+
+        return () => unsubscribeProfile();
       } else {
         setCurrentUserId(null);
         setLoading(false);
       }
     });
-    return () => unsubscribe();
+    return () => unsubscribeAuth();
   }, []);
 
+  // 2. Fetch Ads (Real-time) and their Creator Profiles
   useEffect(() => {
     const adsQuery = query(collection(db, "ads"));
-    const unsubscribe = onSnapshot(adsQuery, (snapshot) => {
+    let creatorUnsubs = {};
+
+    const unsubscribeAds = onSnapshot(adsQuery, (snapshot) => {
       const adsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setAds(adsData);
-      setLoading(false);
 
-      const creatorIds = [...new Set(adsData.map(ad => ad.createdBy).filter(Boolean))];
+      // Fetch creator profiles
+      const creatorIds = Array.from(new Set(adsData.map(ad => ad.createdBy))).filter(Boolean);
+
       creatorIds.forEach(creatorId => {
-        if (!userProfiles[creatorId]) {
-          getDoc(doc(db, 'profiles', creatorId)).then(profileDoc => {
-            if (profileDoc.exists()) setUserProfiles(prev => ({ ...prev, [creatorId]: profileDoc.data() }));
+        // Only start a new listener if we don't already have one for this creator
+        if (!creatorUnsubs[creatorId]) {
+          creatorUnsubs[creatorId] = onSnapshot(doc(db, 'profiles', creatorId), (profileSnap) => {
+            if (profileSnap.exists()) {
+              setUserProfiles(prev => ({
+                ...prev,
+                [creatorId]: profileSnap.data()
+              }));
+            }
           });
         }
       });
+
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching ads:", error);
+      setLoading(false);
     });
-    return () => unsubscribe();
-  }, [userProfiles]);
+
+    return () => {
+      unsubscribeAds();
+      // Clean up all creator profile listeners
+      Object.values(creatorUnsubs).forEach(unsub => unsub());
+    };
+  }, [currentUserId]);
 
   const applyFilters = () => { };
 

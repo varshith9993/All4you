@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { db } from "../firebase";
+import { auth, db } from "../firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck, FiUser } from "react-icons/fi";
@@ -33,7 +32,6 @@ export default function AddWorkers() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const auth = getAuth();
     const unsubscribe = auth.onAuthStateChanged((user) => {
       if (user) {
         setCurrentUser(user);

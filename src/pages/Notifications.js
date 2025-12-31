@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { db } from "../firebase";
+import { auth, db } from "../firebase";
 import {
     collection,
     query,
@@ -11,7 +11,6 @@ import {
     getDoc,
     doc
 } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import {
     FiBell,
@@ -129,7 +128,6 @@ export default function Notifications() {
     const [notifications, setNotifications] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    const auth = getAuth();
     const user = auth.currentUser;
     const navigate = useNavigate();
 

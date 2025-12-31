@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { db } from "../firebase";
-import { collection, query, onSnapshot, doc, getDoc } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+import { db, auth } from "../firebase";
+import { collection, query, onSnapshot, doc } from "firebase/firestore";
 import { FiMapPin, FiWifi, FiFilter, FiChevronDown, FiX, FiPlus, FiStar, FiSearch } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.png";
 import Layout from "../components/Layout";
@@ -555,7 +555,13 @@ function ServiceCard({ service, profile, userProfiles, currentUserId, navigate }
         {/* Left Column: Image & Type Badge */}
         <div className="flex flex-col items-center flex-shrink-0 w-16">
           <div className="relative mb-1.5">
-            <img src={displayProfileImage} alt={displayUsername} className="w-14 h-14 rounded-full object-cover border-2 border-gray-300" onError={(e) => { e.target.src = defaultAvatar; }} />
+            <img
+              src={displayProfileImage}
+              alt={displayUsername}
+              className="w-14 h-14 rounded-full object-cover border-2 border-gray-300"
+              onError={(e) => { e.target.src = defaultAvatar; }}
+              crossOrigin="anonymous"
+            />
             {isOnline && <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>}
           </div>
           <div className={`flex items-center justify-center px-1.5 py-0.5 rounded border w-full mb-1 ${isProviding ? "bg-green-50 border-green-200 text-green-700" : "bg-orange-50 border-orange-200 text-orange-700"}`}>
@@ -709,74 +715,73 @@ export default function Services() {
   });
   const navigate = useNavigate();
 
-  // Get current user authentication and profile
+  // 1. Authentication & Current User Profile
   useEffect(() => {
-    const auth = getAuth();
-    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
         setCurrentUserId(user.uid);
-        try {
-          const profileDoc = await getDoc(doc(db, 'profiles', user.uid));
-          if (profileDoc.exists()) {
-            setUserProfile(profileDoc.data());
+        // Listen to current user profile in real-time
+        const profileRef = doc(db, 'profiles', user.uid);
+        const unsubscribeProfile = onSnapshot(profileRef, (docSnap) => {
+          if (docSnap.exists()) {
+            setUserProfile(docSnap.data());
           }
-        } catch (error) {
-          console.error("Error fetching user profile:", error);
-        }
+        }, (error) => {
+          console.error("Error listening to user profile:", error);
+        });
+
+        return () => unsubscribeProfile();
+      } else {
+        setCurrentUserId(null);
+        setLoading(false);
       }
     });
     return () => unsubscribeAuth();
   }, []);
 
-  // Fetch services and profiles
+  // 2. Fetch Services (Real-time) and their Creator Profiles
   useEffect(() => {
-    setLoading(true);
-
     const q = query(collection(db, "services"));
-    const unsubscribeServices = onSnapshot(
-      q,
-      (snapshot) => {
-        const allServices = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setServices(allServices);
+    let creatorUnsubs = {};
 
-        // Get unique creator IDs
-        const creatorIds = Array.from(new Set(allServices.map(s => s.createdBy))).filter(Boolean);
+    const unsubscribeServices = onSnapshot(q, (snapshot) => {
+      const allServices = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setServices(allServices);
 
-        if (creatorIds.length === 0) {
-          setUserProfiles({});
-          setLoading(false);
-          return;
-        }
+      // Fetch creator profiles
+      const creatorIds = Array.from(new Set(allServices.map(s => s.createdBy))).filter(Boolean);
 
-        // Use onSnapshot for each profile
-        creatorIds.forEach(creatorId => {
-          onSnapshot(doc(db, 'profiles', creatorId), (profileSnap) => {
+      creatorIds.forEach(creatorId => {
+        // Only start a new listener if we don't already have one for this creator
+        if (!creatorUnsubs[creatorId]) {
+          creatorUnsubs[creatorId] = onSnapshot(doc(db, 'profiles', creatorId), (profileSnap) => {
             if (profileSnap.exists()) {
-              const profileData = profileSnap.data();
               setUserProfiles(prev => ({
                 ...prev,
-                [creatorId]: profileData
+                [creatorId]: profileSnap.data()
               }));
             }
           }, (error) => {
             console.error(`Error in profile listener for ${creatorId}:`, error);
           });
-        });
+        }
+      });
 
-        setLoading(false);
-      },
-      (error) => {
-        console.error("Error fetching services:", error);
-        setLoading(false);
-      }
-    );
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching services:", error);
+      setLoading(false);
+    });
 
-    // Cleanup function
-    return () => unsubscribeServices();
-  }, []);
+    return () => {
+      unsubscribeServices();
+      // Clean up all creator profile listeners
+      Object.values(creatorUnsubs).forEach(unsub => unsub());
+    };
+  }, [currentUserId]);
 
   // Process and display services with filtering and sorting
   const getDisplayedServices = () => {

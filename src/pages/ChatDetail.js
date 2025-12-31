@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
-import { getAuth } from "firebase/auth";
-import { db } from "../firebase";
+import { auth, db } from "../firebase";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   doc,
   getDoc,
+  getDocs,
   collection,
   query,
   orderBy,
@@ -16,6 +16,7 @@ import {
   deleteDoc,
   serverTimestamp,
   increment,
+  limit
 } from "firebase/firestore";
 import {
   FiArrowLeft,
@@ -114,13 +115,13 @@ function MessageTickIcon({ message, otherUserId, isOwnMessage }) {
 
   // Return appropriate icon
   if (tickStatus === "seen") {
-    return <MdDoneAll className="text-blue-600 text-lg ml-1" />;
+    return React.createElement(MdDoneAll, { className: "text-blue-600 text-lg ml-1" });
   } else if (tickStatus === "delivered") {
-    return <MdDoneAll className="text-gray-500 text-lg ml-1" />;
+    return React.createElement(MdDoneAll, { className: "text-gray-500 text-lg ml-1" });
   } else if (tickStatus === "sent") {
-    return <MdDone className="text-gray-600 text-lg ml-1" />;
+    return React.createElement(MdDone, { className: "text-gray-600 text-lg ml-1" });
   } else {
-    return <FiClock className="text-gray-400 text-xs ml-1" />;
+    return React.createElement(FiClock, { className: "text-gray-400 text-xs ml-1" });
   }
 }
 
@@ -143,78 +144,87 @@ function MessageActionsComponent({ message, onReply, onCopy, onEdit, onDelete, i
 
   // For deleted messages, only show delete option
   if (isDeleted) {
-    return (
-      <div className="relative" ref={menuRef}>
-        <button
-          onClick={() => setShowMenu(!showMenu)}
-          className="text-gray-400 p-1 rounded hover:bg-gray-100 transition-colors"
-        >
-          <FiMoreVertical size={14} />
-        </button>
-
-        {showMenu && (
-          <div className={`absolute ${isOwnMessage ? 'right-0' : 'left-0'} top-6 bg-white rounded-lg shadow-xl border py-1 z-50 min-w-[140px]`}>
-            <button
-              onClick={() => { onDelete(); setShowMenu(false); }}
-              className="w-full px-4 py-2 text-left hover:bg-red-50 flex items-center text-xs text-red-600"
-            >
-              <FiTrash2 className="mr-2" size={12} /> Delete
-            </button>
-          </div>
-        )}
-      </div>
+    return React.createElement(
+      "div",
+      { className: "relative", ref: menuRef },
+      React.createElement(
+        "button",
+        {
+          onClick: () => setShowMenu(!showMenu),
+          className: "text-gray-400 p-1 rounded hover:bg-gray-100 transition-colors"
+        },
+        React.createElement(FiMoreVertical, { size: 14 })
+      ),
+      showMenu && React.createElement(
+        "div",
+        { className: `absolute ${isOwnMessage ? 'right-0' : 'left-0'} top-6 bg-white rounded-lg shadow-xl border py-1 z-50 min-w-[140px]` },
+        React.createElement(
+          "button",
+          {
+            onClick: () => { onDelete(); setShowMenu(false); },
+            className: "w-full px-4 py-2 text-left hover:bg-red-50 flex items-center text-xs text-red-600"
+          },
+          React.createElement(FiTrash2, { className: "mr-2", size: 12 }),
+          " Delete"
+        )
+      )
     );
   }
 
   // Original code for non-deleted messages
-  return (
-    <div className="relative" ref={menuRef}>
-      <button
-        onClick={() => setShowMenu(!showMenu)}
-        className="text-gray-400 p-1 rounded hover:bg-gray-100 transition-colors"
-      >
-        <FiMoreVertical size={14} />
-      </button>
-
-      {showMenu && (
-        <div className={`absolute ${isOwnMessage ? 'right-0' : 'left-0'} top-6 bg-white rounded-lg shadow-xl border py-1 z-50 min-w-[140px]`}>
-          <button
-            onClick={() => { onReply(); setShowMenu(false); }}
-            className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center text-xs text-gray-700"
-          >
-            <FiCornerUpLeft className="mr-2" size={12} /> Reply
-          </button>
-
-          {message.type === 'text' && (
-            <button
-              onClick={() => { onCopy(); setShowMenu(false); }}
-              className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center text-xs text-gray-700"
-            >
-              <FiCopy className="mr-2" size={12} /> Copy
-            </button>
-          )}
-
-          {isOwnMessage && (
-            <>
-              {message.type === 'text' && (
-                <button
-                  onClick={() => { onEdit(); setShowMenu(false); }}
-                  className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center text-xs text-gray-700"
-                >
-                  <FiEdit2 className="mr-2" size={12} /> Edit
-                </button>
-              )}
-              <button
-                onClick={() => { onDelete(); setShowMenu(false); }}
-                className="w-full px-4 py-2 text-left hover:bg-red-50 flex items-center text-xs text-red-600"
-              >
-                <FiTrash2 className="mr-2" size={12} /> Delete
-              </button>
-            </>
-          )}
-        </div>
-      )}
-    </div>
+  return React.createElement(
+    "div",
+    { className: "relative", ref: menuRef },
+    React.createElement(
+      "button",
+      {
+        onClick: () => setShowMenu(!showMenu),
+        className: "text-gray-400 p-1 rounded hover:bg-gray-100 transition-colors"
+      },
+      React.createElement(FiMoreVertical, { size: 14 })
+    ),
+    showMenu && React.createElement(
+      "div",
+      { className: `absolute ${isOwnMessage ? 'right-0' : 'left-0'} top-6 bg-white rounded-lg shadow-xl border py-1 z-50 min-w-[140px]` },
+      React.createElement(
+        "button",
+        {
+          onClick: () => { onReply(); setShowMenu(false); },
+          className: "w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center text-xs text-gray-700"
+        },
+        React.createElement(FiCornerUpLeft, { className: "mr-2", size: 12 }),
+        " Reply"
+      ),
+      message.type === 'text' && React.createElement(
+        "button",
+        {
+          onClick: () => { onCopy(); setShowMenu(false); },
+          className: "w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center text-xs text-gray-700"
+        },
+        React.createElement(FiCopy, { className: "mr-2", size: 12 }),
+        " Copy"
+      ),
+      isOwnMessage && React.createElement(React.Fragment, null,
+        message.type === 'text' && React.createElement(
+          "button",
+          {
+            onClick: () => { onEdit(); setShowMenu(false); },
+            className: "w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center text-xs text-gray-700"
+          },
+          React.createElement(FiEdit2, { className: "mr-2", size: 12 }),
+          " Edit"
+        ),
+        React.createElement(
+          "button",
+          {
+            onClick: () => { onDelete(); setShowMenu(false); },
+            className: "w-full px-4 py-2 text-left hover:bg-red-50 flex items-center text-xs text-red-600"
+          },
+          React.createElement(FiTrash2, { className: "mr-2", size: 12 }),
+          " Delete"
+        )
+      )
+    )
   );
 }
 
@@ -233,41 +243,58 @@ function AudioMessage({ fileUrl, isOwnMessage }) {
     }
   };
 
-  return (
-    <div className="flex items-center gap-2 min-w-[150px]">
-      <button
-        onClick={togglePlay}
-        className={`p-2 rounded-full ${isOwnMessage ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700'}`}
-      >
-        {isPlaying ? <FiPause size={16} /> : <FiPlay size={16} />}
-      </button>
-      <div className="flex-1 h-1 bg-gray-300 rounded-full overflow-hidden mx-2">
-        <div className={`h-full ${isOwnMessage ? 'bg-blue-600' : 'bg-blue-500'} w-1/2 animate-pulse`}></div>
-      </div>
-      <audio
-        ref={audioRef}
-        src={fileUrl}
-        onEnded={() => setIsPlaying(false)}
-        className="hidden"
-      />
-    </div>
+  return React.createElement(
+    "div",
+    { className: "flex items-center gap-2 min-w-[150px]" },
+    React.createElement(
+      "button",
+      {
+        onClick: togglePlay,
+        className: `p-2 rounded-full ${isOwnMessage ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700'}`
+      },
+      isPlaying ? React.createElement(FiPause, { size: 16 }) : React.createElement(FiPlay, { size: 16 })
+    ),
+    React.createElement(
+      "div",
+      { className: "flex-1 h-1 bg-gray-300 rounded-full overflow-hidden mx-2" },
+      React.createElement("div", { className: `h-full ${isOwnMessage ? 'bg-blue-600' : 'bg-blue-500'} w-1/2 animate-pulse` })
+    ),
+    React.createElement(
+      "audio",
+      {
+        ref: audioRef,
+        src: fileUrl,
+        onEnded: () => setIsPlaying(false),
+        className: "hidden"
+      }
+    )
   );
 }
 
-
-
 function Modal({ title, children, onClose, onConfirm, confirmText = "Confirm", confirmColor = "bg-red-600" }) {
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
-      <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
-        <h3 className="text-lg font-bold mb-2">{title}</h3>
-        <div className="mb-6 text-gray-600">{children}</div>
-        <div className="flex justify-end gap-3">
-          <button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Cancel</button>
-          <button onClick={onConfirm} className={`px-4 py-2 text-white rounded-lg font-medium shadow-md ${confirmColor}`}>{confirmText}</button>
-        </div>
-      </div>
-    </div>
+  return React.createElement(
+    "div",
+    { className: "fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in" },
+    React.createElement(
+      "div",
+      { className: "bg-white rounded-xl shadow-xl max-w-sm w-full p-6" },
+      React.createElement("h3", { className: "text-lg font-bold mb-2" }, title),
+      React.createElement("div", { className: "mb-6 text-gray-600" }, children),
+      React.createElement(
+        "div",
+        { className: "flex justify-end gap-3" },
+        React.createElement(
+          "button",
+          { onClick: onClose, className: "px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium" },
+          "Cancel"
+        ),
+        React.createElement(
+          "button",
+          { onClick: onConfirm, className: `px-4 py-2 text-white rounded-lg font-medium shadow-md ${confirmColor}` },
+          confirmText
+        )
+      )
+    )
   );
 }
 
@@ -276,9 +303,15 @@ function Modal({ title, children, onClose, onConfirm, confirmText = "Confirm", c
 export default function ChatDetail() {
   const { chatId } = useParams();
   const navigate = useNavigate();
-  const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const chatContainerRef = useRef(null);
+
+  // Pagination State
+  const INITIAL_LIMIT = 20;
+  const [limitCount, setLimitCount] = useState(INITIAL_LIMIT);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const scrollRef = useRef({ scrollTop: 0, scrollHeight: 0 });
 
   // State
   const [uid, setUid] = useState("");
@@ -296,6 +329,10 @@ export default function ChatDetail() {
   const [messageToDelete, setMessageToDelete] = useState(null);
   const [viewingImage, setViewingImage] = useState(null);
 
+  // Tracking who blocked whom
+  const [isBlockedByMe, setIsBlockedByMe] = useState(false);
+  const [isBlockedByThem, setIsBlockedByThem] = useState(false);
+
   // Voice Recording State
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -304,15 +341,11 @@ export default function ChatDetail() {
   const timerRef = useRef(null);
   const isCancellingRef = useRef(false);
 
-  // Call State
-  // Removed call state variables
-
   // Modals
   const [showBlockModal, setShowBlockModal] = useState(false);
   const [showMuteModal, setShowMuteModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showDeleteMessageModal, setShowDeleteMessageModal] = useState(false);
-  const [isBlocked, setIsBlocked] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
 
   // Get other user ID
@@ -320,7 +353,6 @@ export default function ChatDetail() {
 
   // Initialize
   useEffect(() => {
-    const auth = getAuth();
     return auth.onAuthStateChanged((user) => setUid(user ? user.uid : ""));
   }, []);
 
@@ -332,59 +364,96 @@ export default function ChatDetail() {
     }
   }, [toastMessage]);
 
-  // Load Chat & Profile
+  // Load Chat, Blocking Status & Profile
   useEffect(() => {
     if (!chatId || !uid) return;
 
-    const loadData = async () => {
-      try {
-        const chatSnap = await getDoc(doc(db, "chats", chatId));
-        if (!chatSnap.exists()) {
-          navigate("/chats");
-          return;
-        }
-
-        const chatData = { id: chatSnap.id, ...chatSnap.data() };
-        setChat(chatData);
-        setIsBlocked(chatData.blockedBy?.includes(uid) || false);
-        setIsMuted(chatData.mutedBy?.includes(uid) || false);
-
-        const otherId = chatData.participants.find(x => x !== uid);
-        if (otherId) {
-          const profSnap = await getDoc(doc(db, "profiles", otherId));
-          if (profSnap.exists()) {
-            setProfile(profSnap.data());
-          }
-
-          const unsubProfile = onSnapshot(doc(db, "profiles", otherId), (snap) => {
-            if (snap.exists()) {
-              const data = snap.data();
-              setProfile(prev => ({ ...prev, ...data }));
-              const isOnline = isUserOnline(data.online, data.lastSeen);
-              setUserStatus({ online: isOnline, lastSeen: data.lastSeen });
-            }
-          });
-          return () => unsubProfile();
-        }
-      } catch (err) {
-        console.error(err);
+    // Use onSnapshot for real-time chat updates (blocking, muting)
+    const unsubChat = onSnapshot(doc(db, "chats", chatId), async (chatSnap) => {
+      if (!chatSnap.exists()) {
+        navigate("/chats");
+        return;
       }
-    };
-    loadData();
+
+      const chatData = { id: chatSnap.id, ...chatSnap.data() };
+      setChat(chatData);
+
+      const otherId = chatData.participants.find(x => x !== uid);
+
+      const meBlocked = chatData.blockedBy?.includes(uid) || false;
+      const themBlocked = otherId ? (chatData.blockedBy?.includes(otherId) || false) : false;
+
+      setIsBlockedByMe(meBlocked);
+      setIsBlockedByThem(themBlocked);
+      setIsMuted(chatData.mutedBy?.includes(uid) || false);
+
+      if (otherId) {
+        // Initial profile load
+        const profSnap = await getDoc(doc(db, "profiles", otherId));
+        if (profSnap.exists()) {
+          setProfile(profSnap.data());
+        }
+
+        // Real-time profile listener
+        const unsubProfile = onSnapshot(doc(db, "profiles", otherId), (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            setProfile(prev => ({ ...prev, ...data }));
+            const isOnline = isUserOnline(data.online, data.lastSeen);
+            setUserStatus({ online: isOnline, lastSeen: data.lastSeen });
+          }
+        });
+        return () => unsubProfile();
+      }
+    }, (err) => console.error(err));
+
+    return () => unsubChat();
   }, [chatId, uid, navigate]);
 
-  // Messages Listener
+  // Messages Listener with Pagination and Block Filtering
   useEffect(() => {
     if (!chatId || !uid) return;
 
-    const q = query(collection(db, "chats", chatId, "messages"), orderBy("createdAt", "asc"));
+    const q = query(
+      collection(db, "chats", chatId, "messages"),
+      orderBy("createdAt", "desc"),
+      limit(limitCount)
+    );
+
     const unsub = onSnapshot(q, (snap) => {
       const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setMessages(msgs);
+
+      // Requirement: Check if either user is blocked. 
+      // Filter out messages that were sent when either person was blocked, 
+      // unless I am the sender of that message and I am not the one who blocked.
+      // Actually, simplified logic based on requirements:
+      // "Blocked users cannot exchange new messages"
+      // "Messages sent by User2 while blocked should remain undelivered"
+
+      const filteredMsgs = msgs.filter(msg => {
+        // If message is not marked as blocked, everyone sees it
+        if (!msg.isBlocked) return true;
+
+        // If it IS marked as blocked, only the sender sees it
+        return msg.senderId === uid;
+      });
+
+      setMessages(filteredMsgs);
+      setHasMore(snap.docs.length >= limitCount);
+      setIsLoadingMore(false);
+
+      // Preserve scroll position when loading more (adjusted for column-reverse)
+      if (isLoadingMore && chatContainerRef.current) {
+        const newHeight = chatContainerRef.current.scrollHeight;
+        const diff = newHeight - scrollRef.current.scrollHeight;
+        // In column-reverse, we want to maintain the visual position relative to the bottom (newest messages)
+        // So, we adjust scrollTop by the difference in height.
+        chatContainerRef.current.scrollTop = scrollRef.current.scrollTop + diff;
+      }
     });
 
     return () => unsub();
-  }, [chatId, uid]);
+  }, [chatId, uid, limitCount, isBlockedByMe, isBlockedByThem, isLoadingMore]);
 
   // Update message delivery and seen status when user views chat
   useEffect(() => {
@@ -469,16 +538,38 @@ export default function ChatDetail() {
 
   // Scroll handling
   useEffect(() => {
-    if (isAtBottom && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    // Basic at-bottom detection for the floating button
+    // In column-reverse, 0 is the bottom.
+    if (chatContainerRef.current && !isLoadingMore) {
+      // When new messages arrive, if we were at the bottom, stay at the bottom.
+      // In column-reverse, "bottom" is scrollTop = 0.
+      if (isAtBottom) {
+        chatContainerRef.current.scrollTop = 0;
+      }
     }
-  }, [messages, isAtBottom]);
+  }, [messages, isAtBottom, isLoadingMore]);
 
   const handleScroll = () => {
     if (chatContainerRef.current) {
-      const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
-      setIsAtBottom(scrollHeight - scrollTop - clientHeight < 100);
+      const { scrollTop } = chatContainerRef.current;
+      // In column-reverse, scrollTop near 0 means we are at the bottom (newest messages)
+      setIsAtBottom(scrollTop < 100);
     }
+  };
+
+  const handleLoadMore = () => {
+    if (!hasMore || isLoadingMore) return;
+
+    setIsLoadingMore(true);
+    // Capture current scroll state
+    if (chatContainerRef.current) {
+      scrollRef.current = {
+        scrollTop: chatContainerRef.current.scrollTop,
+        scrollHeight: chatContainerRef.current.scrollHeight
+      };
+    }
+
+    setLimitCount(prev => prev + INITIAL_LIMIT);
   };
 
   // --- Actions ---
@@ -486,7 +577,7 @@ export default function ChatDetail() {
   const handleBlock = async () => {
     try {
       await updateDoc(doc(db, "chats", chatId), { blockedBy: arrayUnion(uid) });
-      setIsBlocked(true);
+      setIsBlockedByMe(true);
       setToastMessage("User blocked");
     } catch (e) { console.error(e); setToastMessage("Error blocking user"); }
     setShowBlockModal(false);
@@ -495,7 +586,7 @@ export default function ChatDetail() {
   const handleUnblock = async () => {
     try {
       await updateDoc(doc(db, "chats", chatId), { blockedBy: arrayRemove(uid) });
-      setIsBlocked(false);
+      setIsBlockedByMe(false);
       setToastMessage("User unblocked");
     } catch (e) { console.error(e); setToastMessage("Error unblocking user"); }
   };
@@ -689,7 +780,10 @@ export default function ChatDetail() {
   };
 
   const sendMessageInternal = async ({ type, text, fileUrl = "" }) => {
-    if (isBlocked) return;
+    if (isBlockedByMe) {
+      setToastMessage("Unblock to send messages");
+      return;
+    }
 
     const msgData = {
       text,
@@ -697,8 +791,8 @@ export default function ChatDetail() {
       createdAt: serverTimestamp(),
       type,
       fileUrl,
-      deliveredTo: [uid], // Initially delivered to sender (you)
-      // Don't include seenBy initially for the recipient
+      deliveredTo: [uid],
+      isBlocked: isBlockedByThem, // Requirement: Messages sent while blocked remain undelivered
       replyTo: replyTo ? {
         id: replyTo.id,
         text: replyTo.text,
@@ -710,13 +804,15 @@ export default function ChatDetail() {
     try {
       await addDoc(collection(db, "chats", chatId, "messages"), msgData);
 
-      const otherUser = chat.participants.find(x => x !== uid);
-      await updateDoc(doc(db, "chats", chatId), {
-        lastMessage: text,
-        lastSenderId: uid,
-        updatedAt: serverTimestamp(),
-        [`unseenCounts.${otherUser}`]: increment(1)
-      });
+      // If NOT blocked, update chat meta and unseen counts
+      if (!isBlockedByThem && otherUserId) {
+        await updateDoc(doc(db, "chats", chatId), {
+          lastMessage: text,
+          lastSenderId: uid,
+          updatedAt: serverTimestamp(),
+          [`unseenCounts.${otherUserId}`]: increment(1)
+        });
+      }
 
       setReplyTo(null);
 
@@ -726,10 +822,11 @@ export default function ChatDetail() {
           try {
             // Get the latest message (the one we just sent)
             const q = query(collection(db, "chats", chatId, "messages"), orderBy("createdAt", "desc"), orderBy("senderId"));
-            const querySnapshot = await getDoc(q);
-            if (querySnapshot.exists()) {
-              await updateDoc(doc(db, "chats", chatId, "messages", querySnapshot.id), {
-                deliveredTo: arrayUnion(otherUser)
+            const querySnapshot = await getDocs(q);
+            if (!querySnapshot.empty && otherUserId) {
+              const latestMsgDoc = querySnapshot.docs[0];
+              await updateDoc(doc(db, "chats", chatId, "messages", latestMsgDoc.id), {
+                deliveredTo: arrayUnion(otherUserId)
               });
             }
           } catch (error) {
@@ -744,313 +841,490 @@ export default function ChatDetail() {
     }
   };
 
-  // --- Call Logic Removed ---
-
   // --- Render ---
 
-  return (
-    <div className="flex flex-col h-screen bg-white max-w-md mx-auto shadow-2xl relative">
-      {viewingImage && (
-        <div className="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center p-4 animate-fade-in">
-          <button
-            onClick={() => setViewingImage(null)}
-            className="absolute top-4 right-4 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors"
-          >
-            <FiX size={24} />
-          </button>
-          <img
-            src={viewingImage}
-            alt="Full view"
-            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
-          />
-        </div>
-      )}
+  // Create message elements
+  const messageElements = messages.map((msg, index) => {
+    const isOwn = msg.senderId === uid;
+    const dateLabel = getDateLabel(msg.createdAt);
+    const nextMsg = messages[index + 1];
+    const showDate = !nextMsg || getDateLabel(nextMsg.createdAt) !== dateLabel;
 
-      {showBlockModal && (
-        <Modal
-          title="Block User"
-          onClose={() => setShowBlockModal(false)}
-          onConfirm={handleBlock}
-          confirmText="Block"
-        >
-          Are you sure you want to block this user? You won't receive any messages from them.
-        </Modal>
-      )}
+    return React.createElement(
+      React.Fragment,
+      { key: msg.id },
+      React.createElement(
+        "div",
+        { className: `flex w-full ${isOwn ? 'justify-end' : 'justify-start'} group mb-0.5` },
+        // For non-deleted messages from others
+        !msg.isDeleted && !isOwn && React.createElement(
+          MessageActionsComponent,
+          {
+            message: msg,
+            onReply: () => setReplyTo(msg),
+            onCopy: () => { navigator.clipboard.writeText(msg.text); setToastMessage("Copied") },
+            onEdit: () => handleEditMessage(msg),
+            onDelete: () => handleDeleteMessageRequest(msg),
+            isOwnMessage: false
+          }
+        ),
+        // For deleted messages from others
+        msg.isDeleted && !isOwn && React.createElement(
+          MessageActionsComponent,
+          {
+            message: msg,
+            onDelete: () => handleDeleteMessageRequest(msg),
+            isOwnMessage: false
+          }
+        ),
+        React.createElement(
+          "div",
+          { className: `max-w-[75%] relative ${isOwn ? 'items-end' : 'items-start'} flex flex-col` },
+          msg.replyTo && !msg.isDeleted && React.createElement(
+            "div",
+            { className: `text-xs mb-1 px-3 py-2 rounded-lg bg-gray-200/50 border-l-4 ${isOwn ? 'border-blue-500' : 'border-gray-500'} w-full` },
+            React.createElement(
+              "p",
+              { className: "font-bold opacity-70" },
+              msg.replyTo.senderId === uid ? 'You' : profile.username
+            ),
+            React.createElement(
+              "p",
+              { className: "truncate opacity-60" },
+              msg.replyTo.type === 'audio' ? 'Voice Message' : msg.replyTo.text
+            )
+          ),
+          React.createElement(
+            "div",
+            {
+              className: `px-3 py-2 rounded-lg shadow-sm relative min-w-[100px] ${isOwn
+                ? 'bg-[#d1e4f9] text-gray-900 rounded-tr-none'
+                : 'bg-white text-gray-900 rounded-tl-none border border-gray-100'
+                }`
+            },
+            msg.isDeleted ? React.createElement(
+              "div",
+              { className: "flex items-center gap-2 text-gray-500 italic text-sm" },
+              React.createElement(FiSlash, { size: 14 }),
+              " This message was deleted"
+            ) : React.createElement(React.Fragment, null,
+              msg.type === 'text' && React.createElement(
+                "p",
+                { className: "whitespace-pre-wrap text-sm leading-relaxed pr-2 pb-1" },
+                msg.text
+              ),
+              msg.type === 'image' && React.createElement(
+                "img",
+                {
+                  src: msg.fileUrl,
+                  alt: "Shared",
+                  onClick: () => setViewingImage(msg.fileUrl),
+                  className: "rounded-lg max-h-60 object-cover cursor-pointer hover:opacity-95 transition-opacity",
+                  crossOrigin: "anonymous"
+                }
+              ),
+              msg.type === 'audio' && React.createElement(
+                AudioMessage,
+                { fileUrl: msg.fileUrl, isOwnMessage: isOwn }
+              ),
+              msg.type === 'file' && React.createElement(
+                "a",
+                {
+                  href: msg.fileUrl,
+                  target: "_blank",
+                  rel: "noreferrer",
+                  className: "flex items-center gap-2 text-sm underline opacity-90 hover:opacity-100"
+                },
+                React.createElement(FiFile, { size: 16 }),
+                " ",
+                msg.text
+              )
+            ),
+            React.createElement(
+              "div",
+              { className: `flex items-center justify-end gap-1 mt-1 float-right ml-2` },
+              msg.isEdited && !msg.isDeleted && React.createElement(
+                "span",
+                { className: "text-[10px] text-gray-500 italic" },
+                "(edited)"
+              ),
+              React.createElement(
+                "span",
+                { className: "text-[10px] text-gray-500" },
+                formatTime(msg.createdAt)
+              ),
+              // WhatsApp-like tick system
+              React.createElement(
+                MessageTickIcon,
+                {
+                  message: msg,
+                  otherUserId: otherUserId,
+                  isOwnMessage: isOwn
+                }
+              )
+            )
+          )
+        ),
+        // For your own messages (both deleted and non-deleted)
+        isOwn && React.createElement(
+          MessageActionsComponent,
+          {
+            message: msg,
+            onReply: () => !msg.isDeleted && setReplyTo(msg),
+            onCopy: () => !msg.isDeleted && navigator.clipboard.writeText(msg.text),
+            onEdit: () => !msg.isDeleted && handleEditMessage(msg),
+            onDelete: () => handleDeleteMessageRequest(msg),
+            isOwnMessage: true
+          }
+        )
+      ),
+      showDate && React.createElement(
+        "div",
+        { className: "flex justify-center my-4" },
+        React.createElement(
+          "span",
+          { className: "text-gray-500 text-xs font-medium" },
+          dateLabel
+        )
+      )
+    );
+  });
 
-      {showMuteModal && (
-        <Modal
-          title="Mute Notifications"
-          onClose={() => setShowMuteModal(false)}
-          onConfirm={handleMute}
-          confirmText="Mute"
-          confirmColor="bg-yellow-600"
-        >
-          Are you sure you want to mute notifications for this chat?
-        </Modal>
-      )}
-
-      {showDeleteModal && (
-        <Modal
-          title="Delete Chat"
-          onClose={() => setShowDeleteModal(false)}
-          onConfirm={handleDeleteChat}
-          confirmText="Delete"
-        >
-          Are you sure you want to delete this chat? This action cannot be undone.
-        </Modal>
-      )}
-
-      {showDeleteMessageModal && (
-        <Modal
-          title="Delete Message"
-          onClose={() => setShowDeleteMessageModal(false)}
-          onConfirm={confirmDeleteMessage}
-          confirmText="Delete"
-        >
-          Are you sure you want to delete this message? This cannot be undone.
-        </Modal>
-      )}
-
-      <header className="bg-white px-4 py-3 flex items-center justify-between border-b sticky top-0 z-20">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="text-gray-800 hover:bg-gray-100 p-2 rounded-full transition-colors">
-            <FiArrowLeft size={20} />
-          </button>
-          <div className="relative">
-            <img
-              src={profile.photoURL || profile.profileImage || defaultProfile}
-              alt={profile.username}
-              className="w-10 h-10 rounded-full object-cover border border-gray-200"
-            />
-            {userStatus.online && (
-              <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
-            )}
-          </div>
-          <div>
-            <h1 className="font-bold text-sm text-gray-900">{profile.username || "User"}</h1>
-            <p className={`text-xs ${userStatus.online ? 'text-green-600 font-medium' : 'text-gray-500'}`}>
-              {userStatus.online ? 'Active now' : `Last seen: ${formatLastSeen(userStatus.lastSeen)}`}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1">
-
-          <button onClick={() => setShowOptions(!showOptions)} className="p-2 text-gray-800 hover:bg-gray-100 rounded-full transition-colors relative">
-            <FiMoreVertical size={20} />
-            {showOptions && (
-              <div className="absolute right-0 top-10 bg-white rounded-xl shadow-xl border py-2 z-30 w-48 animate-fade-in">
-                {isBlocked ? (
-                  <button onClick={handleUnblock} className="w-full px-4 py-2 text-left text-green-600 hover:bg-green-50 text-sm font-medium">Unblock User</button>
-                ) : (
-                  <button onClick={() => { setShowBlockModal(true); setShowOptions(false); }} className="w-full px-4 py-2 text-left text-red-600 hover:bg-red-50 text-sm font-medium">Block User</button>
-                )}
-
-                {isMuted ? (
-                  <button onClick={() => { handleUnmute(); setShowOptions(false); }} className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50 text-sm">Unmute Notifications</button>
-                ) : (
-                  <button onClick={() => { setShowMuteModal(true); setShowOptions(false); }} className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50 text-sm">Mute Notifications</button>
-                )}
-
-                <button onClick={() => { setShowDeleteModal(true); setShowOptions(false); }} className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50 text-sm">Delete Chat</button>
-              </div>
-            )}
-          </button>
-        </div>
-      </header>
-
-      <div
-        ref={chatContainerRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto bg-white p-4 space-y-2"
-      >
-        {messages.map((msg, index) => {
-          const isOwn = msg.senderId === uid;
-          const dateLabel = getDateLabel(msg.createdAt);
-          const prevDateLabel = index > 0 ? getDateLabel(messages[index - 1].createdAt) : null;
-          const showDate = dateLabel !== prevDateLabel;
-
-          return (
-            <React.Fragment key={msg.id}>
-              {showDate && (
-                <div className="flex justify-center my-4">
-                  <span className="text-gray-500 text-xs font-medium">
-                    {dateLabel}
-                  </span>
-                </div>
-              )}
-
-              <div className={`flex w-full ${isOwn ? 'justify-end' : 'justify-start'} group mb-0.5`}>
-                {/* For non-deleted messages from others */}
-                {!msg.isDeleted && !isOwn && (
-                  <MessageActionsComponent
-                    message={msg}
-                    onReply={() => setReplyTo(msg)}
-                    onCopy={() => { navigator.clipboard.writeText(msg.text); setToastMessage("Copied") }}
-                    isOwnMessage={false}
-                  />
-                )}
-
-                {/* For deleted messages from others */}
-                {msg.isDeleted && !isOwn && (
-                  <MessageActionsComponent
-                    message={msg}
-                    onDelete={() => handleDeleteMessageRequest(msg)}
-                    isOwnMessage={false}
-                  />
-                )}
-
-                <div className={`max-w-[75%] relative ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
-                  {msg.replyTo && !msg.isDeleted && (
-                    <div className={`text-xs mb-1 px-3 py-2 rounded-lg bg-gray-200/50 border-l-4 ${isOwn ? 'border-blue-500' : 'border-gray-500'} w-full`}>
-                      <p className="font-bold opacity-70">{msg.replyTo.senderId === uid ? 'You' : profile.username}</p>
-                      <p className="truncate opacity-60">{msg.replyTo.type === 'audio' ? 'Voice Message' : msg.replyTo.text}</p>
-                    </div>
-                  )}
-
-                  <div className={`px-3 py-2 rounded-lg shadow-sm relative min-w-[100px] ${isOwn
-                    ? 'bg-[#d1e4f9] text-gray-900 rounded-tr-none'
-                    : 'bg-white text-gray-900 rounded-tl-none border border-gray-100'
-                    }`}>
-
-                    {msg.isDeleted ? (
-                      <div className="flex items-center gap-2 text-gray-500 italic text-sm">
-                        <FiSlash size={14} /> This message was deleted
-                      </div>
-                    ) : (
-                      <>
-                        {msg.type === 'text' && <p className="whitespace-pre-wrap text-sm leading-relaxed pr-2 pb-1">{msg.text}</p>}
-
-                        {msg.type === 'image' && (
-                          <img
-                            src={msg.fileUrl}
-                            alt="Shared"
-                            onClick={() => setViewingImage(msg.fileUrl)}
-                            className="rounded-lg max-h-60 object-cover cursor-pointer hover:opacity-95 transition-opacity"
-                          />
-                        )}
-
-                        {msg.type === 'audio' && (
-                          <AudioMessage fileUrl={msg.fileUrl} isOwnMessage={isOwn} />
-                        )}
-
-                        {msg.type === 'file' && (
-                          <a href={msg.fileUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sm underline opacity-90 hover:opacity-100">
-                            <FiFile size={16} /> {msg.text}
-                          </a>
-                        )}
-                      </>
-                    )}
-
-                    <div className={`flex items-center justify-end gap-1 mt-1 float-right ml-2`}>
-                      {msg.isEdited && !msg.isDeleted && <span className="text-[10px] text-gray-500 italic">(edited)</span>}
-                      <span className="text-[10px] text-gray-500">{formatTime(msg.createdAt)}</span>
-                      {/* WhatsApp-like tick system */}
-                      <MessageTickIcon
-                        message={msg}
-                        otherUserId={otherUserId}
-                        isOwnMessage={isOwn}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* For your own messages (both deleted and non-deleted) */}
-                {isOwn && (
-                  <MessageActionsComponent
-                    message={msg}
-                    onReply={() => !msg.isDeleted && setReplyTo(msg)}
-                    onCopy={() => !msg.isDeleted && navigator.clipboard.writeText(msg.text)}
-                    onEdit={() => !msg.isDeleted && handleEditMessage(msg)}
-                    onDelete={() => handleDeleteMessageRequest(msg)}
-                    isOwnMessage={true}
-                  />
-                )}
-              </div>
-            </React.Fragment>
-          );
-        })}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {!isAtBottom && (
-        <button
-          onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })}
-          className="absolute bottom-20 right-4 bg-white p-2 rounded-full shadow-lg border text-blue-600 hover:bg-blue-50 transition-all z-10"
-        >
-          <FiArrowLeft className="-rotate-90" />
-        </button>
-      )}
-
-      <div className="bg-white border-t p-2">
-        {replyTo && (
-          <div className="flex items-center justify-between bg-gray-50 p-2 rounded-lg mb-2 border-l-4 border-blue-500">
-            <div className="text-xs">
-              <span className="font-bold text-blue-600">Replying to {replyTo.senderId === uid ? 'yourself' : profile.username}</span>
-              <p className="text-gray-500 truncate max-w-[200px]">{replyTo.type === 'audio' ? 'Voice Message' : replyTo.text}</p>
-            </div>
-            <button onClick={() => setReplyTo(null)}><FiX size={16} className="text-gray-400 hover:text-gray-600" /></button>
-          </div>
-        )}
-
-        {editingId && (
-          <div className="flex items-center justify-between bg-yellow-50 p-2 rounded-lg mb-2 border-l-4 border-yellow-500">
-            <div className="text-xs">
-              <span className="font-bold text-yellow-600">Editing Message</span>
-            </div>
-            <button onClick={() => { setEditingId(null); setText(""); }}><FiX size={16} className="text-gray-400 hover:text-gray-600" /></button>
-          </div>
-        )}
-
-        {isRecording ? (
-          <div className="flex items-center gap-3 bg-red-50 p-2 rounded-full animate-pulse border border-red-100">
-            <FiMic className="text-red-500 ml-2" size={20} />
-            <span className="flex-1 font-mono text-red-600 font-medium">{formatRecordingTime(recordingTime)}</span>
-            <button onClick={cancelRecording} className="p-2 text-gray-500 hover:text-gray-700"><FiTrash2 size={20} /></button>
-            <button onClick={stopRecording} className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600 shadow-sm"><FiSend size={18} /></button>
-          </div>
-        ) : (
-          <form onSubmit={handleTextSend} className="flex items-center gap-2">
-            <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileSelect} className="hidden" disabled={uploading} />
-
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors shadow-sm"
-              disabled={uploading}
-            >
-              <MdAdd size={24} />
-            </button>
-
-            <div className="flex-1 relative">
-              <input
-                type="text"
-                value={text}
-                onChange={e => setText(e.target.value)}
-                placeholder="Type a message..."
-                disabled={uploading}
-                className="w-full bg-white border border-gray-200 focus:border-blue-500 rounded-full px-4 py-2 text-sm transition-all outline-none shadow-sm"
-              />
-            </div>
-
-            {text.trim() ? (
-              <button type="submit" disabled={uploading} className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 shadow-md transition-all transform hover:scale-105 disabled:opacity-50 disabled:scale-100">
-                <FiSend size={20} className="ml-0.5" />
-              </button>
-            ) : (
-              <button type="button" onClick={startRecording} disabled={uploading} className="p-2 text-blue-600 hover:bg-blue-50 rounded-full transition-colors disabled:opacity-50">
-                <MdMic size={28} />
-              </button>
-            )}
-          </form>
-        )}
-      </div>
-
-      {toastMessage && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-6 py-3 rounded-full text-sm font-medium shadow-lg animate-fade-in z-50">
-          {toastMessage}
-        </div>
-      )}
-    </div>
+  return React.createElement(
+    "div",
+    { className: "flex flex-col h-screen bg-white max-w-md mx-auto shadow-2xl relative" },
+    viewingImage && React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black/95 z-[60] flex items-center justify-center p-4 animate-fade-in" },
+      React.createElement(
+        "button",
+        {
+          onClick: () => setViewingImage(null),
+          className: "absolute top-4 right-4 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors"
+        },
+        React.createElement(FiX, { size: 24 })
+      ),
+      React.createElement(
+        "img",
+        {
+          src: viewingImage,
+          alt: "Full view",
+          className: "max-w-full max-h-full object-contain rounded-lg shadow-2xl",
+          crossOrigin: "anonymous"
+        }
+      )
+    ),
+    showBlockModal && React.createElement(
+      Modal,
+      {
+        title: "Block User",
+        onClose: () => setShowBlockModal(false),
+        onConfirm: handleBlock,
+        confirmText: "Block"
+      },
+      "Are you sure you want to block this user? You won't receive any messages from them."
+    ),
+    showMuteModal && React.createElement(
+      Modal,
+      {
+        title: "Mute Notifications",
+        onClose: () => setShowMuteModal(false),
+        onConfirm: handleMute,
+        confirmText: "Mute",
+        confirmColor: "bg-yellow-600"
+      },
+      "Are you sure you want to mute notifications for this chat?"
+    ),
+    showDeleteModal && React.createElement(
+      Modal,
+      {
+        title: "Delete Chat",
+        onClose: () => setShowDeleteModal(false),
+        onConfirm: handleDeleteChat,
+        confirmText: "Delete"
+      },
+      "Are you sure you want to delete this chat? This action cannot be undone."
+    ),
+    showDeleteMessageModal && React.createElement(
+      Modal,
+      {
+        title: "Delete Message",
+        onClose: () => setShowDeleteMessageModal(false),
+        onConfirm: confirmDeleteMessage,
+        confirmText: "Delete"
+      },
+      "Are you sure you want to delete this message? This cannot be undone."
+    ),
+    React.createElement(
+      "header",
+      { className: "bg-white px-4 py-3 flex items-center justify-between border-b sticky top-0 z-20" },
+      React.createElement(
+        "div",
+        { className: "flex items-center gap-3" },
+        React.createElement(
+          "button",
+          {
+            onClick: () => navigate(-1),
+            className: "text-gray-800 hover:bg-gray-100 p-2 rounded-full transition-colors"
+          },
+          React.createElement(FiArrowLeft, { size: 20 })
+        ),
+        React.createElement(
+          "div",
+          { className: "relative" },
+          React.createElement(
+            "img",
+            {
+              src: profile.photoURL || profile.profileImage || defaultProfile,
+              alt: profile.username,
+              className: "w-10 h-10 rounded-full object-cover border border-gray-200",
+              crossOrigin: "anonymous"
+            }
+          ),
+          userStatus.online && React.createElement(
+            "div",
+            { className: "absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white" }
+          )
+        ),
+        React.createElement(
+          "div",
+          null,
+          React.createElement(
+            "h1",
+            { className: "font-bold text-sm text-gray-900" },
+            profile.username || "User"
+          ),
+          React.createElement(
+            "p",
+            { className: `text-xs ${isBlockedByMe ? 'text-red-500 font-medium' : isBlockedByThem ? 'text-transparent' : userStatus.online ? 'text-green-600 font-medium' : 'text-gray-500'}` },
+            isBlockedByMe ? 'Blocked' : isBlockedByThem ? ' ' : userStatus.online ? 'Active now' : `Last seen: ${formatLastSeen(userStatus.lastSeen)}`
+          )
+        )
+      ),
+      React.createElement(
+        "div",
+        { className: "flex items-center gap-1" },
+        // FIXED: Use a div wrapper for the three dots button and dropdown
+        React.createElement(
+          "div",
+          { className: "relative" },
+          React.createElement(
+            "button",
+            {
+              onClick: () => setShowOptions(!showOptions),
+              className: "p-2 text-gray-800 hover:bg-gray-100 rounded-full transition-colors"
+            },
+            React.createElement(FiMoreVertical, { size: 20 })
+          ),
+          showOptions && React.createElement(
+            "div",
+            {
+              className: "absolute right-0 top-10 bg-white rounded-xl shadow-xl border py-2 z-30 w-48 animate-fade-in"
+            },
+            isBlockedByMe ? React.createElement(
+              "button",
+              {
+                onClick: () => { handleUnblock(); setShowOptions(false); },
+                className: "w-full px-4 py-2 text-left text-green-600 hover:bg-green-50 text-sm font-medium"
+              },
+              "Unblock User"
+            ) : React.createElement(
+              "button",
+              {
+                onClick: () => { setShowBlockModal(true); setShowOptions(false); },
+                className: "w-full px-4 py-2 text-left text-red-600 hover:bg-red-50 text-sm font-medium"
+              },
+              "Block User"
+            ),
+            isMuted ? React.createElement(
+              "button",
+              {
+                onClick: () => { handleUnmute(); setShowOptions(false); },
+                className: "w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50 text-sm"
+              },
+              "Unmute Notifications"
+            ) : React.createElement(
+              "button",
+              {
+                onClick: () => { setShowMuteModal(true); setShowOptions(false); },
+                className: "w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50 text-sm"
+              },
+              "Mute Notifications"
+            ),
+            React.createElement(
+              "button",
+              {
+                onClick: () => { setShowDeleteModal(true); setShowOptions(false); },
+                className: "w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50 text-sm"
+              },
+              "Delete Chat"
+            )
+          )
+        )
+      )
+    ),
+    React.createElement(
+      "div",
+      {
+        ref: chatContainerRef,
+        onScroll: handleScroll,
+        className: "flex-1 overflow-y-auto bg-white p-4 space-y-2 flex flex-col-reverse"
+      },
+      messageElements,
+      hasMore && React.createElement(
+        "div",
+        { className: "flex justify-center py-2" },
+        React.createElement(
+          "button",
+          {
+            onClick: handleLoadMore,
+            disabled: isLoadingMore,
+            className: "text-xs text-blue-600 bg-blue-50 px-3 py-1 rounded-full hover:bg-blue-100 transition-colors disabled:opacity-50"
+          },
+          isLoadingMore ? "Loading..." : "Load More Messages"
+        )
+      )
+    ),
+    !isAtBottom && React.createElement(
+      "button",
+      {
+        onClick: () => {
+          if (chatContainerRef.current) chatContainerRef.current.scrollTop = 0;
+        },
+        className: "absolute bottom-20 right-4 bg-white p-2 rounded-full shadow-lg border text-blue-600 hover:bg-blue-50 transition-all z-10"
+      },
+      React.createElement(FiArrowLeft, { className: "-rotate-90" })
+    ),
+    React.createElement(
+      "div",
+      { className: "bg-white border-t p-2" },
+      replyTo && React.createElement(
+        "div",
+        { className: "flex items-center justify-between bg-gray-50 p-2 rounded-lg mb-2 border-l-4 border-blue-500" },
+        React.createElement(
+          "div",
+          { className: "text-xs" },
+          React.createElement(
+            "span",
+            { className: "font-bold text-blue-600" },
+            `Replying to ${replyTo.senderId === uid ? 'yourself' : profile.username}`
+          ),
+          React.createElement(
+            "p",
+            { className: "text-gray-500 truncate max-w-[200px]" },
+            replyTo.type === 'audio' ? 'Voice Message' : replyTo.text
+          )
+        ),
+        React.createElement(
+          "button",
+          { onClick: () => setReplyTo(null) },
+          React.createElement(FiX, { size: 16, className: "text-gray-400 hover:text-gray-600" })
+        )
+      ),
+      editingId && React.createElement(
+        "div",
+        { className: "flex items-center justify-between bg-yellow-50 p-2 rounded-lg mb-2 border-l-4 border-yellow-500" },
+        React.createElement(
+          "div",
+          { className: "text-xs" },
+          React.createElement(
+            "span",
+            { className: "font-bold text-yellow-600" },
+            "Editing Message"
+          )
+        ),
+        React.createElement(
+          "button",
+          { onClick: () => { setEditingId(null); setText(""); } },
+          React.createElement(FiX, { size: 16, className: "text-gray-400 hover:text-gray-600" })
+        )
+      ),
+      isRecording ? React.createElement(
+        "div",
+        { className: "flex items-center gap-3 bg-red-50 p-2 rounded-full animate-pulse border border-red-100" },
+        React.createElement(FiMic, { className: "text-red-500 ml-2", size: 20 }),
+        React.createElement("span", { className: "flex-1 font-mono text-red-600 font-medium" }, formatRecordingTime(recordingTime)),
+        React.createElement(
+          "button",
+          {
+            onClick: cancelRecording,
+            className: "p-2 text-gray-500 hover:text-gray-700"
+          },
+          React.createElement(FiTrash2, { size: 20 })
+        ),
+        React.createElement(
+          "button",
+          {
+            onClick: stopRecording,
+            className: "p-2 bg-red-500 text-white rounded-full hover:bg-red-600 shadow-sm"
+          },
+          React.createElement(FiSend, { size: 18 })
+        )
+      ) : React.createElement(
+        "div",
+        { className: "flex-1" },
+        isBlockedByMe ? React.createElement(
+          "div",
+          { className: "w-full bg-gray-50 border border-gray-200 rounded-full px-4 py-2 text-sm text-gray-500 text-center" },
+          "You have blocked this user"
+        ) : React.createElement(
+          "form",
+          { onSubmit: handleTextSend, className: "flex items-center gap-2" },
+          React.createElement("input", {
+            type: "file",
+            accept: "image/*",
+            ref: fileInputRef,
+            onChange: handleFileSelect,
+            className: "hidden",
+            disabled: uploading
+          }),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              onClick: () => fileInputRef.current?.click(),
+              className: "p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors shadow-sm",
+              disabled: uploading
+            },
+            React.createElement(MdAdd, { size: 24 })
+          ),
+          React.createElement(
+            "div",
+            { className: "flex-1 relative" },
+            React.createElement("input", {
+              type: "text",
+              value: text,
+              onChange: e => setText(e.target.value),
+              placeholder: isBlockedByThem ? "Sending restricted..." : "Type a message...",
+              disabled: uploading,
+              className: "w-full bg-white border border-gray-200 focus:border-blue-500 rounded-full px-4 py-2 text-sm transition-all outline-none shadow-sm"
+            })
+          ),
+          text.trim() ? React.createElement(
+            "button",
+            {
+              type: "submit",
+              disabled: uploading,
+              className: "p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 shadow-md transition-all transform hover:scale-105 disabled:opacity-50 disabled:scale-100"
+            },
+            React.createElement(FiSend, { size: 20, className: "ml-0.5" })
+          ) : React.createElement(
+            "button",
+            {
+              type: "button",
+              onClick: startRecording,
+              disabled: uploading,
+              className: "p-2 text-blue-600 hover:bg-blue-50 rounded-full transition-colors disabled:opacity-50"
+            },
+            React.createElement(MdMic, { size: 28 })
+          )
+        )
+      )
+    ),
+    toastMessage && React.createElement(
+      "div",
+      { className: "fixed bottom-20 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-6 py-3 rounded-full text-sm font-medium shadow-lg animate-fade-in z-50" },
+      toastMessage
+    )
   );
 }

@@ -34,6 +34,7 @@ export default function ProfileDetail() {
           src={worker.avatarUrl || "/default-user.png"}
           alt={worker.name || "Profile"}
           className="w-20 h-20 rounded-full border mr-4"
+          crossOrigin="anonymous"
         />
         <div>
           <h2 className="text-2xl font-bold">{worker.title || "Untitled"}</h2>
@@ -65,6 +66,7 @@ export default function ProfileDetail() {
               src={url}
               alt={`File ${idx + 1}`}
               className="w-24 h-24 border rounded"
+              crossOrigin="anonymous"
             />
           ))}
         </div>

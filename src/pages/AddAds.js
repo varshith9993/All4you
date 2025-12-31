@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { db } from "../firebase";
-import { collection, addDoc, serverTimestamp, getDoc, doc } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { auth, db } from "../firebase";
+import {
+  doc,
+  getDoc,
+  addDoc,
+  collection,
+  serverTimestamp
+} from "firebase/firestore";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck } from "react-icons/fi";
@@ -34,7 +39,6 @@ export default function AddAds() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const auth = getAuth();
     const unsubscribe = auth.onAuthStateChanged((user) => {
       if (user) {
         setCurrentUser(user);

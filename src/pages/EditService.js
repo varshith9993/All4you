@@ -299,6 +299,7 @@ export default function EditService() {
                                     src={profilePhoto ? URL.createObjectURL(profilePhoto) : existingProfilePhotoUrl || defaultAvatar}
                                     alt="Profile"
                                     className="w-24 h-24 rounded-full object-cover border-4 border-white shadow-lg"
+                                    crossOrigin="anonymous"
                                 />
                                 <label className="absolute bottom-0 right-0 bg-indigo-600 text-white p-2 rounded-full cursor-pointer shadow-md hover:bg-indigo-700 transition-colors">
                                     <FiCamera size={16} />
@@ -524,6 +525,7 @@ export default function EditService() {
                                                     src={displayUrl}
                                                     alt={`Upload ${idx + 1}`}
                                                     className="w-full h-24 object-cover rounded-lg border border-gray-200"
+                                                    crossOrigin="anonymous"
                                                 />
                                             ) : (
                                                 <div className="w-full h-24 bg-gray-50 rounded-lg border border-gray-200 flex flex-col items-center justify-center p-2">
