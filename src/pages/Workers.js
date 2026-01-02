@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { db, auth } from "../firebase";
@@ -6,6 +6,12 @@ import { collection, query, onSnapshot, doc } from "firebase/firestore";
 import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiPlus, FiWifi, FiSearch } from "react-icons/fi";
 import Layout from "../components/Layout";
 import defaultAvatar from "../assets/images/default_profile.png";
+import {  buildFuseIndex,
+  performSearch,
+  reRankByRelevance,
+  getWorkerSearchKeys,
+  prepareWorkerForSearch,
+} from "../utils/searchEngine";
 
 // --- Helper Functions ---
 
@@ -526,12 +532,29 @@ export default function Workers() {
     };
   }, [currentUserId]);
 
-  // Process and display workers with filtering and sorting - SIMPLIFIED
+  // 3. Prepare workers for advanced search with Fuse.js
+  const searchableWorkers = useMemo(() => {
+    return workers.map(worker => {
+      const creatorProfile = userProfiles[worker.createdBy] || {};
+      return prepareWorkerForSearch(worker, creatorProfile);
+    });
+  }, [workers, userProfiles]);
+
+  // 4. Build Fuse.js search index with GOOGLE-LIKE configuration
+  const workerFuseIndex = useMemo(() => {
+    if (searchableWorkers.length === 0) return null;
+    return buildFuseIndex(searchableWorkers, {
+      keys: getWorkerSearchKeys(),
+      // Use default optimized config (threshold: 0.2, distance: 200, minMatchCharLength: 1)
+    });
+  }, [searchableWorkers]);
+
+  // Process and display workers with filtering and sorting - ENHANCED WITH FUSE.JS
   const getDisplayedWorkers = () => {
     console.log("Processing workers with sort:", sortBy);
 
     // Calculate distances
-    const workersWithDistance = workers.map(worker => {
+    const workersWithDistance = searchableWorkers.map(worker => {
       let distance = null;
       if (userProfile && userProfile.latitude && userProfile.longitude && worker.latitude && worker.longitude) {
         distance = getDistanceKm(
@@ -544,35 +567,55 @@ export default function Workers() {
       return { ...worker, distance };
     });
 
-    // Apply filters
-    const filteredWorkers = workersWithDistance.filter(worker => {
+    // Apply advanced search using Fuse.js if search query exists
+    let searchFiltered = workersWithDistance;
+    let searchScoreMap = new Map();
+
+    if (searchValue.trim() && workerFuseIndex) {
+      let searchResults = performSearch(workerFuseIndex, searchValue, {
+        expandSynonyms: true,
+        maxResults: 500, // INCREASED: Show ALL results
+        // Use default minScore: 1.0 for Google-like behavior
+      });
+
+      if (searchResults && searchResults.length > 0) {
+        // RE-RANK RESULTS BY RELEVANCE (exact prefix matches first)
+        searchResults = reRankByRelevance(searchResults, searchValue);
+        
+        const searchIds = new Set(searchResults.map(r => r.item.id));
+        searchFiltered = workersWithDistance.filter(w => searchIds.has(w.id));
+        
+        // Store CUSTOM search scores for ranking
+        searchResults.forEach(r => {
+          searchScoreMap.set(r.item.id, r.customScore || 0);
+        });
+      } else {
+        // No results from search, return empty
+        searchFiltered = [];
+      }
+    }
+
+    // Apply additional filters
+    const filteredWorkers = searchFiltered.filter(worker => {
       const creatorProfile = userProfiles[worker.createdBy] || {};
 
       // Status filter - only show active posts
       if (worker.status && worker.status !== "active") return false;
 
-      // Search filter
-      const searchLower = searchValue.toLowerCase();
-      if (searchValue &&
-        !creatorProfile.username?.toLowerCase().includes(searchLower) &&
-        !worker.title?.toLowerCase().includes(searchLower) &&
-        !(worker.tags || []).some(tag => tag.toLowerCase().includes(searchLower)) &&
-        !worker.location?.city?.toLowerCase().includes(searchLower) &&
-        !worker.location?.area?.toLowerCase().includes(searchLower)) {
-        return false;
-      }
+      // Distance filter - ONLY APPLY IF USER SETS FILTERS (not during search)
+      if (!searchValue.trim()) {
+        let minDistanceKm = filters.distance.min || 0;
+        let maxDistanceKm = filters.distance.max;
+        if (filters.distanceUnit === 'm') {
+          minDistanceKm = minDistanceKm / 1000;
+          if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
+        }
 
-      // Distance filter
-      let minDistanceKm = filters.distance.min || 0;
-      let maxDistanceKm = filters.distance.max;
-      if (filters.distanceUnit === 'm') {
-        minDistanceKm = minDistanceKm / 1000;
-        if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
+        const distance = worker.distance;
+        if (filters.distance.min && (distance === null || distance < minDistanceKm)) return false;
+        if (filters.distance.max && (distance === null || distance > maxDistanceKm)) return false;
       }
-
-      const distance = worker.distance;
-      if (filters.distance.min && (distance === null || distance < minDistanceKm)) return false;
-      if (filters.distance.max && (distance === null || distance > maxDistanceKm)) return false;
+      // WHEN SEARCHING: Show ALL results regardless of distance
 
       // Rating filter
       const rating = worker.rating || 0;
@@ -608,8 +651,16 @@ export default function Workers() {
       return true;
     });
 
-    // Apply sorting - SIMPLIFIED LOGIC
+    // Apply sorting
     const sortedWorkers = [...filteredWorkers].sort((a, b) => {
+      // IF SEARCHING: Sort by relevance score (custom score)
+      if (searchValue.trim() && searchScoreMap.size > 0) {
+        const scoreA = searchScoreMap.get(a.id) || 0;
+        const scoreB = searchScoreMap.get(b.id) || 0;
+        return scoreB - scoreA; // Higher score first
+      }
+      
+      // OTHERWISE: Use user-selected sorting
       const distA = a.distance === null ? Infinity : a.distance;
       const distB = b.distance === null ? Infinity : b.distance;
 

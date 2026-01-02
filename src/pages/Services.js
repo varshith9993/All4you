@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { db, auth } from "../firebase";
@@ -6,6 +6,13 @@ import { collection, query, onSnapshot, doc } from "firebase/firestore";
 import { FiMapPin, FiWifi, FiFilter, FiChevronDown, FiX, FiPlus, FiStar, FiSearch } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.png";
 import Layout from "../components/Layout";
+import {
+  buildFuseIndex,
+  performSearch,
+  reRankByRelevance,
+  getServiceSearchKeys,
+  prepareServiceForSearch,
+} from "../utils/searchEngine";
 
 // Calculate Haversine distance in km
 function getDistanceKm(lat1, lon1, lat2, lon2) {
@@ -783,10 +790,27 @@ export default function Services() {
     };
   }, [currentUserId]);
 
-  // Process and display services with filtering and sorting
+  // 3. Prepare services for advanced search with Fuse.js
+  const searchableServices = useMemo(() => {
+    return services.map(service => {
+      const creatorProfile = userProfiles[service.createdBy] || {};
+      return prepareServiceForSearch(service, creatorProfile);
+    });
+  }, [services, userProfiles]);
+
+  // 4. Build Fuse.js search index with GOOGLE-LIKE configuration
+  const serviceFuseIndex = useMemo(() => {
+    if (searchableServices.length === 0) return null;
+    return buildFuseIndex(searchableServices, {
+      keys: getServiceSearchKeys(),
+      // Use default optimized config (threshold: 0.2, distance: 200, minMatchCharLength: 1)
+    });
+  }, [searchableServices]);
+
+  // Process and display services with filtering and sorting - ENHANCED WITH FUSE.JS
   const getDisplayedServices = () => {
     // Calculate distances
-    const servicesWithDistance = services.map(service => {
+    const servicesWithDistance = searchableServices.map(service => {
       let distance = null;
       if (userProfile && userProfile.latitude && userProfile.longitude && service.latitude && service.longitude) {
         distance = getDistanceKm(
@@ -799,8 +823,36 @@ export default function Services() {
       return { ...service, distance };
     });
 
-    // Apply filters
-    const filteredServices = servicesWithDistance.filter(service => {
+    // Apply advanced search using Fuse.js if search query exists
+    let searchFiltered = servicesWithDistance;
+    let searchScoreMap = new Map();
+
+    if (searchValue.trim() && serviceFuseIndex) {
+      let searchResults = performSearch(serviceFuseIndex, searchValue, {
+        expandSynonyms: true,
+        maxResults: 500, // INCREASED: Show ALL results
+        // Use default minScore: 1.0 for Google-like behavior
+      });
+
+      if (searchResults && searchResults.length > 0) {
+        // RE-RANK RESULTS BY RELEVANCE (exact prefix matches first)
+        searchResults = reRankByRelevance(searchResults, searchValue);
+        
+        const searchIds = new Set(searchResults.map(r => r.item.id));
+        searchFiltered = servicesWithDistance.filter(s => searchIds.has(s.id));
+        
+        // Store CUSTOM search scores for ranking
+        searchResults.forEach(r => {
+          searchScoreMap.set(r.item.id, r.customScore || 0);
+        });
+      } else {
+        // No results from search, return empty
+        searchFiltered = [];
+      }
+    }
+
+    // Apply additional filters
+    const filteredServices = searchFiltered.filter(service => {
       const now = new Date();
       const creatorProfile = userProfiles[service.createdBy] || {};
 
@@ -832,31 +884,20 @@ export default function Services() {
 
       if (!matchesPhase) return false;
 
-      // Search filter
-      const searchLower = searchValue.toLowerCase();
-      if (searchValue) {
-        const creatorUsername = creatorProfile.username || "";
-        const matchesSearch =
-          creatorUsername.toLowerCase().includes(searchLower) ||
-          service.title?.toLowerCase().includes(searchLower) ||
-          (service.tags || []).some(tag => tag.toLowerCase().includes(searchLower)) ||
-          service.location?.city?.toLowerCase().includes(searchLower) ||
-          service.location?.area?.toLowerCase().includes(searchLower);
+      // Distance filter - ONLY APPLY IF USER SETS FILTERS (not during search)
+      if (!searchValue.trim()) {
+        let minDistanceKm = filters.distance.min || 0;
+        let maxDistanceKm = filters.distance.max;
+        if (filters.distanceUnit === 'm') {
+          minDistanceKm = minDistanceKm / 1000;
+          if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
+        }
 
-        if (!matchesSearch) return false;
+        const distance = service.distance;
+        if (filters.distance.min && (distance === null || distance < minDistanceKm)) return false;
+        if (filters.distance.max && (distance === null || distance > maxDistanceKm)) return false;
       }
-
-      // Distance filter
-      let minDistanceKm = filters.distance.min || 0;
-      let maxDistanceKm = filters.distance.max;
-      if (filters.distanceUnit === 'm') {
-        minDistanceKm = minDistanceKm / 1000;
-        if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
-      }
-
-      const distance = service.distance;
-      if (filters.distance.min && (distance === null || distance < minDistanceKm)) return false;
-      if (filters.distance.max && (distance === null || distance > maxDistanceKm)) return false;
+      // WHEN SEARCHING: Show ALL results regardless of distance
 
       // Online status filter
       const isOnline = isUserOnline(service.createdBy, currentUserId, creatorProfile.online, creatorProfile.lastSeen);
@@ -910,6 +951,14 @@ export default function Services() {
 
     // Apply sorting
     const sortedServices = [...filteredServices].sort((a, b) => {
+      // IF SEARCHING: Sort by relevance score (custom score)
+      if (searchValue.trim() && searchScoreMap.size > 0) {
+        const scoreA = searchScoreMap.get(a.id) || 0;
+        const scoreB = searchScoreMap.get(b.id) || 0;
+        return scoreB - scoreA; // Higher score first
+      }
+      
+      // OTHERWISE: Use user-selected sorting
       const distA = a.distance === null ? Infinity : a.distance;
       const distB = b.distance === null ? Infinity : b.distance;
 

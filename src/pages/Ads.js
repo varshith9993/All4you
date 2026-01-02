@@ -6,6 +6,13 @@ import { collection, query, onSnapshot, doc } from "firebase/firestore";
 import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiPlus, FiWifi, FiChevronLeft, FiChevronRight, FiSearch } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.png";
 import Layout from "../components/Layout";
+import {
+  buildFuseIndex,
+  performSearch,
+  reRankByRelevance,
+  getAdSearchKeys,
+  prepareAdForSearch,
+} from "../utils/searchEngine";
 
 // --- Helper Functions ---
 
@@ -76,11 +83,26 @@ function isUserOnline(userId, currentUserId, online, lastSeen) {
 function AdCard({ ad, profile, userProfiles, currentUserId, navigate }) {
   const { title, photos = [], rating = 0, location = {}, tags = [], latitude, longitude, createdBy } = ad;
   const [currentPhotoIndex, setCurrentPhotoIndex] = React.useState(0);
+  const [imagesPreloaded, setImagesPreloaded] = React.useState(false);
   const adCreatorProfile = userProfiles[createdBy] || {};
   const displayUsername = adCreatorProfile.username || "Unknown User";
   const displayProfileImage = adCreatorProfile.photoURL || adCreatorProfile.profileImage || defaultAvatar;
   const displayOnline = adCreatorProfile.online;
   const displayLastSeen = adCreatorProfile.lastSeen;
+
+  // PERFORMANCE: Preload all images for instant swiping
+  React.useEffect(() => {
+    if (photos && photos.length > 1 && !imagesPreloaded) {
+      // Preload adjacent images for smooth transitions
+      const preloadImages = [];
+      photos.forEach((photoUrl, index) => {
+        const img = new Image();
+        img.src = photoUrl;
+        preloadImages.push(img);
+      });
+      setImagesPreloaded(true);
+    }
+  }, [photos, imagesPreloaded]);
 
   let distanceText = "Distance away: --";
   if (profile && profile.latitude && profile.longitude && latitude && longitude) {
@@ -577,40 +599,77 @@ export default function Ads() {
     };
   }, [currentUserId]);
 
+  // 3. Prepare ads for advanced search with Fuse.js
+  const searchableAds = useMemo(() => {
+    return ads.map(ad => {
+      const creatorProfile = userProfiles[ad.createdBy] || {};
+      return prepareAdForSearch(ad, creatorProfile);
+    });
+  }, [ads, userProfiles]);
+
+  // 4. Build Fuse.js search index with GOOGLE-LIKE configuration
+  const adFuseIndex = useMemo(() => {
+    if (searchableAds.length === 0) return null;
+    return buildFuseIndex(searchableAds, {
+      keys: getAdSearchKeys(),
+      // Use default optimized config (threshold: 0.2, distance: 200, minMatchCharLength: 1)
+    });
+  }, [searchableAds]);
+
   const applyFilters = () => { };
 
   const filteredAds = useMemo(() => {
-    let result = [...ads];
+    let result = searchableAds;
 
-    if (searchValue.trim()) {
-      const searchLower = searchValue.toLowerCase();
-      result = result.filter(ad => {
-        if (ad.status === "expired") return false;
-        return (ad.title || "").toLowerCase().includes(searchLower) || (ad.description || "").toLowerCase().includes(searchLower) || (ad.tags || []).some(tag => tag.toLowerCase().includes(searchLower));
+    // Apply advanced search using Fuse.js if search query exists
+    if (searchValue.trim() && adFuseIndex) {
+      let searchResults = performSearch(adFuseIndex, searchValue, {
+        expandSynonyms: true,
+        maxResults: 500, // INCREASED: Show ALL results
+        // Use default minScore: 1.0 for Google-like behavior
       });
+
+      if (searchResults && searchResults.length > 0) {
+        // RE-RANK RESULTS BY RELEVANCE (exact prefix matches first)
+        searchResults = reRankByRelevance(searchResults, searchValue);
+        
+        const searchIds = new Set(searchResults.map(r => r.item.id));
+        result = result.filter(ad => {
+          if (ad.status === "expired") return false;
+          return searchIds.has(ad.id);
+        });
+      } else {
+        // No results from search
+        result = [];
+      }
     } else {
+      // No search query, just filter out expired
       result = result.filter(ad => ad.status !== "expired");
     }
 
-    if (profile && profile.latitude && profile.longitude) {
-      result = result.filter(ad => {
-        if (!ad.latitude || !ad.longitude) return true;
-        const distance = getDistanceKm(profile.latitude, profile.longitude, ad.latitude, ad.longitude);
-        if (distance === null) return true;
+    // Distance filter - ONLY APPLY IF USER SETS FILTERS (not during search)
+    if (!searchValue.trim()) {
+      if (profile && profile.latitude && profile.longitude) {
+        result = result.filter(ad => {
+          if (!ad.latitude || !ad.longitude) return true;
+          const distance = getDistanceKm(profile.latitude, profile.longitude, ad.latitude, ad.longitude);
+          if (distance === null) return true;
 
-        let minDistanceKm = filters.distance.min || 0;
-        let maxDistanceKm = filters.distance.max;
+          let minDistanceKm = filters.distance.min || 0;
+          let maxDistanceKm = filters.distance.max;
 
-        if (filters.distanceUnit === 'm') {
-          minDistanceKm = minDistanceKm / 1000;
-          if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
-        }
+          if (filters.distanceUnit === 'm') {
+            minDistanceKm = minDistanceKm / 1000;
+            if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
+          }
 
-        const meetsMin = filters.distance.min === 0 || distance >= minDistanceKm;
-        const meetsMax = !filters.distance.max || distance <= maxDistanceKm;
-        return meetsMin && meetsMax;
-      });
+          const meetsMin = filters.distance.min === 0 || distance >= minDistanceKm;
+          const meetsMax = !filters.distance.max || distance <= maxDistanceKm;
+          return meetsMin && meetsMax;
+        });
+      }
     }
+    // WHEN SEARCHING: Show ALL results regardless of distance
 
     result = result.filter(ad => {
       const rating = ad.rating || 0;
@@ -677,7 +736,7 @@ export default function Ads() {
     });
 
     return result;
-  }, [ads, searchValue, filters, sortBy, profile, userProfiles, currentUserId]);
+  }, [searchableAds, adFuseIndex, searchValue, filters, sortBy, profile, userProfiles, currentUserId]);
 
   const hasActiveFilters = filters.distance.min > 0 || filters.distance.max || filters.rating.min > 0 || filters.rating.max < 5 || filters.onlineStatus !== "all" || filters.area || filters.city || filters.landmark || filters.pincode || filters.tags;
 

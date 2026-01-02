@@ -106,35 +106,32 @@ export default function Login() {
     if (submitting) return;
     setSubmitting(true);
     setError("");
+    setSuccessMessage("");
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
-      // Check if user has a profile
+      // Check if user has a profile in Firestore
       const docRef = doc(db, "profiles", user.uid);
       const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {
+        // User has an account, proceed to login
         navigate("/workers");
       } else {
-        // If Google user has no profile, delete the auth user to prevent "half-created" state 
-        // and redirect to signup to complete the formatted profile creation.
-        const email = user.email;
-        const displayName = user.displayName;
+        // User doesn't have an account, delete auth user and show error
         await user.delete();
         await signOut(auth);
-
-        navigate("/signup", {
-          state: {
-            message: "Please complete your signup to continue.",
-            prefill: { email, username: displayName }
-          }
-        });
+        setError("Didn't have an account. Please signup first.");
       }
     } catch (err) {
       console.error(err);
-      setError("Failed to sign in with Google.");
+      if (err.code === "auth/popup-closed-by-user") {
+        setError("Sign-in popup was closed. Please try again.");
+      } else {
+        setError("Failed to sign in with Google. Please try again.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -178,10 +175,11 @@ export default function Login() {
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none"
               disabled={submitting}
+              aria-label={showPassword ? "Hide password" : "Show password"}
             >
-              {showPassword ? <FiEye size={20} /> : <FiEyeOff size={20} />}
+              {showPassword ? <FiEyeOff size={20} /> : <FiEye size={20} />}
             </button>
           </div>
 

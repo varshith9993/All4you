@@ -69,9 +69,23 @@ export default function AdDetail() {
   const [toast, setToast] = useState("");
   const [activeMenuId, setActiveMenuId] = useState(null);
   const [viewingImage, setViewingImage] = useState(null);
+  const [imagesPreloaded, setImagesPreloaded] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
   const [replyText, setReplyText] = useState("");
   const [expandedReplies, setExpandedReplies] = useState({});
+
+  // PERFORMANCE: Preload all carousel images for instant swiping
+  useEffect(() => {
+    if (ad && ad.photos && ad.photos.length > 1 && !imagesPreloaded) {
+      const preloadImages = [];
+      ad.photos.forEach((photoUrl) => {
+        const img = new Image();
+        img.src = photoUrl;
+        preloadImages.push(img);
+      });
+      setImagesPreloaded(true);
+    }
+  }, [ad, imagesPreloaded]);
 
   // Get auth user
   useEffect(() => {
