@@ -6,7 +6,8 @@ import { collection, query, onSnapshot, doc } from "firebase/firestore";
 import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiPlus, FiWifi, FiSearch } from "react-icons/fi";
 import Layout from "../components/Layout";
 import defaultAvatar from "../assets/images/default_profile.png";
-import {  buildFuseIndex,
+import {
+  buildFuseIndex,
   performSearch,
   reRankByRelevance,
   getWorkerSearchKeys,
@@ -550,7 +551,7 @@ export default function Workers() {
   }, [searchableWorkers]);
 
   // Process and display workers with filtering and sorting - ENHANCED WITH FUSE.JS
-  const getDisplayedWorkers = () => {
+  const displayedWorkers = useMemo(() => {
     console.log("Processing workers with sort:", sortBy);
 
     // Calculate distances
@@ -581,10 +582,10 @@ export default function Workers() {
       if (searchResults && searchResults.length > 0) {
         // RE-RANK RESULTS BY RELEVANCE (exact prefix matches first)
         searchResults = reRankByRelevance(searchResults, searchValue);
-        
+
         const searchIds = new Set(searchResults.map(r => r.item.id));
         searchFiltered = workersWithDistance.filter(w => searchIds.has(w.id));
-        
+
         // Store CUSTOM search scores for ranking
         searchResults.forEach(r => {
           searchScoreMap.set(r.item.id, r.customScore || 0);
@@ -602,20 +603,17 @@ export default function Workers() {
       // Status filter - only show active posts
       if (worker.status && worker.status !== "active") return false;
 
-      // Distance filter - ONLY APPLY IF USER SETS FILTERS (not during search)
-      if (!searchValue.trim()) {
-        let minDistanceKm = filters.distance.min || 0;
-        let maxDistanceKm = filters.distance.max;
-        if (filters.distanceUnit === 'm') {
-          minDistanceKm = minDistanceKm / 1000;
-          if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
-        }
-
-        const distance = worker.distance;
-        if (filters.distance.min && (distance === null || distance < minDistanceKm)) return false;
-        if (filters.distance.max && (distance === null || distance > maxDistanceKm)) return false;
+      // Distance filter
+      let minDistanceKm = filters.distance.min || 0;
+      let maxDistanceKm = filters.distance.max;
+      if (filters.distanceUnit === 'm') {
+        minDistanceKm = minDistanceKm / 1000;
+        if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
       }
-      // WHEN SEARCHING: Show ALL results regardless of distance
+
+      const distance = worker.distance;
+      if (filters.distance.min && (distance === null || distance < minDistanceKm)) return false;
+      if (filters.distance.max && (distance === null || distance > maxDistanceKm)) return false;
 
       // Rating filter
       const rating = worker.rating || 0;
@@ -659,7 +657,7 @@ export default function Workers() {
         const scoreB = searchScoreMap.get(b.id) || 0;
         return scoreB - scoreA; // Higher score first
       }
-      
+
       // OTHERWISE: Use user-selected sorting
       const distA = a.distance === null ? Infinity : a.distance;
       const distB = b.distance === null ? Infinity : b.distance;
@@ -687,7 +685,7 @@ export default function Workers() {
 
     console.log(`Sorted ${sortedWorkers.length} workers with sort: ${sortBy}`);
     return sortedWorkers;
-  };
+  }, [searchableWorkers, workerFuseIndex, searchValue, filters, sortBy, userProfile, userProfiles, currentUserId]);
 
   const hasActiveFilters =
     filters.distance.min > 0 ||
@@ -711,7 +709,6 @@ export default function Workers() {
     );
   }
 
-  const displayedWorkers = getDisplayedWorkers();
 
   return (
     <Layout

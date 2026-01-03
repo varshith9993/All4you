@@ -620,6 +620,7 @@ export default function Ads() {
 
   const filteredAds = useMemo(() => {
     let result = searchableAds;
+    let searchScoreMap = new Map();
 
     // Apply advanced search using Fuse.js if search query exists
     if (searchValue.trim() && adFuseIndex) {
@@ -632,11 +633,16 @@ export default function Ads() {
       if (searchResults && searchResults.length > 0) {
         // RE-RANK RESULTS BY RELEVANCE (exact prefix matches first)
         searchResults = reRankByRelevance(searchResults, searchValue);
-        
+
         const searchIds = new Set(searchResults.map(r => r.item.id));
         result = result.filter(ad => {
           if (ad.status === "expired") return false;
           return searchIds.has(ad.id);
+        });
+
+        // Store CUSTOM search scores for ranking
+        searchResults.forEach(r => {
+          searchScoreMap.set(r.item.id, r.customScore || 0);
         });
       } else {
         // No results from search
@@ -647,29 +653,26 @@ export default function Ads() {
       result = result.filter(ad => ad.status !== "expired");
     }
 
-    // Distance filter - ONLY APPLY IF USER SETS FILTERS (not during search)
-    if (!searchValue.trim()) {
-      if (profile && profile.latitude && profile.longitude) {
-        result = result.filter(ad => {
-          if (!ad.latitude || !ad.longitude) return true;
-          const distance = getDistanceKm(profile.latitude, profile.longitude, ad.latitude, ad.longitude);
-          if (distance === null) return true;
+    // Distance filter
+    if (profile && profile.latitude && profile.longitude) {
+      result = result.filter(ad => {
+        if (!ad.latitude || !ad.longitude) return true;
+        const distance = getDistanceKm(profile.latitude, profile.longitude, ad.latitude, ad.longitude);
+        if (distance === null) return true;
 
-          let minDistanceKm = filters.distance.min || 0;
-          let maxDistanceKm = filters.distance.max;
+        let minDistanceKm = filters.distance.min || 0;
+        let maxDistanceKm = filters.distance.max;
 
-          if (filters.distanceUnit === 'm') {
-            minDistanceKm = minDistanceKm / 1000;
-            if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
-          }
+        if (filters.distanceUnit === 'm') {
+          minDistanceKm = minDistanceKm / 1000;
+          if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
+        }
 
-          const meetsMin = filters.distance.min === 0 || distance >= minDistanceKm;
-          const meetsMax = !filters.distance.max || distance <= maxDistanceKm;
-          return meetsMin && meetsMax;
-        });
-      }
+        const meetsMin = filters.distance.min === 0 || distance >= minDistanceKm;
+        const meetsMax = !filters.distance.max || distance <= maxDistanceKm;
+        return meetsMin && meetsMax;
+      });
     }
-    // WHEN SEARCHING: Show ALL results regardless of distance
 
     result = result.filter(ad => {
       const rating = ad.rating || 0;
@@ -713,6 +716,13 @@ export default function Ads() {
     result = result.filter(ad => !filters.tags || tagsFilters.some(tag => (ad.tags || []).some(wt => wt.toLowerCase().includes(tag))));
 
     result.sort((a, b) => {
+      // IF SEARCHING: Sort by relevance score (custom score)
+      if (searchValue.trim() && searchScoreMap.size > 0) {
+        const scoreA = searchScoreMap.get(a.id) || 0;
+        const scoreB = searchScoreMap.get(b.id) || 0;
+        return scoreB - scoreA; // Higher score first
+      }
+
       switch (sortBy) {
         case "distance-low-high":
           if (!profile) return 0;

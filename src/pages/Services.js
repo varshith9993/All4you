@@ -140,6 +140,7 @@ function FilterModal({ isOpen, onClose, filters, setFilters, applyFilters }) {
     const resetFilters = {
       distance: { min: 0, max: null },
       distanceUnit: 'km',
+      rating: { min: 0, max: 5 },
       onlineStatus: "all",
       area: "",
       city: "",
@@ -220,6 +221,46 @@ function FilterModal({ isOpen, onClose, filters, setFilters, applyFilters }) {
                   onChange={(e) => setLocalFilters({
                     ...localFilters,
                     distance: { ...localFilters.distance, max: e.target.value ? Number(e.target.value) : null }
+                  })}
+                />
+              </div>
+            </div>
+          </div>
+
+
+          {/* Rating */}
+          <div>
+            <h3 className="font-medium mb-3 text-gray-700">Rating</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Minimum</label>
+                <input
+                  type="number"
+                  placeholder="0"
+                  min="0"
+                  max="5"
+                  step="0.1"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={localFilters.rating.min}
+                  onChange={(e) => setLocalFilters({
+                    ...localFilters,
+                    rating: { ...localFilters.rating, min: Number(e.target.value) }
+                  })}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Maximum</label>
+                <input
+                  type="number"
+                  placeholder="5"
+                  min="0"
+                  max="5"
+                  step="0.1"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={localFilters.rating.max}
+                  onChange={(e) => setLocalFilters({
+                    ...localFilters,
+                    rating: { ...localFilters.rating, max: Number(e.target.value) }
                   })}
                 />
               </div>
@@ -710,6 +751,7 @@ export default function Services() {
   const [filters, setFilters] = useState({
     distance: { min: 0, max: null },
     distanceUnit: 'km',
+    rating: { min: 0, max: 5 },
     onlineStatus: "all",
     area: "",
     city: "",
@@ -808,7 +850,7 @@ export default function Services() {
   }, [searchableServices]);
 
   // Process and display services with filtering and sorting - ENHANCED WITH FUSE.JS
-  const getDisplayedServices = () => {
+  const displayedServices = useMemo(() => {
     // Calculate distances
     const servicesWithDistance = searchableServices.map(service => {
       let distance = null;
@@ -837,10 +879,10 @@ export default function Services() {
       if (searchResults && searchResults.length > 0) {
         // RE-RANK RESULTS BY RELEVANCE (exact prefix matches first)
         searchResults = reRankByRelevance(searchResults, searchValue);
-        
+
         const searchIds = new Set(searchResults.map(r => r.item.id));
         searchFiltered = servicesWithDistance.filter(s => searchIds.has(s.id));
-        
+
         // Store CUSTOM search scores for ranking
         searchResults.forEach(r => {
           searchScoreMap.set(r.item.id, r.customScore || 0);
@@ -884,20 +926,24 @@ export default function Services() {
 
       if (!matchesPhase) return false;
 
-      // Distance filter - ONLY APPLY IF USER SETS FILTERS (not during search)
-      if (!searchValue.trim()) {
-        let minDistanceKm = filters.distance.min || 0;
-        let maxDistanceKm = filters.distance.max;
-        if (filters.distanceUnit === 'm') {
-          minDistanceKm = minDistanceKm / 1000;
-          if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
-        }
-
-        const distance = service.distance;
-        if (filters.distance.min && (distance === null || distance < minDistanceKm)) return false;
-        if (filters.distance.max && (distance === null || distance > maxDistanceKm)) return false;
+      // Distance filter
+      let minDistanceKm = filters.distance.min || 0;
+      let maxDistanceKm = filters.distance.max;
+      if (filters.distanceUnit === 'm') {
+        minDistanceKm = minDistanceKm / 1000;
+        if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
       }
-      // WHEN SEARCHING: Show ALL results regardless of distance
+
+      const distance = service.distance;
+      if (filters.distance.min && (distance === null || distance < minDistanceKm)) return false;
+      if (filters.distance.max && (distance === null || distance > maxDistanceKm)) return false;
+
+      // Rating filter
+      const creatorRating = userProfiles[service.createdBy]?.rating || 0;
+      const rating = service.rating || creatorRating || 0;
+
+      if (rating < filters.rating.min) return false;
+      if (rating > filters.rating.max) return false;
 
       // Online status filter
       const isOnline = isUserOnline(service.createdBy, currentUserId, creatorProfile.online, creatorProfile.lastSeen);
@@ -957,7 +1003,7 @@ export default function Services() {
         const scoreB = searchScoreMap.get(b.id) || 0;
         return scoreB - scoreA; // Higher score first
       }
-      
+
       // OTHERWISE: Use user-selected sorting
       const distA = a.distance === null ? Infinity : a.distance;
       const distB = b.distance === null ? Infinity : b.distance;
@@ -1001,11 +1047,13 @@ export default function Services() {
     });
 
     return sortedServices;
-  };
+  }, [searchableServices, serviceFuseIndex, searchValue, filters, sortBy, userProfile, userProfiles, currentUserId, phase]);
 
   const hasActiveFilters =
     filters.distance.min > 0 ||
     filters.distance.max !== null ||
+    filters.rating.min > 0 ||
+    filters.rating.max < 5 ||
     filters.onlineStatus !== "all" ||
     filters.area ||
     filters.city ||
@@ -1022,8 +1070,6 @@ export default function Services() {
       </div>
     );
   }
-
-  const displayedServices = getDisplayedServices();
 
   return (
     <Layout
@@ -1079,6 +1125,16 @@ export default function Services() {
                     Max {filters.distance.max}{filters.distanceUnit}
                   </span>
                 )}
+                {filters.rating.min > 0 && (
+                  <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                    Min {filters.rating.min}★
+                  </span>
+                )}
+                {filters.rating.max < 5 && (
+                  <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                    Max {filters.rating.max}★
+                  </span>
+                )}
                 {filters.onlineStatus !== "all" && (
                   <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
                     {filters.onlineStatus === "online" ? "Online Only" : "Offline Only"}
@@ -1123,6 +1179,7 @@ export default function Services() {
                   onClick={() => setFilters({
                     distance: { min: 0, max: null },
                     distanceUnit: 'km',
+                    rating: { min: 0, max: 5 },
                     onlineStatus: "all",
                     area: "",
                     city: "",

@@ -14,8 +14,10 @@ import Fuse from "fuse.js";
 const STOP_WORDS = new Set([
   "a", "an", "the", "and", "or", "for", "in", "on", "of", "at", "by",
   "with", "is", "are", "was", "were", "be", "have",
-  "has", "had", "would", "should", "could",
-  "may", "might", "can", "it", "its",
+  "has", "had", "would", "should", "could", "we", "he", "she",
+  "may", "might", "can", "it", "its", "i", "am", "my", "me", "myself",
+  "need", "want", "require", "requirements", "requirement", "required", "needs", "wants",
+  "looking", "for", "please", "can", "could", "would", "any", "some", "anyone", "someone", "anybody", "somebody"
 ]);
 
 // Domain-specific synonyms for better search matching
@@ -25,12 +27,12 @@ export const SYNONYMS = {
   delhi: ["new delhi", "ncr", "dilli", "dilhi", "dwarka", "rohini", "south delhi", "gurgaon", "noida", "ghaziabad", "faridabad"],
   mumbai: ["bombay", "mumbai city", "bombai", "mumabi", "navimumbai", "thane", "andheri", "bandra", "borivali", "dadar", "powai"],
   chennai: ["madras", "chenai", "channai", "tn", "adyar", "velachery", "tambaram"],
-  kolkata: ["calcutta", "kolkatta", "wb", "salt lake", "new town"],
-  hyderabad: ["hyd", "secunderabad", "hydrabad", "hyderbad", "hitech city", "gachibowli", "jubilee hills"],
+  kolkata: ["calcutta", "kolkatta", "wb"],
+  hyderabad: ["hyd", "secunderabad", "hydrabad", "hyderbad",],
   pune: ["poona", "pcmc", "hinjewadi", "baner", "wakad", "viman nagar"],
-  ahmedabad: ["amdavad", "ahmdabad", "gujarat", "maninagar", "satellite"],
-  gurgaon: ["gurugram", "gurgon", "cyber city", "sohna road"],
-  noida: ["greater noida", "noida extension", "sector 62"],
+  ahmedabad: ["amdavad", "ahmdabad", "gujarat",],
+  gurgaon: ["gurugram", "gurgon"],
+  noida: ["greater noida", "noida extension"],
   chandigarh: ["tricity", "mohali", "panchkula", "zirakpur"],
 
   // ===== TRANSACTIONAL & INTENT =====
@@ -76,7 +78,6 @@ export const SYNONYMS = {
   pg: ["paying guest", "hostel", "accommodation", "shared room", "co-living", "bachelor room", "working men pg", "working women pg"],
   room: ["rooms", "bedroom", "bhk", "kholii", "single room", "hall kitchen", "1bhk", "2bhk", "3bhk"],
   office: ["commercial space", "shop", "dukan", "coworking", "warehouse", "godown", "factory", "industrial shed", "showroom"],
-  land: ["plot", "site", "ground", "khata", "agricultural land", "farmhouse", "corner plot", "residential land"],
   owner: ["direct owner", "no broker", "landlord", "malik", "individual", "direct party", "by owner"],
   broker: ["agent", "property dealer", "consultant", "middleman", "real estate consultant", "dealer"],
 
@@ -136,6 +137,7 @@ export const SYNONYMS = {
   menswear: ["shirt", "tshirt", "jeans", "trouser", "suit", "blazer"],
   womenswear: ["saree", "kurti", "suit", "lehenga", "top", "dress", "gown"],
   footwear: ["shoes", "sneakers", "sandals", "slippers", "boots", "heels"],
+  dating: ["date", "girlfriend", "boyfriend", "husband", "wife", "couple", "dating", "relationship"],
 
   // ===== GENERAL SLANG & VERNACULAR =====
   nearby: ["near me", "around me", "close by", "paas mein", "local", "area", "within 5km", "nearby me"],
@@ -159,7 +161,7 @@ export const SYNONYMS = {
  */
 export function normalizeText(text = "") {
   if (!text) return "";
-  
+
   return text
     .toString()
     .normalize("NFD") // Decompose combined characters
@@ -178,7 +180,7 @@ export function normalizeText(text = "") {
  */
 export function normalizeSpaceInsensitive(text = "") {
   if (!text) return "";
-  
+
   return text
     .toString()
     .normalize("NFD")
@@ -194,7 +196,7 @@ export function normalizeSpaceInsensitive(text = "") {
  */
 export function removeAccents(text = "") {
   if (!text) return "";
-  
+
   return text
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
@@ -211,12 +213,12 @@ export function removeAccents(text = "") {
  */
 export function tokenize(text = "") {
   if (!text) return [];
-  
+
   const normalized = normalizeText(text);
   const tokens = normalized
     .split(/[^a-z0-9]+/i)
     .filter(token => token && token.length > 1 && !STOP_WORDS.has(token));
-  
+
   return tokens;
 }
 
@@ -230,30 +232,30 @@ export function tokenize(text = "") {
  */
 export function generateNGrams(text = "", n = 3) {
   if (!text) return [];
-  
+
   const normalized = normalizeText(text);
   const spaceInsensitive = normalizeSpaceInsensitive(text);
   const ngrams = new Set(); // Use Set to avoid duplicates
-  
+
   // Generate n-grams for normal text (with spaces)
   if (normalized.length >= 2) {
     for (let i = 0; i <= normalized.length - 2; i++) { // Start with 2-grams for better coverage
       ngrams.add(normalized.substring(i, i + 2));
     }
   }
-  
+
   if (normalized.length >= 3) {
     for (let i = 0; i <= normalized.length - 3; i++) {
       ngrams.add(normalized.substring(i, i + 3));
     }
   }
-  
+
   if (normalized.length >= 4) {
     for (let i = 0; i <= normalized.length - 4; i++) {
       ngrams.add(normalized.substring(i, i + 4));
     }
   }
-  
+
   // ENHANCED: Generate n-grams for space-removed text
   // This allows "plu mber" to match "plumber" via n-grams
   if (spaceInsensitive.length >= 2) {
@@ -261,26 +263,21 @@ export function generateNGrams(text = "", n = 3) {
       ngrams.add(spaceInsensitive.substring(i, i + 2));
     }
   }
-  
+
   if (spaceInsensitive.length >= 3) {
     for (let i = 0; i <= spaceInsensitive.length - 3; i++) {
       ngrams.add(spaceInsensitive.substring(i, i + 3));
     }
   }
-  
+
   if (spaceInsensitive.length >= 4) {
     for (let i = 0; i <= spaceInsensitive.length - 4; i++) {
       ngrams.add(spaceInsensitive.substring(i, i + 4));
     }
   }
-  
-  // Generate character-level shingles (single characters) for extreme typo tolerance
-  if (normalized.length >= 1) {
-    for (let i = 0; i < normalized.length; i++) {
-      ngrams.add(normalized[i]);
-    }
-  }
-  
+
+
+
   return Array.from(ngrams);
 }
 
@@ -288,23 +285,23 @@ export function generateNGrams(text = "", n = 3) {
  * Generate prefix tokens for partial word matching
  * ENHANCED: Support single-character prefixes for "m", "my" searches
  * @param {string} text - Input text
- * @param {number} minLength - Minimum prefix length (default: 1 for single-char)
+ * @param {number} minLength - Minimum prefix length (default: 2)
  * @returns {Array<string>} Array of prefixes
  */
-export function generatePrefixes(text = "", minLength = 1) {
+export function generatePrefixes(text = "", minLength = 2) {
   if (!text) return [];
-  
+
   const normalized = normalizeText(text);
-  const words = normalized.split(/\s+/).filter(w => w); // Split by whitespace
+  const words = normalized.split(/\s+/).filter(w => w && !STOP_WORDS.has(w)); // Split by whitespace and filter stop words
   const prefixes = new Set(); // Use Set to avoid duplicates
-  
+
   words.forEach(word => {
     // Generate prefixes from minLength up to full word length (max 8 chars)
     for (let i = minLength; i <= Math.min(word.length, 8); i++) {
       prefixes.add(word.slice(0, i));
     }
   });
-  
+
   return Array.from(prefixes);
 }
 
@@ -320,12 +317,12 @@ export function generatePrefixes(text = "", minLength = 1) {
  */
 export function soundex(text = "") {
   if (!text) return "";
-  
+
   const normalized = normalizeText(text).replace(/[^a-z]/g, "");
   if (!normalized) return "";
-  
+
   const firstLetter = normalized[0].toUpperCase();
-  
+
   // Soundex mapping
   const map = {
     b: "1", f: "1", p: "1", v: "1",
@@ -335,14 +332,14 @@ export function soundex(text = "") {
     m: "5", n: "5",
     r: "6",
   };
-  
+
   let code = firstLetter;
   let lastCode = map[firstLetter.toLowerCase()] || "";
-  
+
   for (let i = 1; i < normalized.length && code.length < 4; i++) {
     const char = normalized[i];
     const currentCode = map[char] || "";
-    
+
     if (currentCode && currentCode !== lastCode) {
       code += currentCode;
       lastCode = currentCode;
@@ -350,7 +347,7 @@ export function soundex(text = "") {
       lastCode = "";
     }
   }
-  
+
   return (code + "000").slice(0, 4);
 }
 
@@ -362,10 +359,10 @@ export function soundex(text = "") {
  */
 export function metaphone(text = "") {
   if (!text) return "";
-  
+
   let metaphone = normalizeText(text).replace(/[^a-z]/g, "").toUpperCase();
   if (!metaphone) return "";
-  
+
   // ENHANCED: Apply comprehensive metaphone rules
   // Initial consonant combinations
   metaphone = metaphone.replace(/^KN/, "N");
@@ -374,10 +371,10 @@ export function metaphone(text = "") {
   metaphone = metaphone.replace(/^AE/, "E");
   metaphone = metaphone.replace(/^WR/, "R");
   metaphone = metaphone.replace(/^X/, "S");
-  
+
   // H after vowel
   metaphone = metaphone.replace(/([AEIOU])H/g, "$1");
-  
+
   // Common patterns
   metaphone = metaphone.replace(/MB$/, "M");
   metaphone = metaphone.replace(/PH/, "F");
@@ -385,31 +382,31 @@ export function metaphone(text = "") {
   metaphone = metaphone.replace(/SH/, "X");
   metaphone = metaphone.replace(/TH/, "0"); // 0 represents "th" sound
   metaphone = metaphone.replace(/CH/, "X");
-  
+
   // CK becomes K
   metaphone = metaphone.replace(/CK/, "K");
-  
+
   // C rules
   metaphone = metaphone.replace(/C([IEY])/g, "S$1");
   metaphone = metaphone.replace(/C/g, "K");
-  
+
   // DGE/DGI/DGY becomes J
   metaphone = metaphone.replace(/DG([EIY])/g, "J$1");
-  
+
   // GH at end or before consonant becomes silent
   metaphone = metaphone.replace(/GH($|[^AEIOU])/g, "$1");
-  
+
   // G before I, E, Y becomes J
   metaphone = metaphone.replace(/G([IEY])/g, "J$1");
-  
+
   // Double letters become single
   metaphone = metaphone.replace(/(.)\1+/g, "$1");
-  
+
   // Remove vowels (but keep first if it's the first character)
   const firstChar = metaphone[0];
   metaphone = metaphone.substring(1).replace(/[AEIOU]/g, "");
   metaphone = firstChar + metaphone;
-  
+
   return metaphone.slice(0, 6); // Increased from 4 to 6 for better accuracy
 }
 
@@ -422,23 +419,23 @@ export function metaphone(text = "") {
  */
 export function doubleMetaphone(text = "") {
   if (!text) return { primary: "", secondary: "" };
-  
+
   const original = text.toUpperCase();
   let primary = "";
   let secondary = "";
   let current = 0;
   const length = original.length;
-  
+
   // Add buffer characters to avoid boundary checks
   const input = " " + original + "  ";
-  
+
   // Slavo-Germanic check
   const isSlavoGermanic = /W|K|CZ|WITZ/.test(original);
-  
+
   // Process each character
   while (current < length) {
     const char = input[current + 1];
-    
+
     switch (char) {
       case 'A': case 'E': case 'I': case 'O': case 'U': case 'Y':
         if (current === 0) {
@@ -447,25 +444,25 @@ export function doubleMetaphone(text = "") {
         }
         current++;
         break;
-        
+
       case 'B':
         primary += 'P';
         secondary += 'P';
         if (input[current + 1] === 'B') current += 2;
         else current += 1;
         break;
-        
+
       case 'Ç':
         primary += 'S';
         secondary += 'S';
         current += 1;
         break;
-        
+
       case 'C':
         // Various C rules
-        if (current > 1 && !isVowel(input[current]) && 
-            areSlavoGermanic(input[current - 2]) && 
-            input[current + 1] === 'H') {
+        if (current > 1 && !isVowel(input[current]) &&
+          areSlavoGermanic(input[current - 2]) &&
+          input[current + 1] === 'H') {
           primary += 'K';
           secondary += 'K';
           current += 2;
@@ -523,7 +520,7 @@ export function doubleMetaphone(text = "") {
           current += 1;
         }
         break;
-        
+
       case 'D':
         if (input[current + 1] === 'G') {
           if (input[current + 2] === 'I' || input[current + 2] === 'E' || input[current + 2] === 'Y') {
@@ -545,14 +542,14 @@ export function doubleMetaphone(text = "") {
           current += 1;
         }
         break;
-        
+
       case 'F':
         if (input[current + 1] === 'F') current += 2;
         else current += 1;
         primary += 'F';
         secondary += 'F';
         break;
-        
+
       case 'G':
         if (input[current + 1] === 'H') {
           if (current > 0 && !isVowel(input[current - 1])) {
@@ -569,12 +566,12 @@ export function doubleMetaphone(text = "") {
             }
             current += 2;
           } else if (((current > 1 && input[current - 2] === 'B') || input[current - 2] === 'H' || input[current - 2] === 'D') ||
-                     ((current > 2 && input[current - 3] === 'B') || input[current - 3] === 'H' || input[current - 3] === 'D') ||
-                     ((current > 3 && input[current - 4] === 'B') || input[current - 4] === 'H')) {
+            ((current > 2 && input[current - 3] === 'B') || input[current - 3] === 'H' || input[current - 3] === 'D') ||
+            ((current > 3 && input[current - 4] === 'B') || input[current - 4] === 'H')) {
             current += 2;
           } else {
-            if (current > 2 && input[current - 1] === 'U' && 
-                (input[current - 3] === 'C' || input[current - 3] === 'G' || input[current - 3] === 'L')) {
+            if (current > 2 && input[current - 1] === 'U' &&
+              (input[current - 3] === 'C' || input[current - 3] === 'G' || input[current - 3] === 'L')) {
               primary += 'F';
               secondary += 'F';
             } else if (current > 0 && input[current - 1] !== 'N') {
@@ -606,7 +603,7 @@ export function doubleMetaphone(text = "") {
           secondary += 'K';
         }
         break;
-        
+
       case 'H':
         if ((current === 0 || isVowel(input[current - 1])) && isVowel(input[current + 1]) && current < length - 1) {
           primary += 'H';
@@ -616,7 +613,7 @@ export function doubleMetaphone(text = "") {
           current += 1;
         }
         break;
-        
+
       case 'J':
         if (current === 0 && input.substr(current + 1, 4) === 'OSE') {
           if (input[current + 4] === ' ' || input[current + 4] === 'A' || input[current + 4] === 'O') {
@@ -639,20 +636,20 @@ export function doubleMetaphone(text = "") {
         if (input[current + 1] === 'J') current += 2;
         else current += 1;
         break;
-        
+
       case 'K':
         if (input[current + 1] === 'K') current += 2;
         else current += 1;
         primary += 'K';
         secondary += 'K';
         break;
-        
+
       case 'L':
         if (input[current + 1] === 'L') {
           if ((current === length - 2 && input[current - 1] === 'A') ||
-              ((current > 1 && input.substr(current - 1, 2) === 'IL') && 
-               (input[current + 2] === 'A' || input[current + 2] === 'O' || input[current + 2] === 'U')) ||
-              ((input[current - 1] === 'A' || input[current - 1] === 'O') && input[current + 2] === 'E')) {
+            ((current > 1 && input.substr(current - 1, 2) === 'IL') &&
+              (input[current + 2] === 'A' || input[current + 2] === 'O' || input[current + 2] === 'U')) ||
+            ((input[current - 1] === 'A' || input[current - 1] === 'O') && input[current + 2] === 'E')) {
             primary += 'L';
             secondary += '';
           } else {
@@ -666,27 +663,27 @@ export function doubleMetaphone(text = "") {
           current += 1;
         }
         break;
-        
+
       case 'M':
         if (input[current + 1] === 'M') current += 2;
         else current += 1;
         primary += 'M';
         secondary += 'M';
         break;
-        
+
       case 'N':
         if (input[current + 1] === 'N') current += 2;
         else current += 1;
         primary += 'N';
         secondary += 'N';
         break;
-        
+
       case 'Ñ':
         current += 1;
         primary += 'N';
         secondary += 'N';
         break;
-        
+
       case 'P':
         if (input[current + 1] === 'H') {
           primary += 'F';
@@ -699,21 +696,21 @@ export function doubleMetaphone(text = "") {
           secondary += 'P';
         }
         break;
-        
+
       case 'Q':
         if (input[current + 1] === 'Q') current += 2;
         else current += 1;
         primary += 'K';
         secondary += 'K';
         break;
-        
+
       case 'R':
         if (input[current + 1] === 'R') current += 2;
         else current += 1;
         primary += 'R';
         secondary += 'R';
         break;
-        
+
       case 'S':
         if (input[current + 1] === 'H') {
           primary += 'X';
@@ -729,7 +726,7 @@ export function doubleMetaphone(text = "") {
           }
           current += 3;
         } else if (((current === 0 && input[current + 1] === 'I') && (input[current + 2] === 'A' || input[current + 2] === 'O')) ||
-                   input[current + 1] === 'Z') {
+          input[current + 1] === 'Z') {
           primary += 'S';
           secondary += 'X';
           if (input[current + 1] === 'Z') current += 2;
@@ -745,7 +742,7 @@ export function doubleMetaphone(text = "") {
           else current += 1;
         }
         break;
-        
+
       case 'T':
         if (input[current + 1] === 'I' && (input[current + 2] === 'O' || input[current + 2] === 'A') && !isSlavoGermanic) {
           primary += 'X';
@@ -775,14 +772,14 @@ export function doubleMetaphone(text = "") {
           secondary += 'T';
         }
         break;
-        
+
       case 'V':
         if (input[current + 1] === 'V') current += 2;
         else current += 1;
         primary += 'F';
         secondary += 'F';
         break;
-        
+
       case 'W':
         if (input[current + 1] === 'R') {
           primary += 'R';
@@ -816,7 +813,7 @@ export function doubleMetaphone(text = "") {
           current += 1;
         }
         break;
-        
+
       case 'X':
         if (current === 0) {
           primary += 'S';
@@ -825,12 +822,12 @@ export function doubleMetaphone(text = "") {
         } else {
           if (!(current === length - 1 && (input[current - 1] === 'U' || input[current - 1] === 'A' || input[current - 1] === 'O')))
             primary += 'KS';
-            secondary += 'KS';
+          secondary += 'KS';
           if (input[current + 1] === 'X') current += 2;
           else current += 1;
         }
         break;
-        
+
       case 'Z':
         if (input[current + 1] === 'H') {
           primary += 'J';
@@ -852,12 +849,12 @@ export function doubleMetaphone(text = "") {
           else current += 1;
         }
         break;
-        
+
       default:
         current += 1;
     }
   }
-  
+
   return { primary: primary.slice(0, 4), secondary: secondary.slice(0, 4) };
 }
 
@@ -882,17 +879,17 @@ function areSlavoGermanic(text) {
  */
 export function expandQueryWithSynonyms(query = "") {
   if (!query) return [];
-  
+
   const tokens = tokenize(query);
   const expanded = new Set(tokens);
-  
+
   tokens.forEach(token => {
     // Check if token matches any synonym key
     const synonyms = SYNONYMS[token];
     if (synonyms) {
       synonyms.forEach(syn => expanded.add(syn));
     }
-    
+
     // OPTIMIZED: Check for partial matches in synonym keys
     Object.entries(SYNONYMS).forEach(([key, values]) => {
       // Direct key match
@@ -907,7 +904,7 @@ export function expandQueryWithSynonyms(query = "") {
       }
     });
   });
-  
+
   return Array.from(expanded);
 }
 
@@ -927,7 +924,7 @@ export function generateSearchTokens(text = "") {
     doubleMetaphonePrimary: "",
     doubleMetaphoneSecondary: "",
   };
-  
+
   return {
     normalized: normalizeText(text),
     tokens: tokenize(text),
@@ -965,9 +962,9 @@ export function buildFuseIndex(items, options = {}) {
     ignoreFieldNorm: true, // CHANGED: Don't penalize longer fields (better for typos)
     keys: [], // Must be provided by caller
   };
-  
+
   const fuseOptions = { ...defaultOptions, ...options };
-  
+
   return new Fuse(items, fuseOptions);
 }
 
@@ -981,28 +978,31 @@ export function buildFuseIndex(items, options = {}) {
  */
 export function performSearch(fuse, query, options = {}) {
   if (!query || !query.trim()) return null;
-  
+
   const {
     expandSynonyms = true,
     maxResults = 500, // INCREASED: Show more results
     minScore = 1.0, // INCREASED: Accept more results (lower score is better, max 1.0)
   } = options;
-  
+
   // Expand query with synonyms if enabled
   let searchQuery = query;
   if (expandSynonyms) {
     const expandedTokens = expandQueryWithSynonyms(query);
+    if (expandedTokens.length === 0) return []; // Return empty if query becomes empty (e.g. only stop words)
     searchQuery = expandedTokens.join(" ");
   }
-  
+
+  if (!searchQuery.trim()) return [];
+
   // Perform search
   let results = fuse.search(searchQuery, { limit: maxResults });
-  
+
   // Filter by minimum score if specified
   if (minScore < 1) {
     results = results.filter(r => (r.score || 0) <= minScore);
   }
-  
+
   return results.map(r => ({
     item: r.item,
     score: r.score || 0,
@@ -1023,19 +1023,19 @@ export function performSearch(fuse, query, options = {}) {
  */
 export function reRankByRelevance(results, query) {
   if (!results || results.length === 0 || !query) return results;
-  
+
   const normalizedQuery = normalizeText(query).trim();
   const queryLower = normalizedQuery.toLowerCase();
-  
+
   // Calculate custom relevance score for each result
   const scoredResults = results.map(result => {
     const item = result.item;
     const title = normalizeText(item.title || "").toLowerCase();
     const tags = (item.tags || []).map(t => normalizeText(t).toLowerCase()).join(" ");
     const username = normalizeText(item.searchData?.username || "").toLowerCase();
-    
+
     let customScore = 0;
-    
+
     // 1. EXACT SUBSTRING MATCH (highest priority - score 1000+)
     if (title.includes(queryLower)) {
       customScore += 1000;
@@ -1050,7 +1050,7 @@ export function reRankByRelevance(results, query) {
         customScore += 450;
       }
     }
-    
+
     // 2. PREFIX MATCH (high priority - score 800+)
     if (title.startsWith(queryLower)) {
       customScore += 800;
@@ -1064,12 +1064,12 @@ export function reRankByRelevance(results, query) {
         customScore += 350;
       }
     }
-    
+
     // 3. ORDERED SUBSEQUENCE MATCH (score 600+)
     // Check for ordered character sequence matches
     const titleOrderedMatch = hasOrderedSubsequence(title, queryLower);
     const tagsOrderedMatch = hasOrderedSubsequence(tags, queryLower);
-    
+
     if (titleOrderedMatch) {
       customScore += 600;
       // Bonus based on how well characters align
@@ -1081,38 +1081,38 @@ export function reRankByRelevance(results, query) {
       const alignmentBonus = calculateCharacterAlignment(tags, queryLower) * 180;
       customScore += alignmentBonus;
     }
-    
+
     // 4. PREFIX MATCH IN USERNAME (score 400+)
     if (username.startsWith(queryLower)) {
       customScore += 400;
     }
-    
+
     // 5. CONTAINS QUERY IN USERNAME (score 200+)
     if (username.includes(queryLower)) {
       customScore += 200;
     }
-    
+
     // 6. CHARACTER ALIGNMENT SCORE (progressive matching)
     // For queries like 't', 'te', 'tes', 'test'
     const alignmentScore = calculateCharacterAlignment(title, queryLower) +
-                          calculateCharacterAlignment(tags, queryLower);
+      calculateCharacterAlignment(tags, queryLower);
     customScore += alignmentScore * 100; // Increased weight for alignment
-    
+
     // 7. FUSE.JS SCORE (inverse - lower is better)
     // Convert Fuse score (0-1, lower better) to points (0-100, higher better)
     const fusePoints = (1 - (result.score || 0)) * 100;
     customScore += fusePoints;
-    
+
     return {
       ...result,
       customScore,
       originalFuseScore: result.score
     };
   });
-  
+
   // Sort by custom score (descending - higher is better)
   scoredResults.sort((a, b) => b.customScore - a.customScore);
-  
+
   return scoredResults;
 }
 
@@ -1125,12 +1125,12 @@ export function reRankByRelevance(results, query) {
  */
 function calculateCharacterAlignment(text, query) {
   if (!text || !query) return 0;
-  
+
   const textLower = text.toLowerCase();
   const queryLower = query.toLowerCase();
-  
+
   let maxAlignment = 0;
-  
+
   // Check all positions in text
   for (let i = 0; i <= textLower.length - queryLower.length; i++) {
     let alignment = 0;
@@ -1141,7 +1141,7 @@ function calculateCharacterAlignment(text, query) {
     }
     maxAlignment = Math.max(maxAlignment, alignment);
   }
-  
+
   // Return ratio of aligned characters
   return queryLower.length > 0 ? maxAlignment / queryLower.length : 0;
 }
@@ -1155,20 +1155,20 @@ function calculateCharacterAlignment(text, query) {
  */
 function hasOrderedSubsequence(text, query) {
   if (!text || !query) return false;
-  
+
   const textLower = text.toLowerCase();
   const queryLower = query.toLowerCase();
-  
+
   let textIndex = 0;
   let queryIndex = 0;
-  
+
   while (textIndex < textLower.length && queryIndex < queryLower.length) {
     if (textLower[textIndex] === queryLower[queryIndex]) {
       queryIndex++;
     }
     textIndex++;
   }
-  
+
   return queryIndex === queryLower.length;
 }
 
@@ -1182,16 +1182,16 @@ function hasOrderedSubsequence(text, query) {
  */
 export function performTieredSearch(items, query, keys) {
   if (!query || !query.trim()) return null;
-  
+
   // Tier 1: Strict search (threshold 0.2 - close to exact)
   const strictFuse = buildFuseIndex(items, {
     keys,
     threshold: 0.2,
     distance: 50,
   });
-  
+
   let results = performSearch(strictFuse, query);
-  
+
   // Tier 2: If too few results, try fuzzy search
   if (!results || results.length < 3) {
     const fuzzyFuse = buildFuseIndex(items, {
@@ -1199,10 +1199,10 @@ export function performTieredSearch(items, query, keys) {
       threshold: 0.5,
       distance: 150,
     });
-    
+
     results = performSearch(fuzzyFuse, query);
   }
-  
+
   return results;
 }
 
@@ -1294,25 +1294,25 @@ export function prepareWorkerForSearch(worker, creatorProfile = {}) {
   const tags = worker.tags || [];
   const username = creatorProfile.username || "";
   const title = worker.title || "";
-  
+
   const city = location.city || "";
   const area = location.area || "";
   const landmark = location.landmark || "";
   const pincode = location.pincode || "";
-  
+
   const locationText = [area, city, landmark, pincode].filter(Boolean).join(" ");
   const allText = [username, title, tags.join(" "), locationText].join(" ");
-  
+
   // ULTRA-FUZZY: Generate comprehensive search data with n-grams
   const titleNormalized = normalizeText(title);
   const tagsNormalized = tags.map(t => normalizeText(t)).join(" ");
   const tagsSpaceInsensitive = tags.map(t => normalizeSpaceInsensitive(t)).join(" "); // Only tags get space-insensitive
-  
+
   // Generate n-grams and prefixes as STRINGS (not arrays) for Fuse.js
   const searchText = title + " " + tags.join(" ");
   const ngramsArray = generateNGrams(searchText, 3);
-  const prefixesArray = generatePrefixes(searchText, 1); // Changed to 1 for single-char matching
-  
+  const prefixesArray = generatePrefixes(searchText, 2); // Changed to 2 to avoid noise
+
   return {
     ...worker,
     searchData: {
@@ -1349,25 +1349,25 @@ export function prepareServiceForSearch(service, creatorProfile = {}) {
   const tags = service.tags || [];
   const username = creatorProfile.username || "";
   const title = service.title || "";
-  
+
   const city = location.city || "";
   const area = location.area || "";
   const landmark = location.landmark || "";
   const pincode = location.pincode || "";
-  
+
   const locationText = [area, city, landmark, pincode].filter(Boolean).join(" ");
   const allText = [username, title, tags.join(" "), locationText].join(" ");
-  
+
   // ULTRA-FUZZY: Generate comprehensive search data with n-grams
   const titleNormalized = normalizeText(title);
   const tagsNormalized = tags.map(t => normalizeText(t)).join(" ");
   const tagsSpaceInsensitive = tags.map(t => normalizeSpaceInsensitive(t)).join(" "); // Only tags get space-insensitive
-  
+
   // Generate n-grams and prefixes as STRINGS (not arrays) for Fuse.js
   const searchText = title + " " + tags.join(" ");
   const ngramsArray = generateNGrams(searchText, 3);
-  const prefixesArray = generatePrefixes(searchText, 1); // Changed to 1 for single-char matching
-  
+  const prefixesArray = generatePrefixes(searchText, 2); // Changed to 2 to avoid noise
+
   return {
     ...service,
     searchData: {
@@ -1406,25 +1406,25 @@ export function prepareAdForSearch(ad, creatorProfile = {}) {
   const username = creatorProfile.username || "";
   const title = ad.title || "";
   // NO DESCRIPTION - removed from search as per requirements
-  
+
   const city = location.city || "";
   const area = location.area || "";
   const landmark = location.landmark || "";
   const pincode = location.pincode || "";
-  
+
   const locationText = [area, city, landmark, pincode].filter(Boolean).join(" ");
   const allText = [username, title, tags.join(" "), locationText].join(" ");
-  
+
   // ULTRA-FUZZY: Generate comprehensive search data with n-grams
   const titleNormalized = normalizeText(title);
   const tagsNormalized = tags.map(t => normalizeText(t)).join(" ");
   const tagsSpaceInsensitive = tags.map(t => normalizeSpaceInsensitive(t)).join(" "); // Only tags get space-insensitive
-  
+
   // Generate n-grams and prefixes as STRINGS (not arrays) for Fuse.js
   const searchText = title + " " + tags.join(" ");
   const ngramsArray = generateNGrams(searchText, 3);
-  const prefixesArray = generatePrefixes(searchText, 1); // Changed to 1 for single-char matching
-  
+  const prefixesArray = generatePrefixes(searchText, 2); // Changed to 2 to avoid noise
+
   return {
     ...ad,
     searchData: {
