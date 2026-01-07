@@ -183,6 +183,7 @@ export default function AddAds() {
         distance: "---",
         online: !!userProfile.online,
         lastSeen: null,
+        status: "active",
         createdAt: serverTimestamp(),
         createdBy: currentUser.uid,
       });

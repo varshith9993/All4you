@@ -6,7 +6,6 @@ import {
     where,
     orderBy,
     onSnapshot,
-    getDocs,
     limit,
     getDoc,
     doc
@@ -20,55 +19,133 @@ import {
     FiBox,
     FiMessageSquare,
     FiCheckCircle,
-    FiAlertTriangle
+    FiAlertTriangle,
+    FiMessageCircle
 } from "react-icons/fi";
 
 const MAX_NOTIFICATIONS = 30;
 
 /* ---------------- ICON ---------------- */
 
-const getIcon = (type) => {
+const getIcon = (notif) => {
+    const type = notif.type;
+    const status = notif.status;
+    const msg = notif.message?.toLowerCase() || "";
+
+    // 1. Priority Check: Message Content (Most reliable)
+    if (msg.includes("deleted")) {
+        return <FiInfo className="text-red-500" size={20} />;
+    }
+    // Grey for Disabled (Check BEFORE positive because it contains "enabled back")
+    if (msg.includes("disabled")) {
+        return <FiInfo className="text-gray-500" size={20} />;
+    }
+    if (msg.includes("expired")) {
+        return <FiInfo className="text-purple-500" size={20} />;
+    }
+    if (msg.includes("back online") || msg.includes("enabled") || msg.includes("active")) {
+        return <FiCheckCircle className="text-green-500" size={20} />;
+    }
+
+    // 2. Fallback to Status/Type fields
+    if (type === "rating" || msg.includes("rating")) {
+        return <FiStar className="text-yellow-500" size={20} />;
+    }
+
+    // Check for 'reply' BEFORE 'review' because reply messages often contain the word 'review'
+    if (type === "reply" || msg.includes("replied") || notif.title === "Review Reply") {
+        return <FiMessageCircle className="text-blue-500" size={20} />;
+    }
+
+    if (type === "review" || msg.includes("review")) {
+        return <FiMessageSquare className="text-blue-500" size={20} />;
+    }
+
     switch (type) {
-        case "chat": return <FiMessageSquare className="text-blue-500" size={20} />;
-        case "review": return <FiStar className="text-yellow-500" size={20} />;
-        case "rating": return <FiStar className="text-yellow-500" size={20} />;
+        case "post_status":
+            if (status === "deleted") return <FiInfo className="text-red-500" size={20} />;
+            if (status === "expired") return <FiInfo className="text-purple-500" size={20} />;
+            if (status === "disabled") return <FiInfo className="text-gray-500" size={20} />;
+            if (status === "active") return <FiCheckCircle className="text-green-500" size={20} />;
+            return <FiAlertTriangle className="text-orange-500" size={20} />;
         case "alert": return <FiInfo className="text-red-500" size={20} />;
         case "alert_good": return <FiCheckCircle className="text-green-500" size={20} />;
         case "system": return <FiInfo className="text-purple-500" size={20} />;
-        case "post_status": return <FiAlertTriangle className="text-orange-500" size={20} />;
-        default: return <FiBell className="text-gray-500" size={20} />;
+        case "reply": return <FiMessageCircle className="text-blue-500" size={20} />;
+        case "review": return <FiMessageSquare className="text-blue-500" size={20} />;
+        case "rating": return <FiStar className="text-yellow-500" size={20} />;
+        default:
+            if (type?.includes('star') || type?.includes('rate')) return <FiStar className="text-yellow-500" size={20} />;
+            if (type?.includes('msg') || type?.includes('review')) return <FiMessageSquare className="text-blue-500" size={20} />;
+            return <FiBell className="text-gray-500" size={20} />;
     }
+};
+
+// Robust Date Parsing Helper
+const parseDate = (val) => {
+    if (!val) return new Date(0); // For unread logic, missing date = very old
+    if (val.toDate && typeof val.toDate === "function") return val.toDate();
+    if (val instanceof Date) return val;
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? new Date(0) : d;
 };
 
 /* ---------------- ITEM ---------------- */
 
 const NotificationItem = ({ notif }) => {
     const [expanded, setExpanded] = useState(false);
-    const isLong = notif.message?.length > 80;
+    const [isTruncated, setIsTruncated] = useState(false);
+    const messageRef = useRef(null);
     const navigate = useNavigate();
 
-    const handleClick = () => {
-        // Handle navigation based on notification type
-        if (notif.type === "rating" || notif.type === "review") {
-            // Navigate to the post if it's a rating/review notification
+    useEffect(() => {
+        if (messageRef.current) {
+            const { scrollHeight, clientHeight } = messageRef.current;
+            setIsTruncated(scrollHeight > clientHeight);
+        }
+    }, [notif.message]);
+
+    const handleClick = async () => {
+        const isActionable = notif.type === "rating" || notif.type === "review" || notif.type === "reply" || (notif.type === "post_status" && (notif.status === "active" || !notif.status));
+
+        if (isActionable) {
             if (notif.postId && notif.postType) {
-                const route = {
-                    worker: "/worker-detail/",
-                    service: "/service-detail/",
-                    ad: "/ad-detail/"
+                const collectionName = {
+                    worker: "workers",
+                    service: "services",
+                    ad: "ads"
                 }[notif.postType];
 
-                if (route) {
-                    navigate(route + notif.postId);
+                if (!collectionName) return;
+
+                try {
+                    const postSnap = await getDoc(doc(db, collectionName, notif.postId));
+                    if (postSnap.exists()) {
+                        const postStatus = postSnap.data().status;
+                        const isForbidden = postStatus === "disabled" || postStatus === "expired" || postStatus === "deleted";
+
+                        if (!isForbidden) {
+                            const route = {
+                                worker: "/worker-detail/",
+                                service: "/service-detail/",
+                                ad: "/ad-detail/"
+                            }[notif.postType];
+
+                            if (route) {
+                                navigate(route + notif.postId);
+                                return;
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error("Error checking post status:", error);
                 }
             }
+            alert("the post is unavailable");
         } else if (notif.type === "post_status") {
-            // For status changes, show error if post is unavailable
-            if (notif.status === "deleted" || notif.status === "disabled" || notif.status === "expired") {
-                alert("Post unavailable");
-            }
+            // Negative status (deleted, disabled, expired)
+            alert("the post is unavailable");
         } else if (notif.type === "system" && notif.actionUrl) {
-            // For system notifications with action URLs
             window.open(notif.actionUrl, '_blank');
         }
     };
@@ -78,16 +155,22 @@ const NotificationItem = ({ notif }) => {
             className={`p-4 rounded-xl bg-white border border-gray-100 shadow-sm flex gap-4 relative overflow-hidden cursor-pointer hover:shadow-md transition-shadow ${notif.type === 'post_status' ? 'bg-orange-50 border-orange-100' : ''}`}
             onClick={handleClick}
         >
-            <div className="flex-shrink-0 mt-1">
+            <div className="flex-shrink-0 mt-1 relative">
                 <div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center">
-                    {getIcon(notif.type)}
+                    {getIcon(notif)}
                 </div>
             </div>
 
             <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-start mb-1">
-                    <h3 className="font-semibold text-gray-900 text-sm truncate pr-2">
-                        {notif.title}
+                    <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-2 min-w-0 pr-2">
+                        <span className="truncate">{notif.title}</span>
+                        {notif.isNew && (
+                            <div className="relative flex-shrink-0">
+                                <span className="absolute inset-0 rounded-full bg-blue-500 animate-ping opacity-25"></span>
+                                <span className="relative block w-2.5 h-2.5 rounded-full bg-blue-500 border-2 border-white shadow-sm ring-1 ring-blue-500/20"></span>
+                            </div>
+                        )}
                     </h3>
                     <span className="text-xs text-gray-400 whitespace-nowrap">
                         {notif.date.toDateString() === new Date().toDateString()
@@ -96,19 +179,22 @@ const NotificationItem = ({ notif }) => {
                     </span>
                 </div>
 
-                <div className={`text-sm text-gray-600 ${expanded ? "" : "line-clamp-2"}`}>
+                <div
+                    ref={messageRef}
+                    className={`text-sm text-gray-600 ${expanded ? "" : "line-clamp-2"}`}
+                >
                     {notif.message}
                 </div>
 
-                {isLong && !expanded && (
+                {isTruncated && !expanded && (
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
                             setExpanded(true);
                         }}
-                        className="text-xs text-blue-600 font-medium mt-1 hover:underline"
+                        className="text-xs text-blue-600 font-medium mt-1 hover:underline flex items-center gap-1"
                     >
-                        ...more
+                        Show more
                     </button>
                 )}
 
@@ -132,6 +218,9 @@ export default function Notifications() {
     const navigate = useNavigate();
 
     const notificationsMap = useRef(new Map());
+    const postUnsubsMap = useRef(new Map()); // Manage inner listeners to prevent leaks
+    const viewTimeRef = useRef(0);
+    const userCache = useRef(new Map());
 
     useEffect(() => {
         if (!user) {
@@ -139,16 +228,33 @@ export default function Notifications() {
             return;
         }
 
-        const userCache = new Map();
+        /* ---------------- READ STATUS LOGIC ---------------- */
+
+        // 1. Get the reference time for "New" notifications for this visit session
+        // Using sessionStorage so the dots persist while navigating into details and back
+        let sessionRef = sessionStorage.getItem('notif_view_ref');
+
+        if (!sessionRef) {
+            // First time in this session: Copy the last persistent read time
+            const lastRead = localStorage.getItem('lastNotificationView') || "0";
+            sessionStorage.setItem('notif_view_ref', lastRead);
+            sessionRef = lastRead;
+        }
+
+        viewTimeRef.current = Number(sessionRef);
 
         const getUserName = async (uid) => {
             if (!uid) return "Unknown User";
-            if (userCache.has(uid)) return userCache.get(uid);
+            if (userCache.current.has(uid)) return userCache.current.get(uid);
 
-            const snap = await getDoc(doc(db, "profiles", uid));
-            const name = snap.exists() ? snap.data().username || "Unknown User" : "Unknown User";
-            userCache.set(uid, name);
-            return name;
+            try {
+                const snap = await getDoc(doc(db, "profiles", uid));
+                const name = snap.exists() ? snap.data().username || "Unknown User" : "Unknown User";
+                userCache.current.set(uid, name);
+                return name;
+            } catch (e) {
+                return "Unknown User";
+            }
         };
 
         const updateUI = () => {
@@ -163,270 +269,133 @@ export default function Notifications() {
 
         // Track user's favorited posts
         const userFavoritesRef = [
-            collection(db, "workerFavorites"),
-            collection(db, "serviceFavorites"),
-            collection(db, "adFavorites")
+            { col: collection(db, "workerFavorites"), idField: "workerId", type: "worker", targetCol: "workers" },
+            { col: collection(db, "serviceFavorites"), idField: "serviceId", type: "service", targetCol: "services" },
+            { col: collection(db, "adFavorites"), idField: "adId", type: "ad", targetCol: "ads" }
         ];
 
-        const unsubFavorites = userFavoritesRef.map(favCollection =>
+        const unsubFavorites = userFavoritesRef.map(favConfig =>
             onSnapshot(
-                query(favCollection, where("userId", "==", user.uid)),
-                async (favSnapshot) => {
-                    const favoritePostIds = favSnapshot.docs.map(doc => doc.data());
+                query(favConfig.col, where("userId", "==", user.uid)),
+                (favSnapshot) => {
+                    const postIds = favSnapshot.docs
+                        .map(d => d.data()[favConfig.idField])
+                        .filter(id => id)
+                        .slice(0, 10); // Capture latest 10 favorites per category
 
-                    // For each type of post, listen for changes
-                    const postCollections = [
-                        { name: "workers", idField: "workerId", type: "worker" },
-                        { name: "services", idField: "serviceId", type: "service" },
-                        { name: "ads", idField: "adId", type: "ad" }
-                    ];
-
-                    for (const postCollection of postCollections) {
-                        const postIds = favoritePostIds
-                            .filter(fav => fav[postCollection.idField])
-                            .map(fav => fav[postCollection.idField]);
-
-                        if (postIds.length > 0) {
-                            // Listen for changes to favorited posts
-                            const postQuery = query(
-                                collection(db, postCollection.name),
-                                where("__name__", "in", postIds)
-                            );
-
-                            onSnapshot(postQuery, (postSnapshot) => {
-                                postSnapshot.docChanges().forEach(change => {
-                                    const postData = change.doc.data();
-                                    const postId = change.doc.id;
-                                    const oldData = change.type === 'modified' ? change.doc.data() : null;
-
-                                    // Check for status changes
-                                    if (change.type === 'modified') {
-                                        const oldStatus = oldData?.status || 'active';
-                                        const newStatus = postData?.status || 'active';
-
-                                        // Notify on status change
-                                        if (oldStatus !== newStatus) {
-                                            const statusMessages = {
-                                                'disabled': `A favorited ${postCollection.type} has been disabled`,
-                                                'active': `A favorited ${postCollection.type} has been enabled`,
-                                                'expired': `A favorited ${postCollection.type} has expired`,
-                                                'deleted': `A favorited ${postCollection.type} has been deleted`
-                                            };
-
-                                            const date = new Date();
-                                            notificationsMap.current.set(`status_${postId}_${newStatus}`, {
-                                                id: `status_${postId}_${newStatus}`,
-                                                type: "post_status",
-                                                title: "Post Status Changed",
-                                                message: statusMessages[newStatus] || `A favorited ${postCollection.type} status changed to ${newStatus}`,
-                                                date,
-                                                timestamp: date.getTime(),
-                                                status: newStatus,
-                                                postId: postId,
-                                                postType: postCollection.type
-                                            });
-                                        }
-                                    } else if (change.type === 'removed') {
-                                        // Notify when post is deleted
-                                        const date = new Date();
-                                        notificationsMap.current.set(`status_${postId}_deleted`, {
-                                            id: `status_${postId}_deleted`,
-                                            type: "post_status",
-                                            title: "Post Deleted",
-                                            message: `A favorited ${postCollection.type} has been deleted`,
-                                            date,
-                                            timestamp: date.getTime(),
-                                            status: "deleted",
-                                            postId: postId,
-                                            postType: postCollection.type
-                                        });
-                                    }
-                                });
-                                updateUI();
-                            });
-                        }
+                    // Clean up previous post listener for this type to prevent leaks
+                    if (postUnsubsMap.current.has(favConfig.type)) {
+                        postUnsubsMap.current.get(favConfig.type)();
                     }
+
+                    if (postIds.length === 0) return;
+
+                    // Listen for status changes on favorited posts
+                    const postQuery = query(
+                        collection(db, favConfig.targetCol),
+                        where("__name__", "in", postIds)
+                    );
+
+                    const unsubPosts = onSnapshot(postQuery, async (postSnapshot) => {
+                        const changes = postSnapshot.docChanges();
+
+                        // Parallelize processing of all changes
+                        await Promise.all(changes.map(async (change) => {
+                            const postData = change.doc.data();
+                            const postId = change.doc.id;
+                            const titleWords = postData.name || postData.title || "";
+                            const ownerId = postData.createdBy;
+
+                            let msg = "";
+                            const postTypeRaw = favConfig.type;
+                            const displayType = postTypeRaw === 'ad' ? 'ads' : postTypeRaw;
+
+                            if (change.type === 'removed') {
+                                msg = `a ${displayType} post is deleted by the post owner and the post is vanished from favorites`;
+                            } else if (change.type === 'modified') {
+                                const ownerName = ownerId ? await getUserName(ownerId) : "Owner";
+                                const statusMessages = {
+                                    'disabled': `${ownerName} disabled "${titleWords}" post and the ${displayType} post is vanished from favorites, it will be seen back when it is enabled back`,
+                                    'active': `${ownerName} enabled "${titleWords}" post and now the ${displayType} post is available in favorites`,
+                                    'expired': `${ownerName} expired "${titleWords}" post and the ${displayType} post is removed from favorites`,
+                                    'deleted': `a ${displayType} post is deleted by the post owner and the post is vanished from favorites`
+                                };
+                                msg = statusMessages[postData.status];
+                            }
+
+                            if (msg) {
+                                const date = new Date();
+                                const status = postData?.status || (change.type === 'removed' ? 'deleted' : 'unknown');
+                                notificationsMap.current.set(`status_${postId}_${status}`, {
+                                    id: `status_${postId}_${status}`,
+                                    type: "post_status",
+                                    title: "Post Status Changed",
+                                    message: msg,
+                                    date,
+                                    timestamp: date.getTime(),
+                                    status,
+                                    postId,
+                                    postType: postTypeRaw
+                                });
+                            }
+                        }));
+                        updateUI();
+                    });
+
+                    postUnsubsMap.current.set(favConfig.type, unsubPosts);
                 }
             )
         );
 
-        /* ---------------- USER FEEDBACK NOTIFICATIONS ---------------- */
+        /* ---------------- REPLIES TO USER REVIEWS ---------------- */
+        const reviewCollections = [
+            { name: "workerReviews", type: "worker", idField: "workerId" },
+            { name: "serviceReviews", type: "service", idField: "serviceId" },
+            { name: "adReviews", type: "ad", idField: "adId" }
+        ];
 
-        // Listen for ratings and reviews on user's posts
-        const loadUserFeedback = async () => {
-            // Get user's posts
-            const postCollections = ['workers', 'services', 'ads'];
-            const userPosts = {};
+        const unsubReplies = reviewCollections.map(col =>
+            onSnapshot(
+                query(collection(db, col.name), where("userId", "==", user.uid)),
+                async (snapshot) => {
+                    const changes = snapshot.docChanges();
+                    await Promise.all(changes.map(async (change) => {
+                        if (change.type === 'modified') {
+                            const data = change.doc.data();
+                            if (data.reply) {
+                                const postId = data[col.idField];
+                                let ownerName = "Post Owner";
 
-            for (const collectionName of postCollections) {
-                const snapshot = await getDocs(
-                    query(collection(db, collectionName), where("createdBy", "==", user.uid))
-                );
-                userPosts[collectionName] = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                }));
-            }
+                                try {
+                                    const postSnap = await getDoc(doc(db, col.name.replace("Reviews", "s"), postId));
+                                    if (postSnap.exists()) {
+                                        const creatorId = postSnap.data().createdBy;
+                                        ownerName = await getUserName(creatorId);
+                                    }
+                                } catch (e) {
+                                    console.error(e);
+                                }
 
-            // Listen for reviews on workers
-            const workerIds = userPosts.workers.map(w => w.id);
-            let unsubWorkerReviews;
-            if (workerIds.length > 0) {
-                unsubWorkerReviews = onSnapshot(
-                    query(
-                        collection(db, "workerReviews"),
-                        where("workerId", "in", workerIds.slice(0, 10)),
-                        orderBy("createdAt", "desc"),
-                        limit(MAX_NOTIFICATIONS)
-                    ),
-                    async (snap) => {
-                        for (const d of snap.docs) {
-                            const r = d.data();
-                            if (r.userId === user.uid) continue;
-
-                            const name = await getUserName(r.userId);
-                            const date = r.createdAt?.toDate() || new Date();
-
-
-                            let message = "";
-                            if (r.rating && r.text) {
-                                message = `New ${r.rating}-star rating and review from ${name}`;
-                            } else if (r.rating) {
-                                message = `New ${r.rating}-star rating from ${name}`;
-                            } else if (r.text) {
-                                message = `New review from ${name}`;
-                            } else {
-                                continue;
+                                const date = new Date();
+                                notificationsMap.current.set(`reply_${change.doc.id}`, {
+                                    id: `reply_${change.doc.id}`,
+                                    type: "reply",
+                                    title: "Review Reply",
+                                    message: `${ownerName} replied to your review`,
+                                    subText: `"${data.reply.slice(0, 50)}${data.reply.length > 50 ? "..." : ""}"`,
+                                    date,
+                                    timestamp: date.getTime(),
+                                    postId,
+                                    postType: col.type
+                                });
                             }
-
-                            notificationsMap.current.set(`rating_${d.id}`, {
-                                id: `rating_${d.id}`,
-                                type: "rating",
-                                title: "New Rating/Review",
-                                message,
-                                subText: r.text
-                                    ? `"${r.text.slice(0, 50)}${r.text.length > 50 ? "..." : ""}"`
-                                    : "",
-                                date,
-                                timestamp: date.getTime(),
-                                postId: r.workerId,
-                                postType: "worker"
-                            });
                         }
-                        updateUI();
-                    }
-                );
-            }
+                    }));
+                    updateUI();
+                }
+            )
+        );
 
-            // Listen for reviews on services
-            const serviceIds = userPosts.services.map(s => s.id);
-            let unsubServiceReviews;
-            if (serviceIds.length > 0) {
-                unsubServiceReviews = onSnapshot(
-                    query(
-                        collection(db, "serviceReviews"),
-                        where("serviceId", "in", serviceIds.slice(0, 10)),
-                        orderBy("createdAt", "desc"),
-                        limit(MAX_NOTIFICATIONS)
-                    ),
-                    async (snap) => {
-                        for (const d of snap.docs) {
-                            const r = d.data();
-                            if (r.userId === user.uid) continue;
-
-                            const name = await getUserName(r.userId);
-                            const date = r.createdAt?.toDate() || new Date();
-
-
-                            let message = "";
-                            if (r.rating && r.text) {
-                                message = `New ${r.rating}-star rating and review from ${name}`;
-                            } else if (r.rating) {
-                                message = `New ${r.rating}-star rating from ${name}`;
-                            } else if (r.text) {
-                                message = `New review from ${name}`;
-                            } else {
-                                continue;
-                            }
-
-                            notificationsMap.current.set(`rating_${d.id}`, {
-                                id: `rating_${d.id}`,
-                                type: "rating",
-                                title: "New Rating/Review",
-                                message,
-                                subText: r.text
-                                    ? `"${r.text.slice(0, 50)}${r.text.length > 50 ? "..." : ""}"`
-                                    : "",
-                                date,
-                                timestamp: date.getTime(),
-                                postId: r.serviceId,
-                                postType: "service"
-                            });
-                        }
-                        updateUI();
-                    }
-                );
-            }
-
-            // Listen for reviews on ads
-            const adIds = userPosts.ads.map(a => a.id);
-            let unsubAdReviews;
-            if (adIds.length > 0) {
-                unsubAdReviews = onSnapshot(
-                    query(
-                        collection(db, "adReviews"),
-                        where("adId", "in", adIds.slice(0, 10)),
-                        orderBy("createdAt", "desc"),
-                        limit(MAX_NOTIFICATIONS)
-                    ),
-                    async (snap) => {
-                        for (const d of snap.docs) {
-                            const r = d.data();
-                            if (r.userId === user.uid) continue;
-
-                            const name = await getUserName(r.userId);
-                            const date = r.createdAt?.toDate() || new Date();
-
-
-                            let message = "";
-                            if (r.rating && r.text) {
-                                message = `New ${r.rating}-star rating and review from ${name}`;
-                            } else if (r.rating) {
-                                message = `New ${r.rating}-star rating from ${name}`;
-                            } else if (r.text) {
-                                message = `New review from ${name}`;
-                            } else {
-                                continue;
-                            }
-
-                            notificationsMap.current.set(`rating_${d.id}`, {
-                                id: `rating_${d.id}`,
-                                type: "rating",
-                                title: "New Rating/Review",
-                                message,
-                                subText: r.text
-                                    ? `"${r.text.slice(0, 50)}${r.text.length > 50 ? "..." : ""}"`
-                                    : "",
-                                date,
-                                timestamp: date.getTime(),
-                                postId: r.adId,
-                                postType: "ad"
-                            });
-                        }
-                        updateUI();
-                    }
-                );
-            }
-
-            return () => {
-                if (unsubWorkerReviews) unsubWorkerReviews();
-                if (unsubServiceReviews) unsubServiceReviews();
-                if (unsubAdReviews) unsubAdReviews();
-            };
-        };
-
-        let unsubFeedback;
-        loadUserFeedback().then(u => unsubFeedback = u);
 
         /* ---------------- APP UPDATES ---------------- */
 
@@ -437,30 +406,137 @@ export default function Notifications() {
                 orderBy("createdAt", "desc"),
                 limit(MAX_NOTIFICATIONS)
             ),
-            (snap) => {
-                snap.forEach((d) => {
+            async (snap) => {
+                // Parallelize system notification processing
+                await Promise.all(snap.docs.map(async (d) => {
                     const data = d.data();
-                    const date = data.createdAt?.toDate() || new Date();
+                    if (data.type === 'chat' || data.message?.toLowerCase().includes('message')) return;
+
+                    let message = data.message || "";
+                    const type = data.type || "system";
+                    const status = data.status;
+                    const msgLower = message.toLowerCase();
+                    const date = parseDate(data.createdAt);
+
+                    const isLegacyStatus = msgLower.includes("favorited") ||
+                        msgLower.includes("back online") ||
+                        msgLower.includes("disabled") ||
+                        msgLower.includes("expired");
+
+                    let extractedPostType = data.postType ||
+                        (data.link?.includes("worker-detail") ? "worker" :
+                            data.link?.includes("service-detail") ? "service" :
+                                data.link?.includes("ad-detail") ? "ad" :
+                                    (msgLower.includes("worker") ? "worker" :
+                                        msgLower.includes("service") ? "service" :
+                                            msgLower.includes("ad") ? "ad" : null));
+                    let extractedPostId = data.postId || (data.link ? data.link.split('/').pop() : null);
+                    let extractedStatus = null;
+
+                    if (type === "post_status" || type === "rating" || type === "review" || type === "reply" || status || isLegacyStatus) {
+                        try {
+                            const currentStatus = status || (msgLower.includes("disabled") ? "disabled" : msgLower.includes("online") || msgLower.includes("enabled") ? "active" : msgLower.includes("expired") ? "expired" : msgLower.includes("deleted") ? "deleted" : null);
+
+                            if (currentStatus && extractedPostId && extractedPostType) {
+                                extractedStatus = currentStatus;
+                                const displayType = extractedPostType === 'ad' ? 'ads' : extractedPostType;
+
+                                if (currentStatus === 'deleted') {
+                                    message = `a ${displayType} post is deleted by the post owner and the post is vanished from favorites`;
+                                } else {
+                                    const colName = { worker: "workers", service: "services", ad: "ads" }[extractedPostType];
+                                    if (colName) {
+                                        const postSnap = await getDoc(doc(db, colName, extractedPostId));
+                                        if (postSnap.exists()) {
+                                            const p = postSnap.data();
+                                            const ownerId = p.createdBy;
+                                            const ownerName = ownerId ? await getUserName(ownerId) : "Owner";
+                                            const titleWords = p.name || p.title || "";
+
+                                            if (currentStatus === 'active') {
+                                                message = `${ownerName} enabled "${titleWords}" post and now the ${displayType} post is available in favorites`;
+                                            } else if (currentStatus === 'disabled') {
+                                                message = `${ownerName} disabled "${titleWords}" post and the ${displayType} post is vanished from favorites, it will be seen back when it is enabled back`;
+                                            } else if (currentStatus === 'expired') {
+                                                message = `${ownerName} expired "${titleWords}" post and the ${displayType} post is removed from favorites`;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            else if (type === "rating" || type === "review") {
+                                const senderId = data.senderId || data.fromUserId;
+                                if (senderId) {
+                                    const name = await getUserName(senderId);
+                                    const rating = data.rating;
+                                    const hasText = data.hasText || data.text || msgLower.includes("review");
+
+                                    if (rating) {
+                                        notificationsMap.current.set(`sys_rate_${d.id}`, {
+                                            id: `sys_rate_${d.id}`,
+                                            type: "rating",
+                                            title: "New Rating",
+                                            message: `New ${rating}-star rating received from ${name}`,
+                                            date,
+                                            timestamp: date.getTime(),
+                                            postId: extractedPostId || null,
+                                            postType: extractedPostType || null
+                                        });
+                                    }
+
+                                    if (hasText) {
+                                        const reviewText = data.text || "";
+                                        notificationsMap.current.set(`sys_rev_${d.id}`, {
+                                            id: `sys_rev_${d.id}`,
+                                            type: "review",
+                                            title: "New Review",
+                                            message: `New review received from ${name}`,
+                                            subText: reviewText ? `"${reviewText.slice(0, 50)}${reviewText.length > 50 ? "..." : ""}"` : null,
+                                            date,
+                                            timestamp: date.getTime(),
+                                            postId: extractedPostId || null,
+                                            postType: extractedPostType || null
+                                        });
+                                    }
+                                    return;
+                                }
+                            }
+                            else if (type === "reply") {
+                                const senderId = data.senderId || data.fromUserId;
+                                if (senderId) {
+                                    const name = await getUserName(senderId);
+                                    message = `${name} replied to your review`;
+                                }
+                            }
+                        } catch (e) {
+                            console.error("Error re-formatting system notification:", e);
+                        }
+                    }
 
                     notificationsMap.current.set(`sys_${d.id}`, {
                         id: `sys_${d.id}`,
-                        type: "system",
-                        title: data.title || "App Update",
-                        message: data.message || "",
+                        type,
+                        title: type === "reply" ? "Review Reply" : (data.title || "App Update"),
+                        message,
                         date,
                         timestamp: date.getTime(),
-                        actionUrl: data.actionUrl || null
+                        actionUrl: data.actionUrl || null,
+                        postId: extractedPostId || null,
+                        postType: extractedPostType || null,
+                        status: extractedStatus || status || null
                     });
-                });
+                }));
                 updateUI();
             }
         );
 
         /* ---------------- CLEANUP ---------------- */
+        const currentPostUnsubs = postUnsubsMap.current;
 
         return () => {
             unsubFavorites.forEach(unsub => unsub());
-            if (unsubFeedback) unsubFeedback();
+            unsubReplies.forEach(unsub => unsub());
+            currentPostUnsubs.forEach(unsub => unsub());
             unsubSystem();
         };
     }, [user, navigate]);
@@ -479,7 +555,12 @@ export default function Notifications() {
         <div className="min-h-screen bg-gray-50 max-w-md mx-auto flex flex-col">
             <div className="bg-white px-4 py-3 sticky top-0 z-10 shadow-sm flex items-center gap-3">
                 <button
-                    onClick={() => navigate(-1)}
+                    onClick={() => {
+                        // EXPLICIT EXIT: User finished reading. Update persistent read time.
+                        localStorage.setItem('lastNotificationView', Date.now().toString());
+                        sessionStorage.removeItem('notif_view_ref');
+                        navigate(-1);
+                    }}
                     className="p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-full"
                 >
                     <FiArrowLeft size={24} />
@@ -512,7 +593,13 @@ export default function Notifications() {
                     </div>
                 ) : (
                     notifications.map(n => (
-                        <NotificationItem key={n.id} notif={n} />
+                        <NotificationItem
+                            key={n.id}
+                            notif={{
+                                ...n,
+                                isNew: Number(n.timestamp || 0) > Number(viewTimeRef.current)
+                            }}
+                        />
                     ))
                 )}
             </div>

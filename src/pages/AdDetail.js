@@ -240,10 +240,10 @@ export default function AdDetail() {
               senderId: currentUserId,
               type: "review",
               title: "New Rating",
-              message: `Your ad "${ad.title}" received a ${newRating} star rating`,
-              link: `/ad-detail/${adId}`,
+              message: `New ${newRating}-star rating received`, link: `/ad-detail/${adId}`,
               postId: adId,
               postType: "ad",
+              rating: newRating,
               read: false,
               createdAt: serverTimestamp()
             });
@@ -273,10 +273,10 @@ export default function AdDetail() {
               senderId: currentUserId,
               type: "review",
               title: "New Review",
-              message: `New review on your ad "${ad.title}": "${newReviewText.substring(0, 50)}${newReviewText.length > 50 ? '...' : ''}"`,
-              link: `/ad-detail/${adId}`,
+              message: `New review received`, link: `/ad-detail/${adId}`,
               postId: adId,
               postType: "ad",
+              text: newReviewText.trim(),
               read: false,
               createdAt: serverTimestamp()
             });
@@ -324,12 +324,13 @@ export default function AdDetail() {
           await addDoc(collection(db, "notifications"), {
             userId: reviewerId,
             senderId: currentUserId,
-            type: "review_reply",
+            type: "reply",
             title: "New Reply",
-            message: `Owner replied to your review on ${ad?.title || "their ad"}`,
-            link: `/ad-detail/${adId}`,
+            message: `replied to your review`, link: `/ad-detail/${adId}`,
             postId: adId,
             postType: "ad",
+            rating: null,
+            text: replyText.trim(),
             read: false,
             createdAt: serverTimestamp()
           });

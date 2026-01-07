@@ -120,7 +120,7 @@ function isValidCoordinate(value) {
 }
 
 // PostMenu Component - Compact modal style
-function PostMenu({ post, closeMenu, updatePosts, currentTab, setShowConfirm, setConfirmProps, setShowAbout, navigate }) {
+function PostMenu({ post, closeMenu, updatePosts, currentTab, setShowConfirm, setConfirmProps, setShowAbout, navigate, user, profile }) {
   const modalRef = useRef(null);
 
   useEffect(() => {
@@ -185,30 +185,37 @@ function PostMenu({ post, closeMenu, updatePosts, currentTab, setShowConfirm, se
       const promises = snap.docs.map(docSnap => {
         const data = docSnap.data();
         if (data.userId) {
+          const ownerName = profile?.username || "Owner";
+          const titleWords = post.name || post.title || "";
+          const postType = typeLabel.toLowerCase();
+          const displayType = postType === 'ad' ? 'ads' : postType;
+
           let title = "";
           let message = "";
 
           if (action === "expire") {
             title = "Favorite Expired";
-            message = `A ${typeLabel} you favorited has expired: "${post.title}"`;
+            message = `${ownerName} expired "${titleWords}" post and the ${displayType} post is removed from favorites`;
           } else if (action === "disable") {
             title = "Favorite Disabled";
-            message = `A ${typeLabel} you favorited has been disabled: "${post.title}"`;
+            message = `${ownerName} disabled "${titleWords}" post and the ${displayType} post is vanished from favorites, it will be seen back when it is enabled back`;
           } else if (action === "delete") {
             title = "Favorite Deleted";
-            message = `A ${typeLabel} you favorited was deleted: "${post.title}"`;
+            message = `a ${displayType} post is deleted by the post owner and the post is vanished from favorites`;
           } else if (action === "enable") {
             title = "Favorite Available";
-            message = `A ${typeLabel} you favorited is back online: "${post.title}"`;
+            message = `${ownerName} enabled "${titleWords}" post and now the ${displayType} post is available in favorites`;
           }
 
           if (title) {
             return addDoc(collection(db, "notifications"), {
               userId: data.userId,
-              senderId: post.createdBy,
-              type: "alert",
+              senderId: user.uid,
+              type: "post_status",
               title: title,
               message: message,
+              postId: post.id,
+              postType: postType,
               link: action === "delete" ? null : `/${colName.slice(0, -1)}-detail/${post.id}`,
               read: false,
               createdAt: serverTimestamp()
@@ -1559,7 +1566,9 @@ export default function Profile() {
       setShowConfirm: setShowConfirm,
       setConfirmProps: setConfirmProps,
       setShowAbout: setShowAbout,
-      navigate: navigate
+      navigate: navigate,
+      user: user,
+      profile: profile
     }),
 
     // Confirmation Modal

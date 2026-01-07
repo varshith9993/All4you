@@ -260,6 +260,7 @@ export default function AddServices() {
         profilePhotoUrl: profilePhotoUrl || "",
         type: serviceType,
         serviceType,
+        status: "active",
         createdAt: serverTimestamp(),
         createdBy: currentUser.uid,
       });

@@ -179,7 +179,7 @@ export default function Login() {
               disabled={submitting}
               aria-label={showPassword ? "Hide password" : "Show password"}
             >
-              {showPassword ? <FiEyeOff size={20} /> : <FiEye size={20} />}
+              {showPassword ? <FiEye size={20} /> : <FiEyeOff size={20} />}
             </button>
           </div>
 

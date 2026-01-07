@@ -202,6 +202,7 @@ export default function AddWorkers() {
         longitude: parseFloat(longitude),
         profileImage: profilePhotoUrl || "",
         files: uploadedFiles,
+        status: "active",
         createdAt: serverTimestamp(),
         createdBy: currentUser.uid,
       });

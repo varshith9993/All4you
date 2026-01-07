@@ -452,10 +452,11 @@ export default function WorkerDetail() {
               senderId: currentUserId,
               type: "review",
               title: "New Rating",
-              message: `Your worker profile "${worker.title}" received a ${newRating} star rating`,
+              message: `New ${newRating}-star rating received`, // Interceptor will add user name
               link: `/worker-detail/${id}`,
               postId: id,
               postType: "worker",
+              rating: newRating,
               read: false,
               createdAt: serverTimestamp()
             });
@@ -487,10 +488,11 @@ export default function WorkerDetail() {
               senderId: currentUserId,
               type: "review",
               title: "New Review",
-              message: `New review on your worker profile "${worker.title}": "${newReviewText.substring(0, 50)}${newReviewText.length > 50 ? '...' : ''}"`,
+              message: `New review received`, // Interceptor will add user name
               link: `/worker-detail/${id}`,
               postId: id,
               postType: "worker",
+              text: newReviewText.trim(),
               read: false,
               createdAt: serverTimestamp()
             });
@@ -545,12 +547,14 @@ export default function WorkerDetail() {
           await addDoc(collection(db, "notifications"), {
             userId: reviewerId,
             senderId: currentUserId,
-            type: "review_reply",
+            type: "reply",
             title: "New Reply",
-            message: `Owner replied to your review on ${worker?.title || "their profile"}`,
+            message: `replied to your review`, // Interceptor will add user name
             link: `/worker-detail/${id}`,
             postId: id,
-            postType: "worker",
+            postType: "worker", // Changed from "ad" to "worker" based on context
+            rating: null, // Added rating field, set to null for replies
+            text: replyText.trim(), // Added text field
             read: false,
             createdAt: serverTimestamp()
           });

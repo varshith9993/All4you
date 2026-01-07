@@ -442,10 +442,10 @@ function ServiceDetail() {
                             senderId: currentUserId,
                             type: "review",
                             title: "New Rating",
-                            message: `Your service "${service.title}" received a ${newRating} star rating`,
-                            link: `/service-detail/${id}`,
+                            message: `New ${newRating}-star rating received`, link: `/service-detail/${id}`,
                             postId: id,
                             postType: "service",
+                            rating: newRating,
                             read: false,
                             createdAt: serverTimestamp()
                         });
@@ -477,10 +477,10 @@ function ServiceDetail() {
                             senderId: currentUserId,
                             type: "review",
                             title: "New Review",
-                            message: `New review on your service "${service.title}": "${newReviewText.substring(0, 50)}${newReviewText.length > 50 ? '...' : ''}"`,
-                            link: `/service-detail/${id}`,
+                            message: `New review received`, link: `/service-detail/${id}`,
                             postId: id,
                             postType: "service",
+                            text: newReviewText.trim(),
                             read: false,
                             createdAt: serverTimestamp()
                         });
@@ -535,12 +535,13 @@ function ServiceDetail() {
                     await addDoc(collection(db, "notifications"), {
                         userId: reviewerId,
                         senderId: currentUserId,
-                        type: "review_reply",
+                        type: "reply",
                         title: "New Reply",
-                        message: `Owner replied to your review on ${service?.title || "their service"}`,
-                        link: `/service-detail/${id}`,
+                        message: `replied to your review`, link: `/service-detail/${id}`,
                         postId: id,
                         postType: "service",
+                        rating: null,
+                        text: replyText.trim(),
                         read: false,
                         createdAt: serverTimestamp()
                     });
