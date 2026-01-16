@@ -5,10 +5,11 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { FiClock, FiCalendar, FiCamera, FiMapPin, FiX, FiImage, FiFileText, FiUpload, FiArrowLeft, FiRotateCcw } from "react-icons/fi";
-import defaultAvatar from "../assets/images/default_profile.png";
+import defaultAvatar from "../assets/images/default_profile.svg";
+import LocationPickerModal from "../components/LocationPickerModal";
 
 const suggestedTags = ["note-taking", "delivery", "electrician", "repairs", "consulting"];
-const OPENCAGE_API_KEY = "43ac78a805af4868b01f3dc9dcae8556";
+const LOCATIONIQ_API_KEY = "pk.f85d97d836243abb9099ada5ebe13c73";
 
 export default function EditService() {
     const { id } = useParams();
@@ -24,6 +25,8 @@ export default function EditService() {
     const [locationLandmark, setLocationLandmark] = useState("");
     const [locationCity, setLocationCity] = useState("");
     const [pincode, setPincode] = useState("");
+    const [latitude, setLatitude] = useState("");
+    const [longitude, setLongitude] = useState("");
 
     // Expiry state
     const [currentExpiry, setCurrentExpiry] = useState(null);
@@ -40,6 +43,7 @@ export default function EditService() {
     const [loading, setLoading] = useState(true);
     const [saveConfirm, setSaveConfirm] = useState(false);
     const [resetConfirm, setResetConfirm] = useState(false);
+    const [showLocationPicker, setShowLocationPicker] = useState(false);
 
     useEffect(() => {
         async function fetchService() {
@@ -87,6 +91,8 @@ export default function EditService() {
                     setLocationLandmark(serviceData.locationLandmark);
                     setLocationCity(serviceData.locationCity);
                     setPincode(serviceData.pincode);
+                    setLatitude(data.latitude || "");
+                    setLongitude(data.longitude || "");
                     setCurrentExpiry(serviceData.expiry);
 
                 } else {
@@ -120,17 +126,30 @@ export default function EditService() {
         }
         navigator.geolocation.getCurrentPosition(async (pos) => {
             const { latitude, longitude } = pos.coords;
+            setLatitude(latitude);
+            setLongitude(longitude);
             try {
-                const geoRes = await axios.get("https://api.opencagedata.com/geocode/v1/json", {
-                    params: { key: OPENCAGE_API_KEY, q: `${latitude}+${longitude}`, pretty: 1 },
+                const geoRes = await axios.get(`https://us1.locationiq.com/v1/reverse.php`, {
+                    params: {
+                        key: LOCATIONIQ_API_KEY,
+                        lat: latitude,
+                        lon: longitude,
+                        format: 'json'
+                    },
                 });
-                const components = geoRes.data.results[0].components;
-                setLocationArea(components.suburb || components.neighbourhood || "");
-                setLocationCity(components.city || components.town || components.village || "");
-                setPincode(components.postcode || "");
+                const addr = geoRes.data.address;
+                setLocationArea(addr.suburb || addr.neighbourhood || addr.village || "");
+                setLocationCity(addr.city || addr.town || addr.county || "");
+                setPincode(addr.postcode || "");
             } catch {
                 alert("Failed to get location details.");
             }
+        }, (err) => {
+            alert("Failed to get location. Please enable GPS and allow location access.");
+        }, {
+            enableHighAccuracy: true,
+            timeout: 30000,
+            maximumAge: 0,
         });
     };
 
@@ -248,6 +267,8 @@ export default function EditService() {
                     city: locationCity.trim(),
                     pincode: pincode.trim(),
                 },
+                latitude: parseFloat(latitude),
+                longitude: parseFloat(longitude),
                 attachments: finalAttachments,
                 profilePhotoUrl,
                 serviceType,
@@ -415,9 +436,18 @@ export default function EditService() {
                             <label className="text-sm font-bold text-gray-700 flex items-center gap-1">
                                 <FiMapPin /> Location <span className="text-red-500">*</span>
                             </label>
-                            <button type="button" className="text-xs font-bold text-indigo-600 hover:underline" onClick={autofillLocation}>
-                                Get Current Location
-                            </button>
+                            <div className="flex gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowLocationPicker(true)}
+                                    className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1"
+                                >
+                                    <FiMapPin size={12} /> Pin on Map
+                                </button>
+                                <button type="button" className="text-xs font-bold text-indigo-600 hover:underline" onClick={autofillLocation}>
+                                    Get Current Location
+                                </button>
+                            </div>
                         </div>
                         <div className="space-y-3">
                             <input type="text" placeholder="Area" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={locationArea} onChange={(e) => setLocationArea(e.target.value)} required />
@@ -425,6 +455,10 @@ export default function EditService() {
                             <div className="grid grid-cols-2 gap-3">
                                 <input type="text" placeholder="City" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={locationCity} onChange={(e) => setLocationCity(e.target.value)} required />
                                 <input type="text" placeholder="Pincode" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={pincode} onChange={(e) => setPincode(e.target.value)} required />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 mt-4">
+                                <input type="text" placeholder="Latitude" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={latitude} onChange={(e) => setLatitude(e.target.value)} required />
+                                <input type="text" placeholder="Longitude" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={longitude} onChange={(e) => setLongitude(e.target.value)} required />
                             </div>
                         </div>
                     </div>
@@ -620,6 +654,25 @@ export default function EditService() {
                     </div>
                 </div>
             )}
+
+            {/* Location Picker Modal */}
+            <LocationPickerModal
+                show={showLocationPicker}
+                initialPosition={{ lat: latitude, lng: longitude }}
+                apiKey={LOCATIONIQ_API_KEY}
+                apiProvider="locationiq"
+                onConfirm={(location) => {
+                    setLatitude(location.lat);
+                    setLongitude(location.lng);
+                    setLocationArea(location.area);
+                    setLocationCity(location.city);
+                    setPincode(location.pincode);
+                    setShowLocationPicker(false);
+                    setError("");
+                }}
+                onCancel={() => setShowLocationPicker(false)}
+            />
         </div>
     );
 }
+

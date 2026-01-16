@@ -38,8 +38,10 @@ import {
 import { db, auth } from "../firebase";
 import { useLocationWithAddress } from "../hooks/useLocationWithAddress";
 import Layout from "../components/Layout";
-import defaultAvatar from "../assets/images/default_profile.png";
+import defaultAvatar from "../assets/images/default_profile.svg";
+import LocationPickerModal from "../components/LocationPickerModal";
 
+const OPENCAGE_API_KEY = "988148bc222049e2831059ea74476abb";
 const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
 const CLOUDINARY_UPLOAD_PRESET = "ml_default";
 
@@ -398,6 +400,7 @@ function PostMenu({ post, closeMenu, updatePosts, currentTab, setShowConfirm, se
 export default function Profile() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [profile, setProfile] = useState(null);
   const [editMode, setEditMode] = useState(false);
   const [editingProfile, setEditingProfile] = useState({});
@@ -414,7 +417,7 @@ export default function Profile() {
   const [showAbout, setShowAbout] = useState(false);
   const [userProfiles, setUserProfiles] = useState({});
 
-  const { location, address, error: locationErr, loading: locationLoading, addressLoading, requestLocation } = useLocationWithAddress();
+  const { location, address, error: locationErr, loading: locationLoading, addressLoading, requestLocation } = useLocationWithAddress(OPENCAGE_API_KEY, 'opencage');
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -1145,7 +1148,7 @@ export default function Profile() {
           React.createElement("img", {
             src: displayProfileImage,
             alt: displayUsername,
-            className: "w-10 h-10 rounded-full object-cover",
+            className: "w-10 h-10 rounded-full object-cover border-2 border-gray-300",
             onError: (e) => { e.target.src = defaultAvatar; },
             crossOrigin: "anonymous"
           }),
@@ -1485,12 +1488,20 @@ export default function Profile() {
             })
           ),
 
-          React.createElement("button", {
-            className: "w-full py-2 text-indigo-600 text-xs font-bold hover:underline",
-            onClick: handleGetLocation,
-            disabled: locationLoading || addressLoading
+          React.createElement("div", {
+            className: "flex gap-3 w-full"
           },
-            (locationLoading || addressLoading) ? "Getting location..." : "Get Current Location"
+            React.createElement("button", {
+              className: "flex-1 py-2 text-indigo-600 text-xs font-bold hover:underline",
+              onClick: handleGetLocation,
+              disabled: locationLoading || addressLoading
+            },
+              (locationLoading || addressLoading) ? "Getting location..." : "Get Current Location"
+            ),
+            React.createElement("button", {
+              className: "flex-1 py-2 text-indigo-600 text-xs font-bold hover:underline",
+              onClick: () => setShowLocationPicker(true)
+            }, "Pin on Map")
           ),
 
           React.createElement("div", {
@@ -1807,6 +1818,27 @@ export default function Profile() {
         )
       )
     ),
+
+    // Location Picker Modal
+    React.createElement(LocationPickerModal, {
+      show: showLocationPicker,
+      initialPosition: { lat: editingProfile.latitude, lng: editingProfile.longitude },
+      apiKey: OPENCAGE_API_KEY, // Pass explicit key
+      apiProvider: "opencage",
+      onConfirm: (location) => {
+        setEditingProfile(prev => ({
+          ...prev,
+          latitude: location.lat,
+          longitude: location.lng,
+          place: location.area || prev.place,
+          city: location.city || prev.city,
+          pincode: location.pincode || prev.pincode
+        }));
+        setStatusMsg("Location updated from map!");
+        setShowLocationPicker(false);
+      },
+      onCancel: () => setShowLocationPicker(false)
+    }),
 
     // Add CSS animations
     React.createElement("style", null, `

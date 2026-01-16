@@ -4,10 +4,11 @@ import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import axios from "axios";
 import { FiArrowLeft, FiX, FiMapPin, FiUploadCloud, FiRotateCcw } from "react-icons/fi";
+import LocationPickerModal from "../components/LocationPickerModal";
 
 const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
 const CLOUDINARY_UPLOAD_PRESET = "ml_default";
-const OPENCAGE_API_KEY = "43ac78a805af4868b01f3dc9dcae8556";
+const LOCATIONIQ_API_KEY = "pk.a9310b368752337ce215643e50ac0172";
 const suggestedTags = ["discount", "offer", "sale", "new", "limited", "popular"];
 const MAX_PHOTOS = 8;
 
@@ -43,6 +44,7 @@ export default function EditAd() {
   const [saveConfirm, setSaveConfirm] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
 
   // Fetch ad data on mount
   useEffect(() => {
@@ -155,13 +157,18 @@ export default function EditAd() {
         const { latitude: lat, longitude: lng } = pos.coords;
         setLatitude(lat.toString());
         setLongitude(lng.toString());
-        const geoRes = await axios.get("https://api.opencagedata.com/geocode/v1/json", {
-          params: { key: OPENCAGE_API_KEY, q: `${lat}+${lng}`, pretty: 1 },
+        const geoRes = await axios.get(`https://us1.locationiq.com/v1/reverse.php`, {
+          params: {
+            key: LOCATIONIQ_API_KEY,
+            lat: lat,
+            lon: lng,
+            format: 'json'
+          },
         });
-        const components = geoRes.data.results[0].components;
-        setLocationArea(components.suburb || components.neighbourhood || "");
-        setLocationCity(components.city || components.town || components.village || "");
-        setPincode(components.postcode || "");
+        const addr = geoRes.data.address;
+        setLocationArea(addr.suburb || addr.neighbourhood || addr.village || "");
+        setLocationCity(addr.city || addr.town || addr.county || "");
+        setPincode(addr.postcode || "");
         setLocationMsg("Location fetched!");
       } catch {
         setLocationMsg("");
@@ -171,8 +178,12 @@ export default function EditAd() {
       }
     }, () => {
       setLocationMsg("");
-      setError("Failed to fetch location.");
+      setError("Failed to fetch location. Please enable GPS and allow location access.");
       setLocationLoading(false);
+    }, {
+      enableHighAccuracy: true,
+      timeout: 30000,
+      maximumAge: 0,
     });
   };
 
@@ -400,9 +411,18 @@ export default function EditAd() {
               <label className="text-sm font-bold text-gray-700 flex items-center gap-1">
                 <FiMapPin /> Location <span className="text-red-500">*</span>
               </label>
-              <button type="button" className="text-xs font-bold text-indigo-600 hover:underline" onClick={autofillLocation} disabled={locationLoading}>
-                {locationLoading ? "Getting..." : "Get Current Location"}
-              </button>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowLocationPicker(true)}
+                  className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1"
+                >
+                  <FiMapPin size={12} /> Pin on Map
+                </button>
+                <button type="button" className="text-xs font-bold text-indigo-600 hover:underline" onClick={autofillLocation} disabled={locationLoading}>
+                  {locationLoading ? "Getting..." : "Get Current Location"}
+                </button>
+              </div>
             </div>
             <div className="space-y-3">
               <input type="text" value={locationArea} onChange={e => setLocationArea(e.target.value)} placeholder="Area" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" required />
@@ -491,6 +511,24 @@ export default function EditAd() {
           </div>
         </div>
       )}
+
+      {/* Location Picker Modal */}
+      <LocationPickerModal
+        show={showLocationPicker}
+        initialPosition={{ lat: latitude, lng: longitude }}
+        apiKey={LOCATIONIQ_API_KEY}
+        apiProvider="locationiq"
+        onConfirm={(location) => {
+          setLatitude(location.lat);
+          setLongitude(location.lng);
+          setLocationArea(location.area);
+          setLocationCity(location.city);
+          setPincode(location.pincode);
+          setShowLocationPicker(false);
+          setError("");
+        }}
+        onCancel={() => setShowLocationPicker(false)}
+      />
     </div>
   );
 }

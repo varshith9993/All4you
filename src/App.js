@@ -30,6 +30,7 @@ import GetUserId from "./pages/GetUserId";
 import NoInternet from "./components/NoInternet";
 import Notes from "./pages/Notes";
 import TermsAndConditions from "./pages/TermsAndConditions";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 import VerifyEmail from "./pages/VerifyEmail";
 
 export default function App() {
@@ -132,6 +133,7 @@ export default function App() {
       <Route path="/notes" element={<Notes />} />
       <Route path="/notes" element={<Notes />} />
       <Route path="/terms" element={<TermsAndConditions />} />
+      <Route path="/privacy-policy" element={<PrivacyPolicy />} />
       <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="*" element={<div>404 Page Not Found</div>} />
     </Routes>

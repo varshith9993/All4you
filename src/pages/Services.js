@@ -4,7 +4,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { db, auth } from "../firebase";
 import { collection, query, onSnapshot, doc } from "firebase/firestore";
 import { FiMapPin, FiWifi, FiFilter, FiChevronDown, FiX, FiPlus, FiStar, FiSearch } from "react-icons/fi";
-import defaultAvatar from "../assets/images/default_profile.png";
+import defaultAvatar from "../assets/images/default_profile.svg";
 import Layout from "../components/Layout";
 import {
   buildFuseIndex,

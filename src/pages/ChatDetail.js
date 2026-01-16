@@ -36,7 +36,7 @@ import {
 } from "react-icons/fi";
 import { MdDone, MdDoneAll, MdAdd, MdMic } from "react-icons/md";
 import { uploadToCloudinary } from "../utils/cloudinaryUpload";
-import defaultProfile from "../assets/images/default_profile.png";
+import defaultProfile from "../assets/images/default_profile.svg";
 
 
 function formatTime(date) {

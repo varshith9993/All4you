@@ -14,7 +14,7 @@ import {
   FiChevronLeft,
   FiChevronRight
 } from "react-icons/fi";
-import defaultAvatar from "../assets/images/default_profile.png";
+import defaultAvatar from "../assets/images/default_profile.svg";
 
 // Helper functions
 function getDistanceKm(lat1, lon1, lat2, lon2) {
@@ -80,16 +80,44 @@ export default function Favorites() {
   const [uid, setUid] = useState("");
   const [tab, setTab] = useState("workers");
   const [servicePhase, setServicePhase] = useState("all");
+
+  // CACHE: Initialize from localStorage
   const [favorites, setFavorites] = useState([]);
-  const [posts, setPosts] = useState({ workers: [], services: [], ads: [] });
+
+  const [posts, setPosts] = useState(() => {
+    try {
+      const cached = localStorage.getItem('fav_posts_cache');
+      return cached ? JSON.parse(cached) : { workers: [], services: [], ads: [] };
+    } catch { return { workers: [], services: [], ads: [] }; }
+  });
+
+  const [userProfiles, setUserProfiles] = useState(() => {
+    try {
+      const cached = localStorage.getItem('fav_profiles_cache');
+      return cached ? JSON.parse(cached) : {};
+    } catch { return {}; }
+  });
+
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState([]);
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userProfile, setUserProfile] = useState(null);
-  const [userProfiles, setUserProfiles] = useState({});
   const [currentUserId, setCurrentUserId] = useState(null);
   const navigate = useNavigate();
+
+  // Save to cache whenever state changes
+  useEffect(() => {
+    if (Object.keys(posts.workers).length || Object.keys(posts.services).length || Object.keys(posts.ads).length) {
+      localStorage.setItem('fav_posts_cache', JSON.stringify(posts));
+    }
+  }, [posts]);
+
+  useEffect(() => {
+    if (Object.keys(userProfiles).length > 0) {
+      localStorage.setItem('fav_profiles_cache', JSON.stringify(userProfiles));
+    }
+  }, [userProfiles]);
 
   // Auth state
   useEffect(() => {
@@ -169,53 +197,134 @@ export default function Favorites() {
     });
   };
 
-  // Fetch posts live and their creator profiles
+  // Fetch posts efficiently (Incremental update + Cache)
   useEffect(() => {
-    async function fetchPosts() {
-      const map = { workers: [], services: [], ads: [] };
+    async function updatePosts() {
+      // 1. Identify valid favorites
+      const validFavIds = new Set(favorites.map(f => f.postId));
 
-      for (const fav of favorites) {
-        const collectionName = fav.type === 'worker' ? 'workers' : fav.type === 'service' ? 'services' : 'ads';
-        const postId = fav.postId;
+      // 2. Filter existing posts to remove deleted favorites
+      // We process each category separately
+      const currentWorkers = posts.workers || [];
+      const currentServices = posts.services || [];
+      const currentAds = posts.ads || [];
 
-        if (postId) {
-          try {
-            const snap = await getDoc(doc(db, collectionName, postId));
-            if (snap.exists()) {
-              const postData = snap.data();
-              const key = collectionName;
-              map[key].push({
-                ...postData,
-                id: snap.id,
-                favId: fav.id,
-                favCollection: fav.type === 'worker' ? 'workerFavorites' : fav.type === 'service' ? 'serviceFavorites' : 'adFavorites'
-              });
+      // Helper: keep post if its ID is in validFavIds
+      const keepPost = (p) => validFavIds.has(p.id);
 
-              // Fetch creator profile for real-time updates
-              const creatorId = postData.createdBy;
-              if (creatorId && !userProfiles[creatorId]) {
-                onSnapshot(doc(db, 'profiles', creatorId), (profileSnap) => {
-                  if (profileSnap.exists()) {
-                    setUserProfiles(prev => ({
-                      ...prev,
-                      [creatorId]: profileSnap.data()
-                    }));
-                  }
-                });
+      let nextWorkers = currentWorkers.filter(keepPost);
+      let nextServices = currentServices.filter(keepPost);
+      let nextAds = currentAds.filter(keepPost);
+
+      // 3. Identify missing posts (Favs that are not in nextLists)
+      const cachedWorkerIds = new Set(nextWorkers.map(p => p.id));
+      const cachedServiceIds = new Set(nextServices.map(p => p.id));
+      const cachedAdIds = new Set(nextAds.map(p => p.id));
+
+      const missingFavs = favorites.filter(fav => {
+        if (fav.type === 'worker') return !cachedWorkerIds.has(fav.postId);
+        if (fav.type === 'service') return !cachedServiceIds.has(fav.postId);
+        if (fav.type === 'ad') return !cachedAdIds.has(fav.postId);
+        return false;
+      });
+
+      // 4. Fetch missing posts
+      if (missingFavs.length > 0) {
+        // Group by type
+        const newItems = { workers: [], services: [], ads: [] };
+
+        await Promise.all(missingFavs.map(async (fav) => {
+          const collectionName = fav.type === 'worker' ? 'workers' : fav.type === 'service' ? 'services' : 'ads';
+          const postId = fav.postId;
+
+          if (postId) {
+            try {
+              const snap = await getDoc(doc(db, collectionName, postId));
+              if (snap.exists()) {
+                const postData = snap.data();
+                const item = {
+                  ...postData,
+                  id: snap.id,
+                  favId: fav.id,
+                  favCollection: fav.type === 'worker' ? 'workerFavorites' : fav.type === 'service' ? 'serviceFavorites' : 'adFavorites'
+                };
+
+                if (fav.type === 'worker') newItems.workers.push(item);
+                else if (fav.type === 'service') newItems.services.push(item);
+                else newItems.ads.push(item);
+
+                // Fetch creator profile if missing
+                const creatorId = postData.createdBy;
+                // Check if profile exists in cache (userProfiles state maps ID -> data)
+                // Note: We access current state 'userProfiles' here. 
+                // Since this is async, we should probably check a ref or just fetch to be safe/simple.
+                // We'll optimistically skip if we "think" we have it, but here we can't easily check state inside async map without deps.
+                // We'll just fetch updates for profiles of newly fetched posts.
+                if (creatorId) {
+                  getDoc(doc(db, 'profiles', creatorId)).then(pSnap => {
+                    if (pSnap.exists()) {
+                      setUserProfiles(prev => ({ ...prev, [creatorId]: pSnap.data() }));
+                    }
+                  });
+                }
               }
+            } catch (error) {
+              console.error(`Error fetching ${collectionName}:`, error);
             }
-          } catch (error) {
-            console.error(`Error fetching ${collectionName}:`, error);
           }
-        }
+        }));
+
+        // Merge new items
+        nextWorkers = [...nextWorkers, ...newItems.workers];
+        nextServices = [...nextServices, ...newItems.services];
+        nextAds = [...nextAds, ...newItems.ads];
       }
 
-      setPosts(map);
+      // 5. Update state only if changed (Deep comparison is expensive, checking lengths is a cheap proxy)
+      // or we can just set it. React handles equality checks if ref is same, but we are creating new arrays.
+      // To avoid loops, we rely on the dependency array [favorites].
+
+      // We also need to attach the correct favId for the *existing* posts because favId might change if user unfavs and refavs? 
+      // Actually favId comes from the Favorites collection doc ID.
+      // Let's ensure all posts have the correct favId map.
+      const mapFavInfo = (list, type) => list.map(p => {
+        const fav = favorites.find(f => f.postId === p.id && f.type === type);
+        if (fav) {
+          return { ...p, favId: fav.id, favCollection: fav.type === 'worker' ? 'workerFavorites' : fav.type === 'service' ? 'serviceFavorites' : 'adFavorites' };
+        }
+        return p;
+      });
+
+      nextWorkers = mapFavInfo(nextWorkers, 'worker');
+      nextServices = mapFavInfo(nextServices, 'service');
+      nextAds = mapFavInfo(nextAds, 'ad');
+
+      // Check if anything actually changed to avoid infinite loops
+      // 1. Did we fetch anything new? (missingFavs > 0)
+      // 2. Did we filter anything out? (length changed)
+      const hasAdded = missingFavs.length > 0;
+      const hasRemoved =
+        nextWorkers.length !== currentWorkers.length ||
+        nextServices.length !== currentServices.length ||
+        nextAds.length !== currentAds.length;
+
+      // Note: We also re-map favIds. If favIds changed (e.g. removed and re-added same post), we should update.
+      // But usually checking lengths + added is enough for this cache logic.
+      // To be safe, if we have favorites but no posts, we should update.
+
+      if (hasAdded || hasRemoved || (favorites.length > 0 && nextWorkers.length === 0 && nextServices.length === 0 && nextAds.length === 0 && posts.workers.length === 0)) {
+        setPosts({
+          workers: nextWorkers,
+          services: nextServices,
+          ads: nextAds
+        });
+      }
     }
 
-    if (favorites.length) fetchPosts();
-    else setPosts({ workers: [], services: [], ads: [] });
-  }, [favorites, userProfiles]);
+    if (favorites.length || posts.workers.length || posts.services.length || posts.ads.length) {
+      updatePosts();
+    }
+  }, [favorites, posts.workers, posts.services, posts.ads]);
 
   // Remove selected
   async function removeSelected() {
@@ -605,7 +714,7 @@ export default function Favorites() {
             </div>
           )}
           <div className="relative flex-shrink-0">
-            <img src={displayProfileImage} alt={displayUsername} className="w-10 h-10 rounded-full object-cover" onError={(e) => { e.target.src = defaultAvatar; }} crossOrigin="anonymous" />
+            <img src={displayProfileImage} alt={displayUsername} className="w-10 h-10 rounded-full object-cover border-2 border-gray-300" onError={(e) => { e.target.src = defaultAvatar; }} crossOrigin="anonymous" />
             {isOnline && <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>}
           </div>
           <div className="flex-1 min-w-0">

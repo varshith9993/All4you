@@ -17,7 +17,8 @@ import {
   arrayUnion
 } from "firebase/firestore";
 import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiMoreVertical, FiTrash2, FiFileText, FiFile, FiEye, FiDownload, FiAlertCircle, FiExternalLink, FiLoader, FiChevronLeft, FiChevronRight } from "react-icons/fi";
-import defaultAvatar from "../assets/images/default_profile.png";
+import MapComponent from "../components/MapComponent";
+import defaultAvatar from "../assets/images/default_profile.svg";
 
 function ManualStars({ value, onChange, size = 46 }) {
   const [hover, setHover] = useState(0);
@@ -797,6 +798,14 @@ export default function WorkerDetail() {
                 {worker.location.pincode && ` - ${worker.location.pincode}`}
                 {worker.location.landmark && <div className="text-sm text-gray-500 mt-1.5 tracking-normal">Landmark: {worker.location.landmark}</div>}
               </span>
+            </div>
+            {/* Map Component */}
+            <div className="mt-3">
+              <MapComponent
+                latitude={worker.location?.latitude || worker.latitude}
+                longitude={worker.location?.longitude || worker.longitude}
+                address={`${worker.location?.city || ''} ${worker.location?.area || ''}`}
+              />
             </div>
           </div>
         )}

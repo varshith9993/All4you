@@ -5,9 +5,10 @@ import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { FiClock, FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck } from "react-icons/fi";
+import LocationPickerModal from "../components/LocationPickerModal";
 
 const suggestedTags = ["note-taking", "delivery", "electrician", "repairs", "consulting", "cleaning", "plumbing", "tutoring", "moving", "gardening", "coding", "design", "writing"];
-const OPENCAGE_API_KEY = "43ac78a805af4868b01f3dc9dcae8556";
+const LOCATIONIQ_API_KEY = "pk.f85d97d836243abb9099ada5ebe13c73";
 // const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/auto/upload"; // Deprecated global const
 
 export default function AddServices() {
@@ -34,6 +35,7 @@ export default function AddServices() {
   const [longitude, setLongitude] = useState("");
   const [locationLoading, setLocationLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
 
   const navigate = useNavigate();
 
@@ -95,21 +97,30 @@ export default function AddServices() {
       setLatitude(latitude.toString());
       setLongitude(longitude.toString());
       try {
-        const geoRes = await axios.get("https://api.opencagedata.com/geocode/v1/json", {
-          params: { key: OPENCAGE_API_KEY, q: `${latitude}+${longitude}`, pretty: 1 },
+        const geoRes = await axios.get(`https://us1.locationiq.com/v1/reverse.php`, {
+          params: {
+            key: LOCATIONIQ_API_KEY,
+            lat: latitude,
+            lon: longitude,
+            format: 'json'
+          },
         });
-        const components = geoRes.data.results[0].components;
-        setLocationArea(components.suburb || components.neighbourhood || "");
-        setLocationCity(components.city || components.town || components.village || "");
-        setPincode(components.postcode || "");
+        const addr = geoRes.data.address;
+        setLocationArea(addr.suburb || addr.neighbourhood || addr.village || "");
+        setLocationCity(addr.city || addr.town || addr.county || "");
+        setPincode(addr.postcode || "");
       } catch {
         setError("Failed to get location details");
       } finally {
         setLocationLoading(false);
       }
     }, (err) => {
-      setError("Failed to get location");
+      setError("Failed to get location. Please enable GPS and allow location access.");
       setLocationLoading(false);
+    }, {
+      enableHighAccuracy: true,
+      timeout: 30000,
+      maximumAge: 0,
     });
   };
 
@@ -462,24 +473,34 @@ export default function AddServices() {
               <FiMapPin className="text-blue-600" />
               Location
             </h2>
-            <button
-              type="button"
-              onClick={autofillLocation}
-              disabled={locationLoading}
-              className="mb-4 px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              {locationLoading ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                  Getting location...
-                </>
-              ) : (
-                <>
-                  <FiMapPin size={16} />
-                  Get Current Location
-                </>
-              )}
-            </button>
+            <div className="flex gap-3 mb-4">
+              <button
+                type="button"
+                onClick={autofillLocation}
+                disabled={locationLoading}
+                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {locationLoading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                    Getting location...
+                  </>
+                ) : (
+                  <>
+                    <FiMapPin size={16} />
+                    Get Current Location
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowLocationPicker(true)}
+                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium flex items-center justify-center gap-2"
+              >
+                <FiMapPin size={16} />
+                Pin Location on Map
+              </button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <input
                 type="text"
@@ -685,6 +706,24 @@ export default function AddServices() {
             )}
           </button>
         </form>
+
+        {/* Location Picker Modal */}
+        <LocationPickerModal
+          show={showLocationPicker}
+          initialPosition={{ lat: latitude, lng: longitude }}
+          apiKey={LOCATIONIQ_API_KEY}
+          apiProvider="locationiq"
+          onConfirm={(location) => {
+            setLatitude(location.lat);
+            setLongitude(location.lng);
+            setLocationArea(location.area);
+            setLocationCity(location.city);
+            setPincode(location.pincode);
+            setShowLocationPicker(false);
+            setError("");
+          }}
+          onCancel={() => setShowLocationPicker(false)}
+        />
       </div>
     </div>
   );

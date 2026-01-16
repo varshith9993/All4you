@@ -1,13 +1,55 @@
 import { useState, useEffect, useCallback } from "react";
 
-const OPENCAGE_API_KEY = "43ac78a805af4868b01f3dc9dcae8556";
 
-export function useLocationWithAddress() {
+
+export function useLocationWithAddress(apiKey, apiProvider) {
   const [location, setLocation] = useState(null);
   const [address, setAddress] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [addressLoading, setAddressLoading] = useState(false);
+
+  const fetchAddress = useCallback(async (lat, lon) => {
+    if (!apiKey) return;
+    setAddressLoading(true);
+    try {
+      let url = '';
+      if (apiProvider === 'locationiq') {
+        url = `https://us1.locationiq.com/v1/reverse.php?key=${apiKey}&lat=${lat}&lon=${lon}&format=json`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+        if (data && data.address) {
+          const addr = data.address;
+          setAddress({
+            city: addr.city || addr.town || addr.village || "",
+            place: addr.suburb || addr.neighbourhood || "",
+            pincode: addr.postcode || "",
+            formatted: data.display_name || "",
+          });
+        }
+      } else {
+        // Default to OpenCage
+        url = `https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lon}&key=${apiKey}`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+        if (data && data.results && data.results.length > 0) {
+          const comp = data.results[0].components;
+          setAddress({
+            city: comp.city || comp.town || comp.village || "",
+            place: comp.suburb || comp.neighbourhood || "",
+            pincode: comp.postcode || "",
+            formatted: data.results[0].formatted,
+          });
+        } else {
+          setAddress(null);
+        }
+      }
+    } catch (error) {
+      console.error("Geocoding error:", error);
+      setAddress(null);
+    }
+    setAddressLoading(false);
+  }, [apiKey, apiProvider]);
 
   const requestLocation = useCallback(() => {
     if (!navigator.geolocation) {
@@ -36,35 +78,11 @@ export function useLocationWithAddress() {
       },
       {
         enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 300000,
+        timeout: 30000,
+        maximumAge: 0,
       }
     );
-  }, []);
-
-  const fetchAddress = async (lat, lon) => {
-    setAddressLoading(true);
-    try {
-      const resp = await fetch(
-        `https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lon}&key=${OPENCAGE_API_KEY}`
-      );
-      const data = await resp.json();
-      if (data && data.results && data.results.length > 0) {
-        const comp = data.results[0].components;
-        setAddress({
-          city: comp.city || comp.town || comp.village || "",
-          place: comp.suburb || comp.neighbourhood || "",
-          pincode: comp.postcode || "",
-          formatted: data.results[0].formatted,
-        });
-      } else {
-        setAddress(null);
-      }
-    } catch {
-      setAddress(null);
-    }
-    setAddressLoading(false);
-  };
+  }, [fetchAddress]);
 
   useEffect(() => {
     requestLocation();

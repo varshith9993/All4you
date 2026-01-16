@@ -4,7 +4,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { db, auth } from "../firebase";
 import { collection, query, onSnapshot, doc } from "firebase/firestore";
 import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiPlus, FiWifi, FiChevronLeft, FiChevronRight, FiSearch } from "react-icons/fi";
-import defaultAvatar from "../assets/images/default_profile.png";
+import defaultAvatar from "../assets/images/default_profile.svg";
 import Layout from "../components/Layout";
 import {
   buildFuseIndex,
@@ -132,7 +132,7 @@ function AdCard({ ad, profile, userProfiles, currentUserId, navigate }) {
           <img
             src={displayProfileImage}
             alt={displayUsername}
-            className="w-10 h-10 rounded-full object-cover"
+            className="w-10 h-10 rounded-full object-cover border-2 border-gray-300"
             onError={(e) => { e.target.src = defaultAvatar; }}
             crossOrigin="anonymous"
           />

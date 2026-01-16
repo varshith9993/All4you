@@ -2,14 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Leaflet CSS */
+@import 'leaflet/dist/leaflet.css';
+
 :root {
-  --primary: #4F46E5; /* Indigo 600 */
-  --primary-light: #818CF8; /* Indigo 400 */
-  --secondary: #EC4899; /* Pink 500 */
-  --background: #F3F4F6; /* Gray 100 */
+  --primary: #4F46E5;
+  /* Indigo 600 */
+  --primary-light: #818CF8;
+  /* Indigo 400 */
+  --secondary: #EC4899;
+  /* Pink 500 */
+  --background: #F3F4F6;
+  /* Gray 100 */
   --surface: #FFFFFF;
-  --text-main: #1F2937; /* Gray 800 */
-  --text-muted: #6B7280; /* Gray 500 */
+  --text-main: #1F2937;
+  /* Gray 800 */
+  --text-muted: #6B7280;
+  /* Gray 500 */
 }
 
 body {
@@ -28,7 +37,8 @@ body {
 }
 
 .glass-dark {
-  background: rgba(31, 41, 55, 0.7); /* Gray 800 */
+  background: rgba(31, 41, 55, 0.7);
+  /* Gray 800 */
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -36,8 +46,15 @@ body {
 
 /* Animations */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .animate-fade-in {
@@ -45,8 +62,13 @@ body {
 }
 
 @keyframes slideInRight {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
 }
 
 .animate-slide-in-right {
@@ -57,13 +79,16 @@ body {
 ::-webkit-scrollbar {
   width: 6px;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
   background: #CBD5E1;
   border-radius: 3px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
   background: #94A3B8;
 }
@@ -72,7 +97,15 @@ body {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Leaflet Map Container Fix */
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+  z-index: 1;
 }

@@ -17,7 +17,8 @@ import {
   arrayUnion
 } from "firebase/firestore";
 import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiMoreVertical, FiTrash2, FiChevronLeft, FiChevronRight } from "react-icons/fi";
-import defaultAvatar from "../assets/images/default_profile.png";
+import MapComponent from "../components/MapComponent";
+import defaultAvatar from "../assets/images/default_profile.svg";
 
 function ManualStars({ value, onChange, size = 46 }) {
   const [hover, setHover] = useState(0);
@@ -570,6 +571,15 @@ export default function AdDetail() {
                 {ad.location.pincode && ` - ${ad.location.pincode}`}
               </span>
             </div>
+
+            {/* Map Component */}
+            <div className="mt-3">
+              <MapComponent
+                latitude={ad.location?.latitude || ad.latitude}
+                longitude={ad.location?.longitude || ad.longitude}
+                address={`${ad.location?.city || ''} ${ad.location?.area || ''}`}
+              />
+            </div>
           </div>
         )}
 
@@ -908,3 +918,4 @@ function Modal({ children, onClose }) {
     </div>
   );
 }
+

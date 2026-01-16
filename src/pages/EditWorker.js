@@ -4,10 +4,12 @@ import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { FiCamera, FiMapPin, FiX, FiImage, FiFileText, FiUpload, FiArrowLeft, FiRotateCcw } from "react-icons/fi";
-import defaultAvatar from "../assets/images/default_profile.png";
+
+import defaultAvatar from "../assets/images/default_profile.svg";
+import LocationPickerModal from "../components/LocationPickerModal";
 
 const suggestedTags = ["mechanic", "engineer", "tutor", "electrician", "driver", "teacher", "plumber", "carpenter", "painter", "cleaner", "cook", "gardener"];
-const OPENCAGE_API_KEY = "43ac78a805af4868b01f3dc9dcae8556";
+const LOCATIONIQ_API_KEY = "pk.c46b235dc808aed78cb86bd70c83fab0";
 
 export default function EditWorker() {
   const { id } = useParams();
@@ -35,6 +37,7 @@ export default function EditWorker() {
   const [loading, setLoading] = useState(true);
   const [saveConfirm, setSaveConfirm] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
 
   // Load worker data
   useEffect(() => {
@@ -141,16 +144,27 @@ export default function EditWorker() {
       setLatitude(latitude);
       setLongitude(longitude);
       try {
-        const geoRes = await axios.get("https://api.opencagedata.com/geocode/v1/json", {
-          params: { key: OPENCAGE_API_KEY, q: `${latitude}+${longitude}`, pretty: 1 },
+        const geoRes = await axios.get(`https://us1.locationiq.com/v1/reverse.php`, {
+          params: {
+            key: LOCATIONIQ_API_KEY,
+            lat: latitude,
+            lon: longitude,
+            format: 'json'
+          },
         });
-        const components = geoRes.data.results[0].components;
-        setLocationArea(components.suburb || components.neighbourhood || "");
-        setLocationCity(components.city || components.town || components.village || "");
-        setPincode(components.postcode || "");
+        const addr = geoRes.data.address;
+        setLocationArea(addr.suburb || addr.neighbourhood || addr.village || "");
+        setLocationCity(addr.city || addr.town || addr.county || "");
+        setPincode(addr.postcode || "");
       } catch {
         alert("Failed to get location details.");
       }
+    }, (err) => {
+      alert("Failed to get location. Please enable GPS and allow location access.");
+    }, {
+      enableHighAccuracy: true,
+      timeout: 30000,
+      maximumAge: 0,
     });
   };
 
@@ -396,9 +410,18 @@ export default function EditWorker() {
               <label className="text-sm font-bold text-gray-700 flex items-center gap-1">
                 <FiMapPin /> Location <span className="text-red-500">*</span>
               </label>
-              <button type="button" className="text-xs font-bold text-indigo-600 hover:underline" onClick={autofillLocation}>
-                Get Current Location
-              </button>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowLocationPicker(true)}
+                  className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1"
+                >
+                  <FiMapPin size={12} /> Pin on Map
+                </button>
+                <button type="button" className="text-xs font-bold text-indigo-600 hover:underline" onClick={autofillLocation}>
+                  Get Current Location
+                </button>
+              </div>
             </div>
             <div className="space-y-3">
               <input type="text" placeholder="Area" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={locationArea} onChange={(e) => setLocationArea(e.target.value)} required />
@@ -564,6 +587,24 @@ export default function EditWorker() {
           </div>
         </div>
       )}
+
+      {/* Location Picker Modal */}
+      <LocationPickerModal
+        show={showLocationPicker}
+        initialPosition={{ lat: latitude, lng: longitude }}
+        apiKey={LOCATIONIQ_API_KEY}
+        apiProvider="locationiq"
+        onConfirm={(location) => {
+          setLatitude(location.lat);
+          setLongitude(location.lng);
+          setLocationArea(location.area);
+          setLocationCity(location.city);
+          setPincode(location.pincode);
+          setShowLocationPicker(false);
+          setError("");
+        }}
+        onCancel={() => setShowLocationPicker(false)}
+      />
     </div>
   );
 }

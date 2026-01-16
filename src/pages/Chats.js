@@ -3,7 +3,7 @@ import { auth, db } from "../firebase";
 import { collection, query, where, onSnapshot, doc, updateDoc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { FiStar, FiSearch, FiWifi } from "react-icons/fi";
-import defaultAvatar from "../assets/images/default_profile.png";
+import defaultAvatar from "../assets/images/default_profile.svg";
 import Layout from "../components/Layout";
 
 const TABS = [
@@ -105,7 +105,7 @@ function ChatCard({ chat, uid, profiles, navigate }) {
         <img
           src={prof.photoURL || prof.profileImage || defaultAvatar}
           alt={prof.username || "User"}
-          className="h-12 w-12 rounded-full border-2 border-white object-cover shadow-sm"
+          className="h-12 w-12 rounded-full border-2 border-gray-300 object-cover"
           onError={(e) => { e.target.src = defaultAvatar; }}
           crossOrigin="anonymous"
         />

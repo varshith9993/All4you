@@ -17,7 +17,8 @@ import {
     arrayUnion
 } from "firebase/firestore";
 import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiCalendar, FiMoreVertical, FiTrash2, FiFile, FiFileText, FiDownload, FiAlertCircle, FiExternalLink, FiEye, FiLoader, FiChevronLeft, FiChevronRight } from "react-icons/fi";
-import defaultAvatar from "../assets/images/default_profile.png";
+import MapComponent from "../components/MapComponent";
+import defaultAvatar from "../assets/images/default_profile.svg";
 
 
 
@@ -773,6 +774,16 @@ function ServiceDetail() {
                                 {service.location.landmark && <div className="text-xs text-gray-500 mt-1 tracking-normal">Landmark: {service.location.landmark}</div>}
                             </span>
                         </div>
+
+
+                        {/* Map Component */}
+                        <div className="mt-3">
+                            <MapComponent
+                                latitude={service.location?.latitude || service.latitude}
+                                longitude={service.location?.longitude || service.longitude}
+                                address={`${service.location?.city || ''} ${service.location?.area || ''}`}
+                            />
+                        </div>
                     </div>
                 )}
 
@@ -1203,270 +1214,280 @@ function ServiceDetail() {
             </div>
 
             {/* Rate Modal */}
-            {rateModalOpen && (
-                <Modal onClose={() => { setRateModalOpen(false); setNewRating(0); }}>
-                    <h3 className="mb-4 text-center text-lg font-bold text-gray-900">Rate this Service</h3>
-                    <div className="flex flex-col items-center py-2">
-                        <ManualStars value={newRating} onChange={setNewRating} size={42} />
-                        <p className="text-sm text-gray-500 mb-6">{newRating > 0 ? `You rated ${newRating} star${newRating > 1 ? 's' : ''}` : 'Tap stars to rate'}</p>
-                        <button className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
-                            onClick={submitReview}
-                            disabled={newRating === 0 || !!userRatingDoc}>
-                            Submit Rating
-                        </button>
-                    </div>
-                </Modal>
-            )}
+            {
+                rateModalOpen && (
+                    <Modal onClose={() => { setRateModalOpen(false); setNewRating(0); }}>
+                        <h3 className="mb-4 text-center text-lg font-bold text-gray-900">Rate this Service</h3>
+                        <div className="flex flex-col items-center py-2">
+                            <ManualStars value={newRating} onChange={setNewRating} size={42} />
+                            <p className="text-sm text-gray-500 mb-6">{newRating > 0 ? `You rated ${newRating} star${newRating > 1 ? 's' : ''}` : 'Tap stars to rate'}</p>
+                            <button className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+                                onClick={submitReview}
+                                disabled={newRating === 0 || !!userRatingDoc}>
+                                Submit Rating
+                            </button>
+                        </div>
+                    </Modal>
+                )
+            }
 
             {/* Review Modal */}
-            {commentModalOpen && (
-                <Modal onClose={() => { setCommentModalOpen(false); setNewReviewText(""); }}>
-                    <h3 className="mb-4 text-center text-lg font-bold text-gray-900">Write a Review</h3>
-                    <textarea rows={5} value={newReviewText}
-                        onChange={e => setNewReviewText(e.target.value)}
-                        className="w-full border border-gray-300 p-3 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                        placeholder="Share your experience with this service..."
-                    />
-                    <button className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
-                        onClick={submitReview}
-                        disabled={newReviewText.trim().length === 0}>
-                        Post Review
-                    </button>
-                </Modal>
-            )}
+            {
+                commentModalOpen && (
+                    <Modal onClose={() => { setCommentModalOpen(false); setNewReviewText(""); }}>
+                        <h3 className="mb-4 text-center text-lg font-bold text-gray-900">Write a Review</h3>
+                        <textarea rows={5} value={newReviewText}
+                            onChange={e => setNewReviewText(e.target.value)}
+                            className="w-full border border-gray-300 p-3 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                            placeholder="Share your experience with this service..."
+                        />
+                        <button className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+                            onClick={submitReview}
+                            disabled={newReviewText.trim().length === 0}>
+                            Post Review
+                        </button>
+                    </Modal>
+                )
+            }
 
             {/* File Viewer Modal */}
-            {fileViewerOpen && currentFile && (
-                <div className="fixed inset-0 bg-black bg-opacity-90 z-[60] flex flex-col items-center justify-center p-4 animate-fade-in">
-                    <button
-                        onClick={() => setFileViewerOpen(false)}
-                        className="absolute top-4 right-4 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors z-10"
-                    >
-                        <FiX size={24} />
-                    </button>
+            {
+                fileViewerOpen && currentFile && (
+                    <div className="fixed inset-0 bg-black bg-opacity-90 z-[60] flex flex-col items-center justify-center p-4 animate-fade-in">
+                        <button
+                            onClick={() => setFileViewerOpen(false)}
+                            className="absolute top-4 right-4 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors z-10"
+                        >
+                            <FiX size={24} />
+                        </button>
 
-                    <div className="w-full max-w-2xl bg-white rounded-2xl overflow-hidden shadow-2xl">
-                        <div className="bg-gray-800 text-white p-4 flex items-center gap-3">
-                            <div className={`p-2 rounded-lg ${currentFile.color.replace('text-', 'bg-').replace('-600', '-100')} ${currentFile.color}`}>
-                                <currentFile.icon size={24} />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <h3 className="font-bold text-lg truncate">{currentFile.name}</h3>
-                                <div className="flex items-center gap-3 text-sm text-gray-300">
-                                    <span>{currentFile.label} File</span>
-                                    <span>•</span>
-                                    <span>{currentFile.size}</span>
-                                    {currentFile.isOversized && (
-                                        <span className="bg-red-500 text-white px-2 py-0.5 rounded-full text-xs">Large File</span>
-                                    )}
-                                    {currentFile.url.includes("cloudinary.com") && (
-                                        <span className="bg-blue-500 text-white px-2 py-0.5 rounded-full text-xs">Cloudinary</span>
-                                    )}
+                        <div className="w-full max-w-2xl bg-white rounded-2xl overflow-hidden shadow-2xl">
+                            <div className="bg-gray-800 text-white p-4 flex items-center gap-3">
+                                <div className={`p-2 rounded-lg ${currentFile.color.replace('text-', 'bg-').replace('-600', '-100')} ${currentFile.color}`}>
+                                    <currentFile.icon size={24} />
                                 </div>
-                            </div>
-                        </div>
-
-                        <div className="p-6">
-                            {currentFile.isOversized ? (
-                                <div className="text-center py-8">
-                                    <div className="mb-6">
-                                        <div className="inline-flex p-6 rounded-full bg-red-100 mb-4">
-                                            <FiAlertCircle size={48} className="text-red-600" />
-                                        </div>
-                                        <h4 className="text-xl font-bold text-gray-900 mb-2">File Too Large for Online Viewing</h4>
-                                        <p className="text-gray-600 mb-4">
-                                            This file ({currentFile.size}) exceeds the 10MB limit for online viewing.
-                                        </p>
-                                        <p className="text-gray-500 text-sm mb-6">
-                                            Please download the file to view it on your device.
-                                        </p>
-                                    </div>
-
-                                    <div className="flex justify-center">
-                                        <a
-                                            href={currentFile.downloadUrl}
-                                            download={currentFile.name}
-                                            className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
-                                        >
-                                            <FiDownload size={18} /> Download File ({currentFile.size})
-                                        </a>
-                                    </div>
-                                </div>
-                            ) : currentFile.extension === 'pdf' ? (
-                                <div className="text-center py-8">
-                                    <div className="mb-6">
-                                        <div className="inline-flex p-6 rounded-full bg-red-100 mb-4">
-                                            <FiFileText size={48} className="text-red-600" />
-                                        </div>
-                                        <h4 className="text-xl font-bold text-gray-900 mb-2">PDF Document</h4>
-                                        <p className="text-gray-600 mb-2">{currentFile.name}</p>
-                                        <p className="text-gray-500 text-sm mb-2">{currentFile.size}</p>
+                                <div className="flex-1 min-w-0">
+                                    <h3 className="font-bold text-lg truncate">{currentFile.name}</h3>
+                                    <div className="flex items-center gap-3 text-sm text-gray-300">
+                                        <span>{currentFile.label} File</span>
+                                        <span>•</span>
+                                        <span>{currentFile.size}</span>
+                                        {currentFile.isOversized && (
+                                            <span className="bg-red-500 text-white px-2 py-0.5 rounded-full text-xs">Large File</span>
+                                        )}
                                         {currentFile.url.includes("cloudinary.com") && (
-                                            <p className="text-blue-600 text-sm mb-6">Stored on Cloudinary</p>
+                                            <span className="bg-blue-500 text-white px-2 py-0.5 rounded-full text-xs">Cloudinary</span>
                                         )}
                                     </div>
-
-                                    <div className="flex flex-col gap-3 max-w-sm mx-auto">
-                                        <button
-                                            onClick={() => {
-                                                // For Cloudinary PDFs, open directly
-                                                window.open(currentFile.url, '_blank', 'noopener,noreferrer');
-                                            }}
-                                            className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
-                                        >
-                                            <FiExternalLink size={18} /> Open PDF Directly
-                                        </button>
-
-                                        <button
-                                            onClick={() => {
-                                                // Alternative: Google Docs Viewer
-                                                const googleDocsViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(currentFile.url)}&embedded=true`;
-                                                window.open(googleDocsViewerUrl, '_blank', 'noopener,noreferrer');
-                                            }}
-                                            className="px-6 py-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
-                                        >
-                                            <FiExternalLink size={18} /> Open in Google Docs Viewer
-                                        </button>
-
-                                        <a
-                                            href={currentFile.downloadUrl}
-                                            download={currentFile.name}
-                                            className="px-6 py-3 bg-gray-100 text-gray-700 font-bold rounded-lg hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
-                                        >
-                                            <FiDownload size={18} /> Download PDF
-                                        </a>
-                                    </div>
-
-                                    <p className="text-sm text-gray-500 mt-4">
-                                        Cloudinary PDFs usually open directly in your browser's PDF viewer.
-                                    </p>
                                 </div>
-                            ) : (
-                                <div className="text-center py-8">
-                                    <div className="mb-6">
-                                        <div className={`inline-flex p-6 rounded-full ${currentFile.color.replace('text-', 'bg-').replace('-600', '-100')} mb-4`}>
-                                            <currentFile.icon size={48} className={currentFile.color} />
+                            </div>
+
+                            <div className="p-6">
+                                {currentFile.isOversized ? (
+                                    <div className="text-center py-8">
+                                        <div className="mb-6">
+                                            <div className="inline-flex p-6 rounded-full bg-red-100 mb-4">
+                                                <FiAlertCircle size={48} className="text-red-600" />
+                                            </div>
+                                            <h4 className="text-xl font-bold text-gray-900 mb-2">File Too Large for Online Viewing</h4>
+                                            <p className="text-gray-600 mb-4">
+                                                This file ({currentFile.size}) exceeds the 10MB limit for online viewing.
+                                            </p>
+                                            <p className="text-gray-500 text-sm mb-6">
+                                                Please download the file to view it on your device.
+                                            </p>
                                         </div>
-                                        <h4 className="text-xl font-bold text-gray-900 mb-2">{currentFile.name}</h4>
-                                        <p className="text-gray-600 mb-6">
-                                            This {currentFile.label} file ({currentFile.size}) can be viewed online
+
+                                        <div className="flex justify-center">
+                                            <a
+                                                href={currentFile.downloadUrl}
+                                                download={currentFile.name}
+                                                className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                                            >
+                                                <FiDownload size={18} /> Download File ({currentFile.size})
+                                            </a>
+                                        </div>
+                                    </div>
+                                ) : currentFile.extension === 'pdf' ? (
+                                    <div className="text-center py-8">
+                                        <div className="mb-6">
+                                            <div className="inline-flex p-6 rounded-full bg-red-100 mb-4">
+                                                <FiFileText size={48} className="text-red-600" />
+                                            </div>
+                                            <h4 className="text-xl font-bold text-gray-900 mb-2">PDF Document</h4>
+                                            <p className="text-gray-600 mb-2">{currentFile.name}</p>
+                                            <p className="text-gray-500 text-sm mb-2">{currentFile.size}</p>
+                                            {currentFile.url.includes("cloudinary.com") && (
+                                                <p className="text-blue-600 text-sm mb-6">Stored on Cloudinary</p>
+                                            )}
+                                        </div>
+
+                                        <div className="flex flex-col gap-3 max-w-sm mx-auto">
+                                            <button
+                                                onClick={() => {
+                                                    // For Cloudinary PDFs, open directly
+                                                    window.open(currentFile.url, '_blank', 'noopener,noreferrer');
+                                                }}
+                                                className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                                            >
+                                                <FiExternalLink size={18} /> Open PDF Directly
+                                            </button>
+
+                                            <button
+                                                onClick={() => {
+                                                    // Alternative: Google Docs Viewer
+                                                    const googleDocsViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(currentFile.url)}&embedded=true`;
+                                                    window.open(googleDocsViewerUrl, '_blank', 'noopener,noreferrer');
+                                                }}
+                                                className="px-6 py-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                                            >
+                                                <FiExternalLink size={18} /> Open in Google Docs Viewer
+                                            </button>
+
+                                            <a
+                                                href={currentFile.downloadUrl}
+                                                download={currentFile.name}
+                                                className="px-6 py-3 bg-gray-100 text-gray-700 font-bold rounded-lg hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
+                                            >
+                                                <FiDownload size={18} /> Download PDF
+                                            </a>
+                                        </div>
+
+                                        <p className="text-sm text-gray-500 mt-4">
+                                            Cloudinary PDFs usually open directly in your browser's PDF viewer.
                                         </p>
                                     </div>
+                                ) : (
+                                    <div className="text-center py-8">
+                                        <div className="mb-6">
+                                            <div className={`inline-flex p-6 rounded-full ${currentFile.color.replace('text-', 'bg-').replace('-600', '-100')} mb-4`}>
+                                                <currentFile.icon size={48} className={currentFile.color} />
+                                            </div>
+                                            <h4 className="text-xl font-bold text-gray-900 mb-2">{currentFile.name}</h4>
+                                            <p className="text-gray-600 mb-6">
+                                                This {currentFile.label} file ({currentFile.size}) can be viewed online
+                                            </p>
+                                        </div>
 
-                                    <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                                        <button
-                                            onClick={() => {
-                                                const googleDocsViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(currentFile.url)}&embedded=true`;
-                                                window.open(googleDocsViewerUrl, '_blank');
-                                            }}
-                                            className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
-                                        >
-                                            <FiExternalLink size={18} /> Open in Google Docs Viewer
-                                        </button>
+                                        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                                            <button
+                                                onClick={() => {
+                                                    const googleDocsViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(currentFile.url)}&embedded=true`;
+                                                    window.open(googleDocsViewerUrl, '_blank');
+                                                }}
+                                                className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                                            >
+                                                <FiExternalLink size={18} /> Open in Google Docs Viewer
+                                            </button>
 
-                                        <a
-                                            href={currentFile.downloadUrl}
-                                            download={currentFile.name}
-                                            className="px-6 py-3 bg-gray-100 text-gray-700 font-bold rounded-lg hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
-                                        >
-                                            <FiDownload size={18} /> Download File
-                                        </a>
+                                            <a
+                                                href={currentFile.downloadUrl}
+                                                download={currentFile.name}
+                                                className="px-6 py-3 bg-gray-100 text-gray-700 font-bold rounded-lg hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
+                                            >
+                                                <FiDownload size={18} /> Download File
+                                            </a>
+                                        </div>
+
+                                        <p className="text-sm text-gray-500 mt-4">
+                                            Google Docs Viewer supports: PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, TXT files up to 10MB
+                                        </p>
                                     </div>
+                                )}
+                            </div>
 
-                                    <p className="text-sm text-gray-500 mt-4">
-                                        Google Docs Viewer supports: PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, TXT files up to 10MB
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="bg-gray-50 px-6 py-4 flex justify-between items-center">
-                            <span className="text-sm text-gray-600">
-                                {currentFile.isOversized
-                                    ? 'File exceeds 10MB limit - download required'
-                                    : currentFile.extension === 'pdf' && currentFile.url.includes("cloudinary.com")
-                                        ? 'Cloudinary PDF - Opens directly in browser PDF viewer'
-                                        : 'File will open in a new tab for better viewing experience'}
-                            </span>
-                            <button
-                                onClick={() => {
-                                    const opened = openFileViewer(currentFile.url, currentFile.name, currentFile.extension, currentFile.rawSize);
-                                    if (opened) {
-                                        setFileViewerOpen(false);
-                                    }
-                                }}
-                                className="px-4 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition-colors"
-                            >
-                                {currentFile.isOversized ? 'Download Now' : 'Open Directly'}
-                            </button>
+                            <div className="bg-gray-50 px-6 py-4 flex justify-between items-center">
+                                <span className="text-sm text-gray-600">
+                                    {currentFile.isOversized
+                                        ? 'File exceeds 10MB limit - download required'
+                                        : currentFile.extension === 'pdf' && currentFile.url.includes("cloudinary.com")
+                                            ? 'Cloudinary PDF - Opens directly in browser PDF viewer'
+                                            : 'File will open in a new tab for better viewing experience'}
+                                </span>
+                                <button
+                                    onClick={() => {
+                                        const opened = openFileViewer(currentFile.url, currentFile.name, currentFile.extension, currentFile.rawSize);
+                                        if (opened) {
+                                            setFileViewerOpen(false);
+                                        }
+                                    }}
+                                    className="px-4 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition-colors"
+                                >
+                                    {currentFile.isOversized ? 'Download Now' : 'Open Directly'}
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-            {!!toast && (
-                <div className="fixed bottom-32 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-lg z-50 text-center text-sm font-medium animate-fade-in-up">
-                    {toast}
-                </div>
-            )}
+            {
+                !!toast && (
+                    <div className="fixed bottom-32 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-lg z-50 text-center text-sm font-medium animate-fade-in-up">
+                        {toast}
+                    </div>
+                )
+            }
 
             {/* Image Modal (Lightbox) */}
-            {viewingImage && (
-                <div className="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center p-4 animate-fade-in" onClick={() => setViewingImage(null)}>
-                    <button
-                        onClick={() => setViewingImage(null)}
-                        className="absolute top-4 right-4 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors z-[70]"
-                    >
-                        <FiX size={24} />
-                    </button>
+            {
+                viewingImage && (
+                    <div className="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center p-4 animate-fade-in" onClick={() => setViewingImage(null)}>
+                        <button
+                            onClick={() => setViewingImage(null)}
+                            className="absolute top-4 right-4 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors z-[70]"
+                        >
+                            <FiX size={24} />
+                        </button>
 
-                    {imageFiles.length > 1 && (
-                        <>
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    const urls = imageFiles.map(f => f.url);
-                                    const currentIdx = urls.indexOf(viewingImage);
-                                    const newIdx = (currentIdx - 1 + urls.length) % urls.length;
-                                    setViewingImage(urls[newIdx]);
-                                }}
-                                className="absolute left-4 top-1/2 -translate-y-1/2 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors z-[70]"
-                            >
-                                <FiChevronLeft size={24} />
-                            </button>
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    const urls = imageFiles.map(f => f.url);
-                                    const currentIdx = urls.indexOf(viewingImage);
-                                    const newIdx = (currentIdx + 1) % urls.length;
-                                    setViewingImage(urls[newIdx]);
-                                }}
-                                className="absolute right-4 top-1/2 -translate-y-1/2 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors z-[70]"
-                            >
-                                <FiChevronRight size={24} />
-                            </button>
-                        </>
-                    )}
+                        {imageFiles.length > 1 && (
+                            <>
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const urls = imageFiles.map(f => f.url);
+                                        const currentIdx = urls.indexOf(viewingImage);
+                                        const newIdx = (currentIdx - 1 + urls.length) % urls.length;
+                                        setViewingImage(urls[newIdx]);
+                                    }}
+                                    className="absolute left-4 top-1/2 -translate-y-1/2 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors z-[70]"
+                                >
+                                    <FiChevronLeft size={24} />
+                                </button>
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const urls = imageFiles.map(f => f.url);
+                                        const currentIdx = urls.indexOf(viewingImage);
+                                        const newIdx = (currentIdx + 1) % urls.length;
+                                        setViewingImage(urls[newIdx]);
+                                    }}
+                                    className="absolute right-4 top-1/2 -translate-y-1/2 p-2 bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors z-[70]"
+                                >
+                                    <FiChevronRight size={24} />
+                                </button>
+                            </>
+                        )}
 
-                    <img
-                        src={viewingImage}
-                        alt="Full view"
-                        className="max-w-full max-h-full object-contain rounded-lg shadow-2xl relative z-[65]"
-                        onClick={(e) => e.stopPropagation()}
-                        onError={() => handleFileLoadError(viewingImage)}
-                        crossOrigin="anonymous"
-                    />
-                    {fileLoadErrors[viewingImage] && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 p-4">
-                            <FiAlertCircle className="text-red-400 mb-2" size={48} />
-                            <p className="text-white text-lg font-medium">Failed to load image</p>
-                            <p className="text-gray-300 text-sm mt-1">The image may have been removed or is inaccessible</p>
-                        </div>
-                    )}
-                </div>
-            )}
-        </div>
+                        <img
+                            src={viewingImage}
+                            alt="Full view"
+                            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl relative z-[65]"
+                            onClick={(e) => e.stopPropagation()}
+                            onError={() => handleFileLoadError(viewingImage)}
+                            crossOrigin="anonymous"
+                        />
+                        {fileLoadErrors[viewingImage] && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 p-4">
+                                <FiAlertCircle className="text-red-400 mb-2" size={48} />
+                                <p className="text-white text-lg font-medium">Failed to load image</p>
+                                <p className="text-gray-300 text-sm mt-1">The image may have been removed or is inaccessible</p>
+                            </div>
+                        )}
+                    </div>
+                )
+            }
+        </div >
     );
 }
 

@@ -34,6 +34,9 @@ export const SYNONYMS = {
   gurgaon: ["gurugram", "gurgon"],
   noida: ["greater noida", "noida extension"],
   chandigarh: ["tricity", "mohali", "panchkula", "zirakpur"],
+  surat: ["surat city", "surat", "gujarat", "saurashtra", "surat state"],
+  jaipur: ["jaipur city", "jaipur", "rajasthan", "jaipur state"],
+
 
   // ===== TRANSACTIONAL & INTENT =====
   buy: ["purchase", "looking for", "wanted", "need", "chahiye", "khareedna", "lele", "requirement", "buyer", "procure"],
@@ -52,6 +55,9 @@ export const SYNONYMS = {
   new: ["brand new", "sealed", "unused", "box piece", "latest", "naya", "fresh", "unopened", "current year"],
   scrap: ["junk", "raddi", "broken", "parts only", "kabaad", "waste", "damage", "non working", "bhangar"],
   refurbished: ["renewed", "reconditioned", "certified", "repaired", "qc passed", "factory seconds"],
+  used: ["used", "pre owned", "purana", "old", "second hand", "2nd hand", "pre-loved", "working condition"],
+  old: ["old", "purana", "second hand", "2nd hand", "pre-loved", "working condition"],
+
 
   // ===== ELECTRONICS & GADGETS (GENERIC + BRANDS) =====
   mobile: ["phone", "smartphone", "cellphone", "iphone", "android", "handset", "ios", "mi", "samsung", "oneplus", "vivo", "oppo"],
@@ -60,6 +66,7 @@ export const SYNONYMS = {
   appliance: ["fridge", "refrigerator", "washing machine", "ac", "microwave", "tv", "led", "cooler", "deep freezer", "oven", "chimney"],
   camera: ["dslr", "lens", "digicam", "cctv", "gopro", "photography gear", "tripod"],
   gadgets: ["smartwatch", "earbuds", "headphones", "speakers", "bluetooth", "airpods", "powerbank", "charger"],
+  phone: ["phone", "smartphone", "cellphone", "iphone", "android", "handset", "ios", "mi", "samsung", "oneplus", "vivo", "oppo"],
   accessory: ["accessories", "accessories for phone", "phone accessories", "accessories for camera", "camera accessories"],
 
 
@@ -72,6 +79,8 @@ export const SYNONYMS = {
   cng: ["gas kit", "cng fitted", "green fuel", "sequential kit"],
   spare: ["spare parts", "parts", "accessories", "accessories for car", "car accessories", "accessories for bike", "bike accessories"],
   land: ["plot", "site", "ground", "khata", "agricultural land", "farmhouse", "corner plot", "residential land"],
+  vehicle: ["vehicle", "car", "bike", "auto", "truck", "ev", "cng", "spare", "land"],
+
 
   // ===== REAL ESTATE & PG =====
   home: ["house", "apartment", "flat", "makaan", "villa", "kothi", "bungalow", "residence", "duplex", "triplex"],
@@ -80,6 +89,8 @@ export const SYNONYMS = {
   office: ["commercial space", "shop", "dukan", "coworking", "warehouse", "godown", "factory", "industrial shed", "showroom"],
   owner: ["direct owner", "no broker", "landlord", "malik", "individual", "direct party", "by owner"],
   broker: ["agent", "property dealer", "consultant", "middleman", "real estate consultant", "dealer"],
+  property: ["property", "house", "apartment", "flat", "makaan", "villa", "kothi", "bungalow", "residence", "duplex", "triplex"],
+
 
   // ===== JOBS & WORK =====
   job: ["jobs", "work", "career", "employment", "role", "vacancy", "naukri", "kaam", "opening", "recruitment", "staff", "staffing"],
@@ -88,6 +99,7 @@ export const SYNONYMS = {
   parttime: ["part time", "temporary", "side hustle", "weekend job", "extra income", "flexible hours"],
   fulltime: ["full time", "permanent", "regular job"],
   freelance: ["remote", "work from home", "wfh", "gig", "consultant", "contractor", "freelancer", "online job"],
+  salary: ["salary", "wage", "salary package", "salary structure", "salary range", "salary amount", "salary per month", "salary per year"],
 
   // ===== HOME SERVICES & SKILLED LABOR =====
   plumber: ["plumbing", "tap repair", "water work", "nal wala", "leakage", "pipeline", "tank cleaning"],
@@ -113,6 +125,10 @@ export const SYNONYMS = {
   seller: ["seller", "vendor", "merchant", "trader", "shopkeeper", "business", "enterprise", "company", "factory", "warehouse"],
   buyer: ["buyer", "customer", "consumer", "shopper", "retailer", "merchant", "trader", "shopkeeper", "business", "enterprise"],
   love: ["love", "relationship", "dating", "romance", "partner", "girlfriend", "boyfriend", "husband", "wife"],
+  marriage: ["marriage", "wedding", "engagement", "proposal", "ring", "ceremony", "party", "celebration", "birthday", "anniversary"],
+  gift: ["gift", "present", "birthday gift", "christmas gift", "new year gift", "anniversary gift", "wedding gift", "birthday present", "christmas present", "new year present"],
+
+
 
   // ===== LOGISTICS & EVENTS =====
   packers: ["movers", "shifting", "relocation", "house shifting", "transporters", "luggage shifting", "tempo for shifting"],
@@ -126,6 +142,7 @@ export const SYNONYMS = {
   cat: ["cats", "kitten", "feline", "kitty", "persian cat"],
   vet: ["veterinary", "animal doctor", "pet clinic", "animal hospital"],
   petfood: ["dog food", "cat food", "pedigree", "royal canin"],
+
 
   // ===== PROFESSIONAL SERVICES =====
   legal: ["lawyer", "advocate", "vakil", "notary", "affidavit", "court", "legal advice", "property lawyer"],
@@ -143,9 +160,11 @@ export const SYNONYMS = {
   nearby: ["near me", "around me", "close by", "paas mein", "local", "area", "within 5km", "nearby me"],
   contact: ["mobile number", "whatsapp", "call", "phone", "details", "contact info", "number", "puchna"],
   repair: ["service", "fixing", "broken", "maintenance", "theek", "servicing", "mending", "overhaul"],
+
   grocery: ["kirana", "ration", "provision store", "supermarket", "dukan"],
   medicine: ["chemist", "pharma", "dawa", "dawaii", "pharmacy", "medical store"],
   furniture: ["sofa", "bed", "table", "chair", "almari", "wardrobe", "dining table"],
+
 };
 
 
@@ -884,25 +903,29 @@ export function expandQueryWithSynonyms(query = "") {
   const expanded = new Set(tokens);
 
   tokens.forEach(token => {
-    // Check if token matches any synonym key
-    const synonyms = SYNONYMS[token];
-    if (synonyms) {
-      synonyms.forEach(syn => expanded.add(syn));
+    // 1. DIRECT KEY MATCH
+    const directSynonyms = SYNONYMS[token.toLowerCase()];
+    if (directSynonyms) {
+      directSynonyms.forEach(syn => expanded.add(syn));
     }
 
-    // OPTIMIZED: Check for partial matches in synonym keys
+    // 2. FUZZY/PARTIAL SYNONYM MATCHING
     Object.entries(SYNONYMS).forEach(([key, values]) => {
-      // Direct key match
+      // If token is part of a key (e.g., "bang" matches "bangalore")
       if (key.includes(token) || token.includes(key)) {
         expanded.add(key);
-        values.forEach(v => expanded.add(v));
+        // values.forEach(v => expanded.add(v)); // Don't add all values for partial matches to avoid too much noise
       }
-      // Value matches
+      // If token is part of a value
       if (values.some(v => v.includes(token) || token.includes(v))) {
         expanded.add(key);
-        values.forEach(v => expanded.add(v));
       }
     });
+
+    // 3. PHONETIC EXPANSION (Helper for very bad typos)
+    // We only do this for the original tokens, not for every synonym
+    const tokenDM = doubleMetaphone(token);
+    if (tokenDM.primary) expanded.add(tokenDM.primary);
   });
 
   return Array.from(expanded);
@@ -1304,33 +1327,37 @@ export function prepareWorkerForSearch(worker, creatorProfile = {}) {
   const allText = [username, title, tags.join(" "), locationText].join(" ");
 
   // ULTRA-FUZZY: Generate comprehensive search data with n-grams
-  const titleNormalized = normalizeText(title);
-  const tagsNormalized = tags.map(t => normalizeText(t)).join(" ");
-  const tagsSpaceInsensitive = tags.map(t => normalizeSpaceInsensitive(t)).join(" "); // Only tags get space-insensitive
+  const titleTokens = tokenize(title);
+  const tagTokens = tags.flatMap(t => tokenize(t));
 
-  // Generate n-grams and prefixes as STRINGS (not arrays) for Fuse.js
+  // Generate phonetics for TITLE and TAGS combined (most important)
+  const phoneticBasis = [...titleTokens, ...tagTokens];
+  const dmPrimary = Array.from(new Set(phoneticBasis.map(t => doubleMetaphone(t).primary))).filter(Boolean);
+  const dmSecondary = Array.from(new Set(phoneticBasis.map(t => doubleMetaphone(t).secondary))).filter(Boolean);
+
+  // Character-level matching
   const searchText = title + " " + tags.join(" ");
   const ngramsArray = generateNGrams(searchText, 3);
-  const prefixesArray = generatePrefixes(searchText, 2); // Changed to 2 to avoid noise
+  const prefixesArray = generatePrefixes(searchText, 2);
 
   return {
     ...worker,
     searchData: {
       username: normalizeText(username),
-      title: titleNormalized, // Normal normalization for titles (they are sentences)
-      tags: tagsNormalized + " " + tagsSpaceInsensitive, // Space-insensitive boost for tags only
+      title: normalizeText(title),
+      tags: tags.map(t => normalizeText(t)).join(" ") + " " + tags.map(t => normalizeSpaceInsensitive(t)).join(" "),
       city: normalizeText(city),
       area: normalizeText(area),
       landmark: normalizeText(landmark),
       pincode: normalizeText(pincode),
       location: normalizeText(locationText),
       tokens: tokenize(allText),
-      prefixes: prefixesArray.join(" "), // Convert array to string
-      ngrams: ngramsArray.join(" "), // Convert array to string for character-level matching
+      prefixes: prefixesArray.join(" "),
+      ngrams: ngramsArray.join(" "),
       soundex: soundex(title),
-      metaphone: metaphone(title), // ENHANCED metaphone on title
-      doubleMetaphonePrimary: doubleMetaphone(title).primary, // Double Metaphone primary code
-      doubleMetaphoneSecondary: doubleMetaphone(title).secondary, // Double Metaphone secondary code
+      metaphone: metaphone(title),
+      doubleMetaphonePrimary: dmPrimary.join(" "), // Multi-word phonetic indexing
+      doubleMetaphoneSecondary: dmSecondary.join(" "),
       allText: normalizeText(allText),
     },
   };
@@ -1359,33 +1386,36 @@ export function prepareServiceForSearch(service, creatorProfile = {}) {
   const allText = [username, title, tags.join(" "), locationText].join(" ");
 
   // ULTRA-FUZZY: Generate comprehensive search data with n-grams
-  const titleNormalized = normalizeText(title);
-  const tagsNormalized = tags.map(t => normalizeText(t)).join(" ");
-  const tagsSpaceInsensitive = tags.map(t => normalizeSpaceInsensitive(t)).join(" "); // Only tags get space-insensitive
+  const titleTokens = tokenize(title);
+  const tagTokens = tags.flatMap(t => tokenize(t));
 
-  // Generate n-grams and prefixes as STRINGS (not arrays) for Fuse.js
+  // Generate phonetics
+  const phoneticBasis = [...titleTokens, ...tagTokens];
+  const dmPrimary = Array.from(new Set(phoneticBasis.map(t => doubleMetaphone(t).primary))).filter(Boolean);
+  const dmSecondary = Array.from(new Set(phoneticBasis.map(t => doubleMetaphone(t).secondary))).filter(Boolean);
+
   const searchText = title + " " + tags.join(" ");
   const ngramsArray = generateNGrams(searchText, 3);
-  const prefixesArray = generatePrefixes(searchText, 2); // Changed to 2 to avoid noise
+  const prefixesArray = generatePrefixes(searchText, 2);
 
   return {
     ...service,
     searchData: {
       username: normalizeText(username),
-      title: titleNormalized, // Normal normalization for titles (they are sentences)
-      tags: tagsNormalized + " " + tagsSpaceInsensitive, // Space-insensitive boost for tags only
+      title: normalizeText(title),
+      tags: tags.map(t => normalizeText(t)).join(" ") + " " + tags.map(t => normalizeSpaceInsensitive(t)).join(" "),
       city: normalizeText(city),
       area: normalizeText(area),
       landmark: normalizeText(landmark),
       pincode: normalizeText(pincode),
       location: normalizeText(locationText),
       tokens: tokenize(allText),
-      prefixes: prefixesArray.join(" "), // Convert array to string
-      ngrams: ngramsArray.join(" "), // Convert array to string for character-level matching
+      prefixes: prefixesArray.join(" "),
+      ngrams: ngramsArray.join(" "),
       soundex: soundex(title),
-      metaphone: metaphone(title), // ENHANCED metaphone on title
-      doubleMetaphonePrimary: doubleMetaphone(title).primary, // Double Metaphone primary code
-      doubleMetaphoneSecondary: doubleMetaphone(title).secondary, // Double Metaphone secondary code
+      metaphone: metaphone(title),
+      doubleMetaphonePrimary: dmPrimary.join(" "),
+      doubleMetaphoneSecondary: dmSecondary.join(" "),
       allText: normalizeText(allText),
     },
   };
@@ -1405,7 +1435,6 @@ export function prepareAdForSearch(ad, creatorProfile = {}) {
   const tags = ad.tags || [];
   const username = creatorProfile.username || "";
   const title = ad.title || "";
-  // NO DESCRIPTION - removed from search as per requirements
 
   const city = location.city || "";
   const area = location.area || "";
@@ -1416,33 +1445,36 @@ export function prepareAdForSearch(ad, creatorProfile = {}) {
   const allText = [username, title, tags.join(" "), locationText].join(" ");
 
   // ULTRA-FUZZY: Generate comprehensive search data with n-grams
-  const titleNormalized = normalizeText(title);
-  const tagsNormalized = tags.map(t => normalizeText(t)).join(" ");
-  const tagsSpaceInsensitive = tags.map(t => normalizeSpaceInsensitive(t)).join(" "); // Only tags get space-insensitive
+  const titleTokens = tokenize(title);
+  const tagTokens = tags.flatMap(t => tokenize(t));
 
-  // Generate n-grams and prefixes as STRINGS (not arrays) for Fuse.js
+  // Generate phonetics
+  const phoneticBasis = [...titleTokens, ...tagTokens];
+  const dmPrimary = Array.from(new Set(phoneticBasis.map(t => doubleMetaphone(t).primary))).filter(Boolean);
+  const dmSecondary = Array.from(new Set(phoneticBasis.map(t => doubleMetaphone(t).secondary))).filter(Boolean);
+
   const searchText = title + " " + tags.join(" ");
   const ngramsArray = generateNGrams(searchText, 3);
-  const prefixesArray = generatePrefixes(searchText, 2); // Changed to 2 to avoid noise
+  const prefixesArray = generatePrefixes(searchText, 2);
 
   return {
     ...ad,
     searchData: {
       username: normalizeText(username),
-      title: titleNormalized, // Normal normalization for titles (they are sentences)
-      tags: tagsNormalized + " " + tagsSpaceInsensitive, // Space-insensitive boost for tags only
+      title: normalizeText(title),
+      tags: tags.map(t => normalizeText(t)).join(" ") + " " + tags.map(t => normalizeSpaceInsensitive(t)).join(" "),
       city: normalizeText(city),
       area: normalizeText(area),
       landmark: normalizeText(landmark),
       pincode: normalizeText(pincode),
       location: normalizeText(locationText),
       tokens: tokenize(allText),
-      prefixes: prefixesArray.join(" "), // Convert array to string
-      ngrams: ngramsArray.join(" "), // Convert array to string for character-level matching
+      prefixes: prefixesArray.join(" "),
+      ngrams: ngramsArray.join(" "),
       soundex: soundex(title),
-      metaphone: metaphone(title), // ENHANCED metaphone on title
-      doubleMetaphonePrimary: doubleMetaphone(title).primary, // Double Metaphone primary code
-      doubleMetaphoneSecondary: doubleMetaphone(title).secondary, // Double Metaphone secondary code
+      metaphone: metaphone(title),
+      doubleMetaphonePrimary: dmPrimary.join(" "),
+      doubleMetaphoneSecondary: dmSecondary.join(" "),
       allText: normalizeText(allText),
     },
   };

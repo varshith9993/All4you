@@ -211,8 +211,21 @@ const NotificationItem = ({ notif }) => {
 /* ---------------- MAIN ---------------- */
 
 export default function Notifications() {
-    const [notifications, setNotifications] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [notifications, setNotifications] = useState(() => {
+        try {
+            const cached = localStorage.getItem('cached_notifications');
+            if (cached) {
+                const data = JSON.parse(cached);
+                // Rehydrate Date objects
+                return data.map(n => ({
+                    ...n,
+                    date: new Date(n.timestamp || n.date)
+                }));
+            }
+            return [];
+        } catch { return []; }
+    });
+    const [loading, setLoading] = useState(notifications.length === 0);
 
     const user = auth.currentUser;
     const navigate = useNavigate();
@@ -221,6 +234,13 @@ export default function Notifications() {
     const postUnsubsMap = useRef(new Map()); // Manage inner listeners to prevent leaks
     const viewTimeRef = useRef(0);
     const userCache = useRef(new Map());
+
+    // Hydrate local map from state on mount (or when state is first set from cache)
+    useEffect(() => {
+        if (notifications.length > 0 && notificationsMap.current.size === 0) {
+            notifications.forEach(n => notificationsMap.current.set(n.id, n));
+        }
+    }, [notifications]);
 
     useEffect(() => {
         if (!user) {
@@ -261,6 +281,10 @@ export default function Notifications() {
             const list = Array.from(notificationsMap.current.values())
                 .sort((a, b) => b.timestamp - a.timestamp)
                 .slice(0, MAX_NOTIFICATIONS);
+
+            // CACHE: Save to localStorage
+            localStorage.setItem('cached_notifications', JSON.stringify(list));
+
             setNotifications(list);
             setLoading(false);
         };

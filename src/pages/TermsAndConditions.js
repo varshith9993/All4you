@@ -39,6 +39,12 @@ export default function TermsAndConditions() {
                         </button>
                         <h1 className="text-lg font-bold text-gray-900">Terms of Service</h1>
                     </div>
+                    <button
+                        onClick={() => navigate("/privacy-policy")}
+                        className="text-xs font-bold text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-full transition-colors"
+                    >
+                        Privacy Policy
+                    </button>
                 </div>
             </div>
 

@@ -226,7 +226,7 @@ export default function Settings() {
             <SettingItem
               icon={FiShield}
               label="Privacy Policy"
-              onClick={() => navigate("/terms")}
+              onClick={() => navigate("/privacy-policy")}
               color="text-green-600"
             />
           </div>
