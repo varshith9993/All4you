@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { auth, db } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, getDoc, doc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { FiClock, FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck } from "react-icons/fi";
 import LocationPickerModal from "../components/LocationPickerModal";
+import { compressFile } from "../utils/compressor";
 
 const suggestedTags = ["note-taking", "delivery", "electrician", "repairs", "consulting", "cleaning", "plumbing", "tutoring", "moving", "gardening", "coding", "design", "writing"];
 const LOCATIONIQ_API_KEY = "pk.f85d97d836243abb9099ada5ebe13c73";
@@ -49,8 +50,9 @@ export default function AddServices() {
   }, []);
 
   const uploadFileToCloudinary = async (file) => {
+    const compressedFile = await compressFile(file);
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", compressedFile);
     formData.append("upload_preset", "ml_default");
 
     // Use 'auto' resource type for all files
@@ -135,10 +137,10 @@ export default function AddServices() {
 
     if (selectedFiles.length === 0) return;
 
-    // Validate file size (Max 10MB)
+    // Validate file size (Max 2.5MB)
     for (const file of selectedFiles) {
-      if (file.size > 10 * 1024 * 1024) {
-        setError(`File "${file.name}" exceeds the 10MB limit.`);
+      if (file.size > 2.5 * 1024 * 1024) {
+        setError(`File "${file.name}" exceeds the 2.5MB limit.`);
         return;
       }
     }
@@ -253,8 +255,13 @@ export default function AddServices() {
     setSubmitting(true);
 
     try {
+      // 1. Fetch user profile for Denormalization (Read Optimization)
+      // This allows the Service Card to render without fetching the profile again (0 reads on view)
+      const userProfileSnap = await getDoc(doc(db, "profiles", currentUser.uid));
+      const userProfile = userProfileSnap.exists() ? userProfileSnap.data() : {};
+
       // Create the service document
-      await addDoc(collection(db, "services"), {
+      const docRef = await addDoc(collection(db, "services"), {
         title: title.trim(),
         description: description.trim(),
         tags,
@@ -268,13 +275,32 @@ export default function AddServices() {
         longitude: parseFloat(longitude),
         expiry: finalExpiry,
         attachments: uploadedFiles,
-        profilePhotoUrl: profilePhotoUrl || "",
+        profilePhotoUrl: profilePhotoUrl || "", // Kept for backward compatibility
+
+        // Denormalized Author Data
+        author: {
+          uid: currentUser.uid,
+          username: userProfile.username || "Unknown",
+          photoURL: userProfile.profileImage || profilePhotoUrl || "",
+          online: !!userProfile.online,
+          lastSeen: userProfile.lastSeen || null,
+          verified: !!userProfile.verified
+        },
+
         type: serviceType,
         serviceType,
         status: "active",
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
         createdBy: currentUser.uid,
       });
+
+      console.group(`[Action: CREATE SERVICE]`);
+      console.log(`%c✔ Firestore Write Successful`, "color: green; font-weight: bold");
+      console.log(`Document ID: ${docRef.id}`);
+      console.log(`- Reads: 1 (Profile Fetch for Denormalization)`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
 
       // Show success message immediately
       setSuccess("You've successfully created the post!");
@@ -623,7 +649,7 @@ export default function AddServices() {
                 <span className="text-sm text-gray-600">
                   {uploading ? "Uploading..." : "Click to upload images or files"}
                 </span>
-                <p className="text-xs text-gray-500 mt-1">Images, PDFs, PPTs, Docs (Max 10MB)</p>
+                <p className="text-xs text-gray-500 mt-1">Images, PDFs, PPTs, Docs (Max 2.5MB)</p>
               </div>
               <input
                 type="file"

@@ -1,11 +1,11 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { onAuthStateChanged } from "firebase/auth";
-import { db, auth } from "../firebase";
-import { collection, query, onSnapshot, doc } from "firebase/firestore";
-import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiPlus, FiWifi, FiSearch } from "react-icons/fi";
+import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiPlus, FiWifi, FiSearch, FiLoader } from "react-icons/fi";
 import Layout from "../components/Layout";
 import defaultAvatar from "../assets/images/default_profile.svg";
+import { useProfileCache } from "../contexts/ProfileCacheContext";
+import { usePaginatedWorkers } from "../contexts/PaginatedDataCacheContext";
+import { useDebounce } from "../hooks/useDebounce";
 import {
   buildFuseIndex,
   performSearch,
@@ -55,24 +55,37 @@ function formatLastSeen(lastSeen) {
 }
 
 function isUserOnline(userId, currentUserId, online, lastSeen) {
+  // Current user is always shown as online
   if (userId === currentUserId) return true;
-  if (online === true) {
-    if (!lastSeen) return true;
+
+  // CRITICAL FIX: Check lastSeen timestamp first
+  // If lastSeen is more than 5 minutes old, user is offline regardless of online field
+  // This handles cases where beforeunload didn't fire (browser crash, mobile, etc.)
+  if (lastSeen) {
     try {
       let date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
-      return (new Date().getTime() - date.getTime()) < 5000;
+      const minutesSinceLastSeen = (Date.now() - date.getTime()) / 60000;
+
+      // If last seen more than 5 minutes ago, definitely offline
+      if (minutesSinceLastSeen > 5) {
+        return false;
+      }
+
+      // If last seen within 2 minutes, definitely online
+      if (minutesSinceLastSeen < 2) {
+        return true;
+      }
     } catch (error) {
-      return true;
+      console.error('Error checking lastSeen:', error);
     }
   }
+
+  // Check the online field as secondary indicator
+  if (online === true) return true;
   if (online === false) return false;
-  if (!lastSeen) return false;
-  try {
-    let date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
-    return (new Date().getTime() - date.getTime()) < 5000;
-  } catch (error) {
-    return false;
-  }
+
+  // Fallback: if no lastSeen data, assume offline
+  return false;
 }
 
 // --- Components ---
@@ -298,13 +311,18 @@ function FilterModal({ isOpen, onClose, filters, setFilters, applyFilters }) {
 }
 
 function WorkerCard({ worker, profile, userProfiles, currentUserId, navigate }) {
-  const { title, rating = 0, location = {}, tags = [], latitude, longitude, createdBy, avatarUrl } = worker;
+  const { title, rating = 0, location = {}, tags = [], latitude, longitude, createdBy, avatarUrl, author } = worker;
+
+  // Strategy: Use Denormalized Author -> Real-time Profile -> Cached Profile -> Defaults
   const workerCreatorProfile = userProfiles[createdBy] || {};
-  const displayUsername = workerCreatorProfile.username || "Unknown User";
-  // Prioritize avatarUrl (worker specific image)
-  const displayProfileImage = avatarUrl || workerCreatorProfile.photoURL || workerCreatorProfile.profileImage || defaultAvatar;
-  const displayOnline = workerCreatorProfile.online;
-  const displayLastSeen = workerCreatorProfile.lastSeen;
+
+  const displayUsername = author?.username || workerCreatorProfile.username || "Unknown User";
+  // Prioritize avatarUrl (worker specific) -> author.photo -> profile.photo
+  const displayProfileImage = avatarUrl || author?.photoURL || workerCreatorProfile.photoURL || workerCreatorProfile.profileImage || defaultAvatar;
+
+  // Use real-time status if available, else fallback to snapshot
+  const displayOnline = workerCreatorProfile.online !== undefined ? workerCreatorProfile.online : author?.online;
+  const displayLastSeen = workerCreatorProfile.lastSeen !== undefined ? workerCreatorProfile.lastSeen : author?.lastSeen;
 
   let distanceText = "Distance away: --";
   if (profile && profile.latitude && profile.longitude && latitude && longitude) {
@@ -331,6 +349,7 @@ function WorkerCard({ worker, profile, userProfiles, currentUserId, navigate }) 
               className="w-14 h-14 rounded-full object-cover border-2 border-gray-300"
               onError={(e) => { e.target.src = defaultAvatar; }}
               crossOrigin="anonymous"
+              loading="lazy"
             />
             {isOnline && <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>}
           </div>
@@ -444,12 +463,27 @@ function SortDropdown({ sortBy, setSortBy, showSort, setShowSort }) {
 // --- Main Component ---
 
 export default function Workers() {
-  const [workers, setWorkers] = useState([]);
+  // PAGINATION OPTIMIZATION: Use paginated data fetching
+  // - Initial load: 15 documents (1 read)
+  // - Page return: 0 reads if no changes
+  // - Load more: 15 documents per scroll (1 read)
+  const {
+    workers,
+    loading: workersLoading,
+    loadingMore,
+    hasMore,
+    fetchWorkers,
+    loadMoreWorkers,
+    currentUserId,
+    userProfile
+  } = usePaginatedWorkers();
+
   const [searchValue, setSearchValue] = useState("");
-  const [userProfile, setUserProfile] = useState(null);
+  // OPTIMIZATION: Debounce search value to reduce computation and potential Firestore calls
+  // The search only executes after the user stops typing for 300ms (optimized from 1200ms)
+  const debouncedSearchValue = useDebounce(searchValue, 300);
+
   const [userProfiles, setUserProfiles] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [currentUserId, setCurrentUserId] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
   const [showSort, setShowSort] = useState(false);
   const [sortBy, setSortBy] = useState("distance-low-high");
@@ -464,76 +498,112 @@ export default function Workers() {
     pincode: "",
     tags: ""
   });
+
+  // Pagination display state (for client-side pagination of already-loaded data)
+  // Normal browsing: 15 items per page
+  // Search results: 10 items per page
+  const [displayCount, setDisplayCount] = useState(15);
+  const listContainerRef = useRef(null);
+
+  // Determine page size based on search state
+  const currentPageSize = debouncedSearchValue.trim() ? 10 : 15;
+
+  // Reset displayCount when search query changes
+  useEffect(() => {
+    setDisplayCount(currentPageSize);
+  }, [debouncedSearchValue, currentPageSize]);
+
+  // OPTIMIZATION: Debounce filters to reduce computation and potential Firestore calls
+  // Filter updates only apply after the user stops interacting with filter inputs for 500ms (optimized from 1200ms)
+  const debouncedFilters = useDebounce(filters, 500);
+
   const navigate = useNavigate();
 
-  // 1. Authentication & Current User Profile
+  // OPTIMIZATION: Use ProfileCache for batch profile fetching
+  const { fetchProfiles, getAllCachedProfiles, subscribeToOnlineStatus } = useProfileCache();
+
+  // Data fetch when filters or sort change
   useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setCurrentUserId(user.uid);
-        // Listen to current user profile in real-time
-        const profileRef = doc(db, 'profiles', user.uid);
-        const unsubscribeProfile = onSnapshot(profileRef, (docSnap) => {
-          if (docSnap.exists()) {
-            setUserProfile(docSnap.data());
-          }
-          // We don't set loading false here because workers need to load too
-        }, (error) => {
-          console.error("Error listening to user profile:", error);
-        });
+    // Determine sort field from sortBy
+    let sortField = 'createdAt';
+    let sortDirection = 'desc';
 
-        return () => unsubscribeProfile();
-      } else {
-        setCurrentUserId(null);
-        setLoading(false);
-      }
-    });
-    return () => unsubscribeAuth();
-  }, []);
+    if (sortBy === 'rating-high-low') {
+      sortField = 'rating';
+      sortDirection = 'desc';
+    } else if (sortBy === 'rating-low-high') {
+      sortField = 'rating';
+      sortDirection = 'asc';
+    }
 
-  // 2. Fetch Workers (Real-time) and their Creator Profiles
-  useEffect(() => {
-    const q = query(collection(db, 'workers'));
-    let creatorUnsubs = {};
+    // For distance sorting, Firestore doesn't support it natively.
+    // We stay with createdAt and sort client-side, but at least re-fetch 
+    // to ensure we have the latest items to choose from.
 
-    const unsubscribeWorkers = onSnapshot(q, (snapshot) => {
-      const workerList = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      setWorkers(workerList);
-
-      // Fetch creator profiles
-      const creatorIds = Array.from(new Set(workerList.map(worker => worker.createdBy))).filter(Boolean);
-
-      creatorIds.forEach(creatorId => {
-        // Only start a new listener if we don't already have one for this creator
-        if (!creatorUnsubs[creatorId]) {
-          creatorUnsubs[creatorId] = onSnapshot(doc(db, 'profiles', creatorId), (profileSnap) => {
-            if (profileSnap.exists()) {
-              setUserProfiles(prev => ({
-                ...prev,
-                [creatorId]: profileSnap.data()
-              }));
-            }
-          });
-        }
-      });
-
-      // Set loading to false once we have the workers
-      // If we are logged in, we wait for both workers and (ideally) profile, 
-      // but workers are the main content.
-      setLoading(false);
-    }, (error) => {
-      console.error("Error loading workers:", error);
-      setLoading(false);
+    // OPTIMIZATION: Context now handles smart change detection.
+    // We pass forceRefresh: false to allow using the session cache.
+    fetchWorkers({
+      sortField,
+      sortDirection,
+      forceRefresh: false
     });
 
-    return () => {
-      unsubscribeWorkers();
-      // Clean up all creator profile listeners
-      Object.values(creatorUnsubs).forEach(unsub => unsub());
-    };
-  }, [currentUserId]);
+    setDisplayCount(debouncedSearchValue.trim() ? 10 : 15);
+  }, [debouncedFilters, sortBy, fetchWorkers, debouncedSearchValue]);
 
-  // 3. Prepare workers for advanced search with Fuse.js
+  // OPTIMIZATION: Batch fetch creator profiles when workers data changes
+  const fetchCreatorProfiles = useCallback(async (creatorIds) => {
+    if (!creatorIds || creatorIds.length === 0) return;
+
+    try {
+      const profiles = await fetchProfiles(creatorIds);
+      setUserProfiles(prev => ({ ...prev, ...profiles }));
+    } catch (error) {
+      console.error("Error batch fetching creator profiles:", error);
+    }
+  }, [fetchProfiles]);
+
+  // Fetch profiles when workers data changes (from global cache)
+  useEffect(() => {
+    if (workers.length > 0) {
+      // READ OPTIMIZATION: Only fetch profiles if 'author' data is missing
+      const creatorIds = Array.from(new Set(workers.map(worker => {
+        if (worker.author && worker.author.username) return null;
+        return worker.createdBy;
+      }))).filter(Boolean);
+
+      fetchCreatorProfiles(creatorIds);
+    }
+  }, [workers, fetchCreatorProfiles]);
+
+  // OPTIMIZATION: Subscribe to online status updates for real-time status display
+  // This refreshes every 15 seconds to show accurate online/offline status
+  useEffect(() => {
+    if (workers.length === 0) return;
+
+    const creatorIds = Array.from(new Set(workers.map(worker => worker.createdBy))).filter(Boolean);
+    if (creatorIds.length === 0) return;
+
+    const unsubscribe = subscribeToOnlineStatus(creatorIds, (updatedProfiles) => {
+      setUserProfiles(prev => ({ ...prev, ...updatedProfiles }));
+    });
+
+    return () => unsubscribe();
+  }, [workers, subscribeToOnlineStatus]);
+
+  // Sync with global profile cache updates
+  useEffect(() => {
+    const cachedProfiles = getAllCachedProfiles();
+    if (Object.keys(cachedProfiles).length > 0) {
+      setUserProfiles(prev => ({ ...prev, ...cachedProfiles }));
+    }
+  }, [getAllCachedProfiles]);
+
+  // Use workersLoading from global cache
+  const loading = workersLoading;
+
+
+  // Prepare workers for advanced search with Fuse.js
   const searchableWorkers = useMemo(() => {
     return workers.map(worker => {
       const creatorProfile = userProfiles[worker.createdBy] || {};
@@ -572,8 +642,8 @@ export default function Workers() {
     let searchFiltered = workersWithDistance;
     let searchScoreMap = new Map();
 
-    if (searchValue.trim() && workerFuseIndex) {
-      let searchResults = performSearch(workerFuseIndex, searchValue, {
+    if (debouncedSearchValue.trim() && workerFuseIndex) {
+      let searchResults = performSearch(workerFuseIndex, debouncedSearchValue, {
         expandSynonyms: true,
         maxResults: 500, // INCREASED: Show ALL results
         // Use default minScore: 1.0 for Google-like behavior
@@ -581,7 +651,7 @@ export default function Workers() {
 
       if (searchResults && searchResults.length > 0) {
         // RE-RANK RESULTS BY RELEVANCE (exact prefix matches first)
-        searchResults = reRankByRelevance(searchResults, searchValue);
+        searchResults = reRankByRelevance(searchResults, debouncedSearchValue);
 
         const searchIds = new Set(searchResults.map(r => r.item.id));
         searchFiltered = workersWithDistance.filter(w => searchIds.has(w.id));
@@ -604,26 +674,26 @@ export default function Workers() {
       if (worker.status && worker.status !== "active") return false;
 
       // Distance filter
-      let minDistanceKm = filters.distance.min || 0;
-      let maxDistanceKm = filters.distance.max;
-      if (filters.distanceUnit === 'm') {
+      let minDistanceKm = debouncedFilters.distance.min || 0;
+      let maxDistanceKm = debouncedFilters.distance.max;
+      if (debouncedFilters.distanceUnit === 'm') {
         minDistanceKm = minDistanceKm / 1000;
         if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
       }
 
       const distance = worker.distance;
-      if (filters.distance.min && (distance === null || distance < minDistanceKm)) return false;
-      if (filters.distance.max && (distance === null || distance > maxDistanceKm)) return false;
+      if (debouncedFilters.distance.min && (distance === null || distance < minDistanceKm)) return false;
+      if (debouncedFilters.distance.max && (distance === null || distance > maxDistanceKm)) return false;
 
       // Rating filter
       const rating = worker.rating || 0;
-      if (rating < filters.rating.min) return false;
-      if (rating > filters.rating.max) return false;
+      if (rating < debouncedFilters.rating.min) return false;
+      if (rating > debouncedFilters.rating.max) return false;
 
       // Online status filter
       const isOnline = isUserOnline(worker.createdBy, currentUserId, creatorProfile.online, creatorProfile.lastSeen);
-      if (filters.onlineStatus === "online" && !isOnline) return false;
-      if (filters.onlineStatus === "offline" && isOnline) return false;
+      if (debouncedFilters.onlineStatus === "online" && !isOnline) return false;
+      if (debouncedFilters.onlineStatus === "offline" && isOnline) return false;
 
       // Location filters
       const checkLocationFilter = (filterValue, workerValue) => {
@@ -632,14 +702,14 @@ export default function Workers() {
         return filterValues.some(fv => workerValue?.toLowerCase().includes(fv));
       };
 
-      if (!checkLocationFilter(filters.area, worker.location?.area)) return false;
-      if (!checkLocationFilter(filters.city, worker.location?.city)) return false;
-      if (!checkLocationFilter(filters.landmark, worker.location?.landmark)) return false;
-      if (!checkLocationFilter(filters.pincode, worker.location?.pincode)) return false;
+      if (!checkLocationFilter(debouncedFilters.area, worker.location?.area)) return false;
+      if (!checkLocationFilter(debouncedFilters.city, worker.location?.city)) return false;
+      if (!checkLocationFilter(debouncedFilters.landmark, worker.location?.landmark)) return false;
+      if (!checkLocationFilter(debouncedFilters.pincode, worker.location?.pincode)) return false;
 
       // Tags filter
-      if (filters.tags) {
-        const tagFilters = filters.tags.split(',').map(t => t.trim().toLowerCase()).filter(t => t);
+      if (debouncedFilters.tags) {
+        const tagFilters = debouncedFilters.tags.split(',').map(t => t.trim().toLowerCase()).filter(t => t);
         const hasMatchingTag = tagFilters.some(tag =>
           (worker.tags || []).some(wt => wt.toLowerCase().includes(tag))
         );
@@ -652,7 +722,7 @@ export default function Workers() {
     // Apply sorting
     const sortedWorkers = [...filteredWorkers].sort((a, b) => {
       // IF SEARCHING: Sort by relevance score (custom score)
-      if (searchValue.trim() && searchScoreMap.size > 0) {
+      if (debouncedSearchValue.trim() && searchScoreMap.size > 0) {
         const scoreA = searchScoreMap.get(a.id) || 0;
         const scoreB = searchScoreMap.get(b.id) || 0;
         return scoreB - scoreA; // Higher score first
@@ -685,7 +755,37 @@ export default function Workers() {
 
     console.log(`Sorted ${sortedWorkers.length} workers with sort: ${sortBy}`);
     return sortedWorkers;
-  }, [searchableWorkers, workerFuseIndex, searchValue, filters, sortBy, userProfile, userProfiles, currentUserId]);
+  }, [searchableWorkers, workerFuseIndex, debouncedSearchValue, debouncedFilters, sortBy, userProfile, userProfiles, currentUserId]);
+
+  // OPTIMIZATION: Infinite Scroll - Auto-load when user scrolls near bottom
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!listContainerRef.current) return;
+
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const scrollHeight = document.documentElement.scrollHeight;
+      const clientHeight = window.innerHeight;
+
+      // Load more when user is 300px from bottom
+      const isNearBottom = scrollHeight - (scrollTop + clientHeight) < 300;
+
+      if (isNearBottom && !loadingMore) {
+        // Auto-load next batch of cached items
+        if (displayCount < displayedWorkers.length) {
+          setDisplayCount(prev => prev + currentPageSize);
+        }
+        // Auto-load from Firestore if all cached items shown
+        else if (hasMore) {
+          loadMoreWorkers().then(() => {
+            setDisplayCount(prev => prev + currentPageSize);
+          });
+        }
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [displayCount, displayedWorkers.length, hasMore, loadingMore, loadMoreWorkers, currentPageSize]);
 
   const hasActiveFilters =
     filters.distance.min > 0 ||
@@ -822,9 +922,8 @@ export default function Workers() {
           </div>
         )
       }
-    >
-      {/* Main Content */}
-      <div className="px-4 py-3 pb-20">
+    >      {/* Main Content */}
+      <div className="px-4 py-3 pb-20" ref={listContainerRef}>
         {displayedWorkers.length === 0 ? (
           <div className="text-center text-gray-500 mt-10">
             <p className="text-lg">No workers found.</p>
@@ -845,18 +944,32 @@ export default function Workers() {
             )}
           </div>
         ) : (
-          <div className="space-y-3">
-            {displayedWorkers.map((worker) => (
-              <WorkerCard
-                key={worker.id}
-                worker={worker}
-                profile={userProfile}
-                userProfiles={userProfiles}
-                currentUserId={currentUserId}
-                navigate={navigate}
-              />
-            ))}
-          </div>
+          <>
+            <div className="space-y-3">
+              {/* Show only first displayCount workers (paginated display) */}
+              {displayedWorkers.slice(0, displayCount).map((worker) => (
+                <WorkerCard
+                  key={worker.id}
+                  worker={worker}
+                  profile={userProfile}
+                  userProfiles={userProfiles}
+                  currentUserId={currentUserId}
+                  navigate={navigate}
+                />
+              ))}
+            </div>
+
+            {/* Loading Indicator for Infinite Scroll */}
+            {loadingMore && (
+              <div className="flex justify-center mt-6">
+                <div className="flex items-center gap-2 text-gray-600">
+                  <FiLoader className="animate-spin" size={20} />
+                  <span className="text-sm">Loading more workers...</span>
+                </div>
+              </div>
+            )}
+
+          </>
         )}
       </div>
 
@@ -879,14 +992,6 @@ export default function Workers() {
           <FiPlus size={24} />
         </button>
       </div>
-
-      {/* Close sort dropdown when clicking outside */}
-      {showSort && (
-        <div
-          className="fixed inset-0 z-10"
-          onClick={() => setShowSort(false)}
-        />
-      )}
     </Layout>
   );
 }

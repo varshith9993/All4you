@@ -116,21 +116,60 @@ export default function Login() {
       const docRef = doc(db, "profiles", user.uid);
       const docSnap = await getDoc(docRef);
 
+      console.group(`[Auth Check: GOOGLE PROFILE]`);
+      console.log(`%c✔ Profile check completed`, "color: gray; font-weight: bold");
+      console.log(`- Reads: 1`);
+      console.log(`- Writes: 0`);
+      console.groupEnd();
+
       if (docSnap.exists()) {
         // User has an account, proceed to login
         navigate("/workers");
       } else {
-        // User doesn't have an account, delete auth user and show error
-        await user.delete();
+        // User doesn't have a profile - sign out and redirect to signup
         await signOut(auth);
-        setError("Didn't have an account. Please signup first.");
+        navigate("/signup", {
+          state: {
+            message: "Account not found. Please complete your signup to continue.",
+            prefill: {
+              email: user.email,
+              username: user.displayName ? user.displayName.replace(/\s+/g, '_').toLowerCase().substring(0, 12) : ''
+            }
+          }
+        });
       }
     } catch (err) {
-      console.error(err);
+      console.error("Google Sign-In Error:", err);
+      // Handle specific error codes
       if (err.code === "auth/popup-closed-by-user") {
         setError("Sign-in popup was closed. Please try again.");
+      } else if (err.code === "auth/cancelled-popup-request") {
+        setError("Sign-in was cancelled. Please try again.");
+      } else if (err.code === "auth/popup-blocked") {
+        setError("Popup was blocked by your browser. Please allow popups and try again.");
+      } else if (err.code === "auth/network-request-failed") {
+        setError("Network error. Please check your internet connection and try again.");
+      } else if (err.code === "auth/unauthorized-domain") {
+        setError("This domain is not authorized for Google sign-in. Please contact support.");
+      } else if (err.code === "auth/operation-not-allowed") {
+        setError("Google sign-in is not enabled. Please contact support.");
+      } else if (err.code === "auth/account-exists-with-different-credential") {
+        setError("An account already exists with the same email but different sign-in credentials.");
+      } else if (err.code === "permission-denied" || err.message?.includes("permission")) {
+        // Firestore permission error - user authenticated but can't read profile
+        // This might happen with new users, redirect to signup
+        try {
+          await signOut(auth);
+        } catch (signOutErr) {
+          console.error("Sign out error:", signOutErr);
+        }
+        navigate("/signup", {
+          state: {
+            message: "Please complete your signup to continue."
+          }
+        });
       } else {
-        setError("Failed to sign in with Google. Please try again.");
+        setError(`Sign-in failed: ${err.message || 'Please try again.'}`);
       }
     } finally {
       setSubmitting(false);

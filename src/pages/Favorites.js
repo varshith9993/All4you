@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { auth, db } from "../firebase";
 import { useNavigate } from "react-router-dom";
-import { collection, query, where, onSnapshot, doc, getDoc, deleteDoc } from "firebase/firestore";
+import { doc, deleteDoc } from "firebase/firestore";
+import { useProfileCache } from "../contexts/ProfileCacheContext";
+import { useGlobalDataCache, useFavoritesCache } from "../contexts/GlobalDataCacheContext";
 import {
   FiHeart,
   FiStar,
@@ -56,24 +58,24 @@ function formatLastSeen(lastSeen) {
 }
 
 function isUserOnline(userId, currentUserId, online, lastSeen) {
+  // Current user is always shown as online
   if (userId === currentUserId) return true;
-  if (online === true) {
-    if (!lastSeen) return true;
+
+  // CRITICAL FIX: Check lastSeen timestamp first
+  if (lastSeen) {
     try {
       let date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
-      return (new Date().getTime() - date.getTime()) < 5000;
+      const minutesSinceLastSeen = (Date.now() - date.getTime()) / 60000;
+      if (minutesSinceLastSeen > 5) return false;
+      if (minutesSinceLastSeen < 2) return true;
     } catch (error) {
-      return true;
+      console.error('Error checking lastSeen:', error);
     }
   }
+
+  if (online === true) return true;
   if (online === false) return false;
-  if (!lastSeen) return false;
-  try {
-    let date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
-    return (new Date().getTime() - date.getTime()) < 5000;
-  } catch (error) {
-    return false;
-  }
+  return false;
 }
 
 export default function Favorites() {
@@ -81,15 +83,38 @@ export default function Favorites() {
   const [tab, setTab] = useState("workers");
   const [servicePhase, setServicePhase] = useState("all");
 
-  // CACHE: Initialize from localStorage
-  const [favorites, setFavorites] = useState([]);
+  // OPTIMIZATION: Use ProfileCache for batch profile fetching
+  const { fetchProfiles, getAllCachedProfiles, subscribeToOnlineStatus } = useProfileCache();
+  // OPTIMIZATION: Use GlobalDataCache for user profile (eliminates getDoc)
+  const { userProfile: globalUserProfile, currentUserId: globalCurrentUserId } = useGlobalDataCache();
 
-  const [posts, setPosts] = useState(() => {
-    try {
-      const cached = localStorage.getItem('fav_posts_cache');
-      return cached ? JSON.parse(cached) : { workers: [], services: [], ads: [] };
-    } catch { return { workers: [], services: [], ads: [] }; }
-  });
+  // OPTIMIZATION: Use Global Cache for favorites (0 additional reads)
+  const { favorites, loading: favoritesLoading, favPostsRealtime } = useFavoritesCache();
+
+  // OPTIMIZATION: Real-time Data Sync
+  // Derived posts are filtered to ensure "Vanish" behavior for non-active posts
+  // No additional Firestore reads occur here; it uses results of existing global listeners
+  const posts = React.useMemo(() => {
+    if (!favPostsRealtime) return { workers: [], services: [], ads: [] };
+
+    const mapFavs = (type, list, colName) => {
+      return favorites
+        .filter(f => f.type === type)
+        .map(f => {
+          const post = list.find(p => p.id === f.postId);
+          // VANISH LOGIC: Filter out if post is missing (deleted), disabled, or expired
+          if (!post || (post.status && post.status !== "active")) return null;
+          return { ...post, favId: f.id, favCollection: colName };
+        })
+        .filter(Boolean);
+    };
+
+    return {
+      workers: mapFavs('worker', favPostsRealtime.workers || [], 'workerFavorites'),
+      services: mapFavs('service', favPostsRealtime.services || [], 'serviceFavorites'),
+      ads: mapFavs('ad', favPostsRealtime.ads || [], 'adFavorites')
+    };
+  }, [favorites, favPostsRealtime]);
 
   const [userProfiles, setUserProfiles] = useState(() => {
     try {
@@ -101,17 +126,10 @@ export default function Favorites() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState([]);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [userProfile, setUserProfile] = useState(null);
-  const [currentUserId, setCurrentUserId] = useState(null);
-  const navigate = useNavigate();
 
-  // Save to cache whenever state changes
-  useEffect(() => {
-    if (Object.keys(posts.workers).length || Object.keys(posts.services).length || Object.keys(posts.ads).length) {
-      localStorage.setItem('fav_posts_cache', JSON.stringify(posts));
-    }
-  }, [posts]);
+  const userProfile = globalUserProfile;
+  const currentUserId = globalCurrentUserId || uid;
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (Object.keys(userProfiles).length > 0) {
@@ -123,208 +141,63 @@ export default function Favorites() {
   useEffect(() => {
     return auth.onAuthStateChanged(u => {
       setUid(u?.uid || "");
-      setCurrentUserId(u?.uid || null);
     });
   }, []);
 
-  // Fetch current user profile
+  const loading = favoritesLoading;
+
+  // Check if we have favorites but haven't loaded their details yet (prevents "No Favorites" flash)
+  const totalFavCount = favorites.length;
+  // Check raw real-time data count, not the filtered 'posts'
+  const currentLoadedCount = (favPostsRealtime?.workers?.length || 0) +
+    (favPostsRealtime?.services?.length || 0) +
+    (favPostsRealtime?.ads?.length || 0);
+
+  const isHydrating = totalFavCount > 0 && currentLoadedCount === 0;
+
+  const showLoading = loading || isHydrating;
+
+  // Fetch profiles for the posts we are showing
   useEffect(() => {
-    if (!currentUserId) return;
-    const fetchProfile = async () => {
-      try {
-        const profileDoc = await getDoc(doc(db, 'profiles', currentUserId));
-        if (profileDoc.exists()) {
-          setUserProfile(profileDoc.data());
-        }
-      } catch (error) {
-        console.error("Error fetching user profile:", error);
-      }
-    };
-    fetchProfile();
-  }, [currentUserId]);
+    const allCreatorIds = [
+      ...posts.workers.map(p => p.createdBy),
+      ...posts.services.map(p => p.createdBy),
+      ...posts.ads.map(p => p.createdBy)
+    ].filter(Boolean);
 
-  // Listen for favorites from all collections (real-time)
+    const uniqueIds = [...new Set(allCreatorIds)];
+    if (uniqueIds.length > 0) {
+      fetchProfiles(uniqueIds).then(p => setUserProfiles(prev => ({ ...prev, ...p })));
+    }
+  }, [posts.workers, posts.services, posts.ads, fetchProfiles]);
+
+  // Sync with global profile cache updates
   useEffect(() => {
-    if (!uid) return;
-    setLoading(true);
+    const cachedProfiles = getAllCachedProfiles();
+    if (Object.keys(cachedProfiles).length > 0) {
+      setUserProfiles(prev => ({ ...prev, ...cachedProfiles }));
+    }
+  }, [getAllCachedProfiles]);
 
-    const unsubscribes = [];
+  // OPTIMIZATION: Subscribe to online status updates for real-time status display
+  // This refreshes every 15 seconds to show accurate online/offline status
+  useEffect(() => {
+    // Collect all creator IDs from all posts
+    const allCreatorIds = [
+      ...posts.workers.map(p => p.createdBy),
+      ...posts.services.map(p => p.createdBy),
+      ...posts.ads.map(p => p.createdBy)
+    ].filter(Boolean);
 
-    // Listen to workerFavorites
-    const workerFavQuery = query(collection(db, "workerFavorites"), where("userId", "==", uid));
-    unsubscribes.push(onSnapshot(workerFavQuery, snap => {
-      const workerFavs = snap.docs.map(f => ({
-        id: f.id,
-        ...f.data(),
-        type: 'worker',
-        postId: f.data().workerId
-      }));
-      updateFavorites('workers', workerFavs);
-    }));
+    const uniqueCreatorIds = Array.from(new Set(allCreatorIds));
+    if (uniqueCreatorIds.length === 0) return;
 
-    // Listen to serviceFavorites
-    const serviceFavQuery = query(collection(db, "serviceFavorites"), where("userId", "==", uid));
-    unsubscribes.push(onSnapshot(serviceFavQuery, snap => {
-      const serviceFavs = snap.docs.map(f => ({
-        id: f.id,
-        ...f.data(),
-        type: 'service',
-        postId: f.data().serviceId
-      }));
-      updateFavorites('services', serviceFavs);
-    }));
-
-    // Listen to adFavorites
-    const adFavQuery = query(collection(db, "adFavorites"), where("userId", "==", uid));
-    unsubscribes.push(onSnapshot(adFavQuery, snap => {
-      const adFavs = snap.docs.map(f => ({
-        id: f.id,
-        ...f.data(),
-        type: 'ad',
-        postId: f.data().adId
-      }));
-      updateFavorites('ads', adFavs);
-      setLoading(false);
-    }));
-
-    return () => unsubscribes.forEach(unsub => unsub());
-  }, [uid]);
-
-  const updateFavorites = (type, favs) => {
-    setFavorites(prev => {
-      const filtered = prev.filter(f => f.type !== type.slice(0, -1));
-      return [...filtered, ...favs];
+    const unsubscribe = subscribeToOnlineStatus(uniqueCreatorIds, (updatedProfiles) => {
+      setUserProfiles(prev => ({ ...prev, ...updatedProfiles }));
     });
-  };
 
-  // Fetch posts efficiently (Incremental update + Cache)
-  useEffect(() => {
-    async function updatePosts() {
-      // 1. Identify valid favorites
-      const validFavIds = new Set(favorites.map(f => f.postId));
-
-      // 2. Filter existing posts to remove deleted favorites
-      // We process each category separately
-      const currentWorkers = posts.workers || [];
-      const currentServices = posts.services || [];
-      const currentAds = posts.ads || [];
-
-      // Helper: keep post if its ID is in validFavIds
-      const keepPost = (p) => validFavIds.has(p.id);
-
-      let nextWorkers = currentWorkers.filter(keepPost);
-      let nextServices = currentServices.filter(keepPost);
-      let nextAds = currentAds.filter(keepPost);
-
-      // 3. Identify missing posts (Favs that are not in nextLists)
-      const cachedWorkerIds = new Set(nextWorkers.map(p => p.id));
-      const cachedServiceIds = new Set(nextServices.map(p => p.id));
-      const cachedAdIds = new Set(nextAds.map(p => p.id));
-
-      const missingFavs = favorites.filter(fav => {
-        if (fav.type === 'worker') return !cachedWorkerIds.has(fav.postId);
-        if (fav.type === 'service') return !cachedServiceIds.has(fav.postId);
-        if (fav.type === 'ad') return !cachedAdIds.has(fav.postId);
-        return false;
-      });
-
-      // 4. Fetch missing posts
-      if (missingFavs.length > 0) {
-        // Group by type
-        const newItems = { workers: [], services: [], ads: [] };
-
-        await Promise.all(missingFavs.map(async (fav) => {
-          const collectionName = fav.type === 'worker' ? 'workers' : fav.type === 'service' ? 'services' : 'ads';
-          const postId = fav.postId;
-
-          if (postId) {
-            try {
-              const snap = await getDoc(doc(db, collectionName, postId));
-              if (snap.exists()) {
-                const postData = snap.data();
-                const item = {
-                  ...postData,
-                  id: snap.id,
-                  favId: fav.id,
-                  favCollection: fav.type === 'worker' ? 'workerFavorites' : fav.type === 'service' ? 'serviceFavorites' : 'adFavorites'
-                };
-
-                if (fav.type === 'worker') newItems.workers.push(item);
-                else if (fav.type === 'service') newItems.services.push(item);
-                else newItems.ads.push(item);
-
-                // Fetch creator profile if missing
-                const creatorId = postData.createdBy;
-                // Check if profile exists in cache (userProfiles state maps ID -> data)
-                // Note: We access current state 'userProfiles' here. 
-                // Since this is async, we should probably check a ref or just fetch to be safe/simple.
-                // We'll optimistically skip if we "think" we have it, but here we can't easily check state inside async map without deps.
-                // We'll just fetch updates for profiles of newly fetched posts.
-                if (creatorId) {
-                  getDoc(doc(db, 'profiles', creatorId)).then(pSnap => {
-                    if (pSnap.exists()) {
-                      setUserProfiles(prev => ({ ...prev, [creatorId]: pSnap.data() }));
-                    }
-                  });
-                }
-              }
-            } catch (error) {
-              console.error(`Error fetching ${collectionName}:`, error);
-            }
-          }
-        }));
-
-        // Merge new items
-        nextWorkers = [...nextWorkers, ...newItems.workers];
-        nextServices = [...nextServices, ...newItems.services];
-        nextAds = [...nextAds, ...newItems.ads];
-      }
-
-      // 5. Update state only if changed (Deep comparison is expensive, checking lengths is a cheap proxy)
-      // or we can just set it. React handles equality checks if ref is same, but we are creating new arrays.
-      // To avoid loops, we rely on the dependency array [favorites].
-
-      // We also need to attach the correct favId for the *existing* posts because favId might change if user unfavs and refavs? 
-      // Actually favId comes from the Favorites collection doc ID.
-      // Let's ensure all posts have the correct favId map.
-      const mapFavInfo = (list, type) => list.map(p => {
-        const fav = favorites.find(f => f.postId === p.id && f.type === type);
-        if (fav) {
-          return { ...p, favId: fav.id, favCollection: fav.type === 'worker' ? 'workerFavorites' : fav.type === 'service' ? 'serviceFavorites' : 'adFavorites' };
-        }
-        return p;
-      });
-
-      nextWorkers = mapFavInfo(nextWorkers, 'worker');
-      nextServices = mapFavInfo(nextServices, 'service');
-      nextAds = mapFavInfo(nextAds, 'ad');
-
-      // Check if anything actually changed to avoid infinite loops
-      // 1. Did we fetch anything new? (missingFavs > 0)
-      // 2. Did we filter anything out? (length changed)
-      const hasAdded = missingFavs.length > 0;
-      const hasRemoved =
-        nextWorkers.length !== currentWorkers.length ||
-        nextServices.length !== currentServices.length ||
-        nextAds.length !== currentAds.length;
-
-      // Note: We also re-map favIds. If favIds changed (e.g. removed and re-added same post), we should update.
-      // But usually checking lengths + added is enough for this cache logic.
-      // To be safe, if we have favorites but no posts, we should update.
-
-      if (hasAdded || hasRemoved || (favorites.length > 0 && nextWorkers.length === 0 && nextServices.length === 0 && nextAds.length === 0 && posts.workers.length === 0)) {
-        setPosts({
-          workers: nextWorkers,
-          services: nextServices,
-          ads: nextAds
-        });
-      }
-    }
-
-    if (favorites.length || posts.workers.length || posts.services.length || posts.ads.length) {
-      updatePosts();
-    }
-  }, [favorites, posts.workers, posts.services, posts.ads]);
+    return () => unsubscribe();
+  }, [posts.workers, posts.services, posts.ads, subscribeToOnlineStatus]);
 
   // Remove selected
   async function removeSelected() {
@@ -845,10 +718,8 @@ export default function Favorites() {
   }
 
   // Which posts to show
+  // Use the pre-filtered 'posts' from memo for display
   let show = posts[tab] || [];
-
-  // Filter out disabled/expired posts
-  show = show.filter(x => !x.status || x.status === "active");
 
   if (tab === "services" && servicePhase !== "all") {
     show = show.filter(x => {
@@ -862,19 +733,19 @@ export default function Favorites() {
     });
   }
 
-  // Counts for badges - Filtered by active status
+  // Counts for badges - Show all saved items
   const counts = {
-    workers: posts.workers.filter(x => !x.status || x.status === "active").length,
-    services: posts.services.filter(x => !x.status || x.status === "active").length,
-    ads: posts.ads.filter(x => !x.status || x.status === "active").length
+    workers: posts.workers.length,
+    services: posts.services.length,
+    ads: posts.ads.length
   };
 
   // Subtab service phase counts
-  const activeServices = posts.services.filter(x => !x.status || x.status === "active");
+  const allServices = posts.services;
   const phaseCounts = {
     all: counts.services,
-    providing: activeServices.filter(s => (s.type || s.serviceType) === "provide" || (s.type || s.serviceType) === "providing").length,
-    asking: activeServices.filter(s => (s.type || s.serviceType) === "ask" || (s.type || s.serviceType) === "asking").length
+    providing: allServices.filter(s => (s.type || s.serviceType) === "provide" || (s.type || s.serviceType) === "providing").length,
+    asking: allServices.filter(s => (s.type || s.serviceType) === "ask" || (s.type || s.serviceType) === "asking").length
   };
 
   return (
@@ -946,7 +817,7 @@ export default function Favorites() {
 
       {/* Results */}
       <div className="px-4 pb-8">
-        {loading ? (
+        {showLoading ? (
           <div className="flex justify-center items-center py-20">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
           </div>

@@ -1,5 +1,5 @@
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 
 class UserStatusManager {
@@ -7,125 +7,116 @@ class UserStatusManager {
     this.auth = auth;
     this.currentUserId = null;
     this.unsubscribeAuth = null;
-    this.unsubscribeProfile = null;
+    // OPTIMIZATION: Removed profile listener - GlobalDataCacheContext already handles it
     this.isInitialized = false;
+    this.statusCache = { online: null, lastUpdate: 0 };
+    this.visibilityTimeout = null;
   }
 
   init() {
-    if (this.isInitialized) {
-      console.log('UserStatusManager already initialized');
-      return;
-    }
+    if (this.isInitialized) return;
 
-    console.log('Initializing UserStatusManager...');
     this.isInitialized = true;
 
     // Set up auth state listener
     this.unsubscribeAuth = onAuthStateChanged(this.auth, async (user) => {
       if (user) {
-        console.log('User signed in:', user.uid);
         this.currentUserId = user.uid;
-        await this.setUserOnline(user.uid);
-        this.setupProfileListener(user.uid);
+        // Don't await - let it happen in background
+        this.setUserOnline(user.uid);
       } else {
-        console.log('User signed out');
-        // No need to call setUserOffline here because permissions will fail if auth is already null
         this.currentUserId = null;
-        if (this.unsubscribeProfile) {
-          this.unsubscribeProfile();
-        }
+        this.statusCache = { online: null, lastUpdate: 0 };
       }
     });
 
-    // Handle page visibility changes
-    document.addEventListener('visibilitychange', this.handleVisibilityChange.bind(this));
+    // Handle page visibility changes with debouncing
+    document.addEventListener('visibilitychange', () => {
+      if (this.visibilityTimeout) clearTimeout(this.visibilityTimeout);
+
+      if (document.hidden) {
+        // OPTIMIZATION: Reduced from 30s to 5s for more accurate offline status
+        // Wait 5 seconds before setting offline to avoid flickering on quick tab switch
+        this.visibilityTimeout = setTimeout(() => {
+          if (document.hidden) this.setUserOffline(this.currentUserId);
+        }, 5000); // Changed from 30000 to 5000
+      } else {
+        // OPTIMIZATION: Wait 2 seconds before setting online to prevent rapid writes on quick tab switches
+        this.visibilityTimeout = setTimeout(() => {
+          if (!document.hidden) this.setUserOnline(this.currentUserId);
+        }, 2000);
+      }
+    });
 
     // Handle beforeunload (browser/tab close)
-    window.addEventListener('beforeunload', this.handleBeforeUnload.bind(this));
-
-    console.log('UserStatusManager initialized successfully');
+    window.addEventListener('beforeunload', () => {
+      if (this.currentUserId) this.setUserOffline(this.currentUserId);
+    });
   }
 
   async setUserOnline(userId) {
-    if (!this.auth.currentUser) return;
+    if (!userId || !this.auth.currentUser) return;
+
+    const now = Date.now();
+    // Only update if not already online OR if last update was more than 5 minutes ago
+    if (this.statusCache.online === true && (now - this.statusCache.lastUpdate) < 300000) {
+      return;
+    }
+
     try {
       const userRef = doc(db, 'profiles', userId);
-      // Use setDoc with merge: true to avoid "No document to update" error if profile doesn't exist
       await setDoc(userRef, {
         online: true,
         lastSeen: serverTimestamp()
       }, { merge: true });
-      console.log('✅ User set ONLINE:', userId);
+
+      this.statusCache = { online: true, lastUpdate: now };
+
+      console.group(`[Status: ONLINE]`);
+      console.log(`%c✔ User set ONLINE`, "color: green; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
     } catch (error) {
-      if (error.code !== 'permission-denied') {
-        console.error('Error setting user online:', error);
-      }
+      if (error.code !== 'permission-denied') console.error('Error setting user online:', error);
     }
   }
 
   async setUserOffline(userId) {
-    if (!this.auth.currentUser) return;
+    if (!userId || !this.auth.currentUser) return;
+
     try {
       const userRef = doc(db, 'profiles', userId);
       await setDoc(userRef, {
         online: false,
         lastSeen: serverTimestamp()
       }, { merge: true });
-      console.log('✅ User set OFFLINE:', userId);
+
+      this.statusCache = { online: false, lastUpdate: Date.now() };
+
+      console.group(`[Status: OFFLINE]`);
+      console.log(`%c✔ User set OFFLINE`, "color: gray; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
     } catch (error) {
-      if (error.code !== 'permission-denied') {
-        console.error('Error setting user offline:', error);
-      }
+      if (error.code !== 'permission-denied') console.error('Error setting user offline:', error);
     }
   }
 
-  setupProfileListener(userId) {
-    this.unsubscribeProfile = onSnapshot(doc(db, 'profiles', userId), (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        console.log('👤 Profile updated - Online:', data.online, 'Last seen:', data.lastSeen);
-      }
-    });
-  }
-
-  handleVisibilityChange() {
-    if (this.currentUserId && this.auth.currentUser) {
-      if (document.hidden) {
-        console.log('📱 App backgrounded, setting user OFFLINE');
-        this.setUserOffline(this.currentUserId);
-      } else {
-        console.log('📱 App foregrounded, setting user ONLINE');
-        this.setUserOnline(this.currentUserId);
-      }
-    }
-  }
-
-  async handleBeforeUnload() {
-    if (this.currentUserId && this.auth.currentUser) {
-      console.log('❌ App closing, setting user OFFLINE');
-      await this.setUserOffline(this.currentUserId);
-    }
-  }
+  // OPTIMIZATION: Removed setupProfileListener - GlobalDataCacheContext handles profile listening
 
   async signOut() {
-    if (this.currentUserId && this.auth.currentUser) {
+    if (this.currentUserId) {
       await this.setUserOffline(this.currentUserId);
     }
-    await signOut(this.auth);
+    return signOut(this.auth);
   }
 
   destroy() {
-    console.log('Destroying UserStatusManager...');
-    if (this.unsubscribeAuth) {
-      this.unsubscribeAuth();
-    }
-    if (this.unsubscribeProfile) {
-      this.unsubscribeProfile();
-    }
-    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
-    window.removeEventListener('beforeunload', this.handleBeforeUnload);
+    if (this.unsubscribeAuth) this.unsubscribeAuth();
+    if (this.visibilityTimeout) clearTimeout(this.visibilityTimeout);
     this.isInitialized = false;
-    console.log('UserStatusManager destroyed');
   }
 }
 

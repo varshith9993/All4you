@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { auth, db } from "../firebase";
-import { collection, query, where, onSnapshot, doc, updateDoc } from "firebase/firestore";
+import { doc, updateDoc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { FiStar, FiSearch, FiWifi } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.svg";
 import Layout from "../components/Layout";
+import { useProfileCache } from "../contexts/ProfileCacheContext";
+import { useChatsCache } from "../contexts/GlobalDataCacheContext";
 
 const TABS = [
   { key: "all", label: "All" },
@@ -20,44 +22,47 @@ const FILTERS = [
   { key: "blocked", label: "Blocked" }
 ];
 
-// Format last seen time
-function formatLastSeen(date) {
-  if (!date) return "long time ago";
+// Format last seen time - OPTIMIZED for consistency with Workers/Services/Ads pages
+function formatLastSeen(lastSeen) {
+  if (!lastSeen) return "Never online";
   try {
-    const d = date.toDate ? date.toDate() : date.seconds ? new Date(date.seconds * 1000) : new Date(date);
+    let date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
     const now = new Date();
-    const diffMs = now - d;
-    const diffMins = Math.floor(diffMs / (1000 * 60));
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-    if (diffMins < 1) return "just now";
-    if (diffMins === 1) return "1 min ago";
-    if (diffMins < 60) return `${diffMins} mins ago`;
-    if (diffHours === 1) return "1 hour ago";
-    if (diffHours < 24) return `${diffHours} hours ago`;
+    const diffMs = now - date;
+    const diffSecs = Math.floor(diffMs / 1000);
+    const diffMins = Math.floor(diffSecs / 60);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffSecs < 60) return " just now";
+    if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
     if (diffDays === 1) return "yesterday";
-    if (diffDays < 7) return `${diffDays} days ago`;
-    if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
   } catch (error) {
-    console.error("Error formatting last seen:", error);
-    return "Unknown";
+    return "Offline";
   }
 }
 
 // Check if user is online
 function isUserOnline(online, lastSeen) {
-  if (online === true) {
-    if (!lastSeen) return true;
+  // CRITICAL FIX: Check lastSeen timestamp first
+  if (lastSeen) {
     try {
       const date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
-      const diff = new Date().getTime() - date.getTime();
-      return diff < 60000; // Considered online if active within last 1 minute
+      const minutesSinceLastSeen = (Date.now() - date.getTime()) / 60000;
+      if (minutesSinceLastSeen > 5) return false;
+      if (minutesSinceLastSeen < 2) return true;
     } catch (error) {
-      return true;
+      console.error('Error checking lastSeen:', error);
     }
   }
+
+  if (online === true) return true;
+  if (online === false) return false;
   return false;
 }
 
@@ -78,6 +83,11 @@ function ChatCard({ chat, uid, profiles, navigate }) {
         updateDoc(doc(db, "chats", chat.id), {
           [`unseenCounts.${uid}`]: 0
         });
+        console.group(`[Action: RESET UNSEEN COUNT]`);
+        console.log(`%c✔ Messages marked as seen`, "color: gray; font-weight: bold");
+        console.log(`- Reads: 0`);
+        console.log(`- Writes: 1`);
+        console.groupEnd();
       } catch (error) {
         console.error("Error resetting unseen count:", error);
       }
@@ -91,6 +101,11 @@ function ChatCard({ chat, uid, profiles, navigate }) {
       await updateDoc(doc(db, "chats", chat.id), {
         isFavorite: !chat.isFavorite
       });
+      console.group(`[Action: TOGGLE CHAT FAVORITE]`);
+      console.log(`%c✔ Favorite status updated`, "color: blue; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
     } catch (error) {
       console.error("Error toggling favorite:", error);
     }
@@ -164,90 +179,67 @@ export default function Chats() {
   const [uid, setUid] = useState("");
   const [tab, setTab] = useState("all");
   const [activeFilter, setActiveFilter] = useState("all");
-  const [chats, setChats] = useState([]);
-  const [profiles, setProfiles] = useState({});
   const [search, setSearch] = useState("");
-  const navigate = useNavigate();
+  const [profiles, setProfiles] = useState({});
 
-  const profileUnsubscribes = useRef({});
+  const { chats: allChats, hasMoreChats, loadMoreChats } = useChatsCache();
+  const { fetchProfiles, getAllCachedProfiles, subscribeToOnlineStatus } = useProfileCache();
+  const navigate = useNavigate();
+  const [chats, setChats] = useState([]);
+
+  // Sync with global cache
+  useEffect(() => {
+    setChats(allChats);
+  }, [allChats]);
 
   useEffect(() => {
     return auth.onAuthStateChanged(u => setUid(u ? u.uid : ""));
   }, []);
 
-  // Fetch all chats with deduplication
+  // OPTIMIZATION: Batch fetch participant profiles instead of N+1 listeners
+  const fetchParticipantProfiles = useCallback(async (participantIds) => {
+    if (!participantIds || participantIds.length === 0) return;
+
+    try {
+      const fetchedProfiles = await fetchProfiles(participantIds);
+      setProfiles(prev => ({ ...prev, ...fetchedProfiles }));
+    } catch (error) {
+      console.error("Error batch fetching participant profiles:", error);
+    }
+  }, [fetchProfiles]);
+
+  // OPTIMIZATION: Global chats listener is now in GlobalDataCacheContext
+  // This removes the redundant onSnapshot here
   useEffect(() => {
-    if (!uid) return;
+    if (!uid || chats.length === 0) return;
 
-    const chatsQ = query(collection(db, "chats"), where("participants", "array-contains", uid));
-    const unsubscribeChats = onSnapshot(chatsQ, async (snap) => {
-      const arr = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Still need to fetch profiles for participants
+    const otherIds = Array.from(new Set(chats.map(c => c.participants.find(x => x !== uid)))).filter(Boolean);
+    fetchParticipantProfiles(otherIds);
+  }, [uid, chats, fetchParticipantProfiles]);
 
-      // Deduplicate chats - keep only the most recent chat for each unique participant pair
-      const chatMap = new Map();
-      arr.forEach(chat => {
-        const otherId = chat.participants.find(x => x !== uid);
-        if (otherId) {
-          const existing = chatMap.get(otherId);
-          if (!existing) {
-            chatMap.set(otherId, chat);
-          } else {
-            // Keep the chat with the most recent update
-            const existingTime = existing.updatedAt?.toDate?.()?.getTime() || 0;
-            const currentTime = chat.updatedAt?.toDate?.()?.getTime() || 0;
-            if (currentTime > existingTime) {
-              chatMap.set(otherId, chat);
-            }
-          }
-        }
-      });
+  // Sync with global profile cache updates
+  useEffect(() => {
+    const cachedProfiles = getAllCachedProfiles();
+    if (Object.keys(cachedProfiles).length > 0) {
+      setProfiles(prev => ({ ...prev, ...cachedProfiles }));
+    }
+  }, [getAllCachedProfiles]);
 
-      const deduplicatedChats = Array.from(chatMap.values());
-      setChats(deduplicatedChats);
+  // OPTIMIZATION: Subscribe to online status updates for real-time status display
+  // This refreshes every 15 seconds to show accurate online/offline status
+  useEffect(() => {
+    if (chats.length === 0) return;
 
-      // Identify all other participants
-      const otherIds = Array.from(new Set(deduplicatedChats.map(c => c.participants.find(x => x !== uid)))).filter(Boolean);
+    const otherIds = Array.from(new Set(chats.map(c => c.participants.find(x => x !== uid)))).filter(Boolean);
+    if (otherIds.length === 0) return;
 
-      // Clean up listeners for users who are no longer in the list
-      Object.keys(profileUnsubscribes.current).forEach(id => {
-        if (!otherIds.includes(id)) {
-          if (typeof profileUnsubscribes.current[id] === 'function') {
-            profileUnsubscribes.current[id]();
-          }
-          delete profileUnsubscribes.current[id];
-        }
-      });
-
-      // Set up new listeners for users who don't have one yet
-      otherIds.forEach(otherId => {
-        if (!profileUnsubscribes.current[otherId]) {
-          const unsub = onSnapshot(doc(db, "profiles", otherId), (profileSnap) => {
-            if (profileSnap.exists()) {
-              const profileData = profileSnap.data();
-              setProfiles(prev => ({
-                ...prev,
-                [otherId]: profileData
-              }));
-            }
-          }, (error) => {
-            console.error("Error in profile listener:", error);
-          });
-
-          profileUnsubscribes.current[otherId] = unsub;
-        }
-      });
-    }, (error) => {
-      console.error("Error in chats listener:", error);
+    const unsubscribe = subscribeToOnlineStatus(otherIds, (updatedProfiles) => {
+      setProfiles(prev => ({ ...prev, ...updatedProfiles }));
     });
 
-    return () => {
-      unsubscribeChats();
-      Object.values(profileUnsubscribes.current).forEach(unsub => {
-        if (typeof unsub === 'function') unsub();
-      });
-      profileUnsubscribes.current = {};
-    };
-  }, [uid]);
+    return () => unsubscribe();
+  }, [chats, uid, subscribeToOnlineStatus]);
 
   const tabCount = key => {
     if (key === "all") return chats.length;
@@ -382,6 +374,17 @@ export default function Chats() {
                 navigate={navigate}
               />
             ))}
+          </div>
+        )}
+
+        {hasMoreChats && (
+          <div className="flex justify-center mt-6">
+            <button
+              onClick={loadMoreChats}
+              className="px-6 py-2 bg-white border border-blue-500 text-blue-500 rounded-full text-sm font-medium hover:bg-blue-50 transition-colors flex items-center gap-2"
+            >
+              Load more chats
+            </button>
           </div>
         )}
       </div>

@@ -24,7 +24,6 @@ import {
 import { onAuthStateChanged } from "firebase/auth";
 import {
   doc,
-  getDoc,
   updateDoc,
   addDoc,
   serverTimestamp,
@@ -33,13 +32,16 @@ import {
   where,
   getDocs,
   deleteDoc,
-  onSnapshot,
+  writeBatch,
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { useLocationWithAddress } from "../hooks/useLocationWithAddress";
 import Layout from "../components/Layout";
 import defaultAvatar from "../assets/images/default_profile.svg";
 import LocationPickerModal from "../components/LocationPickerModal";
+import { useProfileCache } from "../contexts/ProfileCacheContext";
+import { useGlobalDataCache } from "../contexts/GlobalDataCacheContext";
+import { compressFile } from "../utils/compressor";
 
 const OPENCAGE_API_KEY = "988148bc222049e2831059ea74476abb";
 const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
@@ -94,24 +96,24 @@ function formatLastSeen(lastSeen) {
 }
 
 function isUserOnline(userId, currentUserId, online, lastSeen) {
+  // Current user is always shown as online
   if (userId === currentUserId) return true;
-  if (online === true) {
-    if (!lastSeen) return true;
+
+  // CRITICAL FIX: Check lastSeen timestamp first
+  if (lastSeen) {
     try {
       let date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
-      return (new Date().getTime() - date.getTime()) < 5000;
+      const minutesSinceLastSeen = (Date.now() - date.getTime()) / 60000;
+      if (minutesSinceLastSeen > 5) return false;
+      if (minutesSinceLastSeen < 2) return true;
     } catch (error) {
-      return true;
+      console.error('Error checking lastSeen:', error);
     }
   }
+
+  if (online === true) return true;
   if (online === false) return false;
-  if (!lastSeen) return false;
-  try {
-    let date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
-    return (new Date().getTime() - date.getTime()) < 5000;
-  } catch (error) {
-    return false;
-  }
+  return false;
 }
 
 // Validation helper function
@@ -206,7 +208,7 @@ function PostMenu({ post, closeMenu, updatePosts, currentTab, setShowConfirm, se
             message = `a ${displayType} post is deleted by the post owner and the post is vanished from favorites`;
           } else if (action === "enable") {
             title = "Favorite Available";
-            message = `${ownerName} enabled "${titleWords}" post and now the ${displayType} post is available in favorites`;
+            message = `${ownerName} enabled "${titleWords}" post and now the ${displayType} post is available in favorites, `;
           }
 
           if (title) {
@@ -227,7 +229,14 @@ function PostMenu({ post, closeMenu, updatePosts, currentTab, setShowConfirm, se
         return Promise.resolve();
       });
 
-      await Promise.all(promises);
+      const notificationResults = await Promise.all(promises);
+      const writeCount = notificationResults.filter(r => r !== undefined).length;
+
+      console.group(`[Action: NOTIFY FAVORITORS]`);
+      console.log(`%c✔ Notification Batch Processed`, "color: blue; font-weight: bold");
+      console.log(`- Reads: ${snap.docs.length || 1} (Query favoritors)`);
+      console.log(`- Writes: ${writeCount} (Notification docs added)`);
+      console.groupEnd();
     } catch (err) {
       console.error("Error notifying favoritors", err);
     }
@@ -276,6 +285,12 @@ function PostMenu({ post, closeMenu, updatePosts, currentTab, setShowConfirm, se
             } else if (action === "delete") {
               await deleteDoc(ref);
             }
+
+            console.group(`[Action: POST STATUS UPDATE]`);
+            console.log(`%c✔ post status changed to: ${action}`, "color: purple; font-weight: bold");
+            console.log(`- Reads: 0`);
+            console.log(`- Writes: 1`);
+            console.groupEnd();
 
             updatePosts((prev) => ({
               ...prev,
@@ -397,11 +412,31 @@ function PostMenu({ post, closeMenu, updatePosts, currentTab, setShowConfirm, se
   );
 }
 
+/**
+ * Profile Page - Optimized with GlobalDataCacheContext
+ * 
+ * OPTIMIZATION: Uses global cache for workers/services/ads
+ * - First visit: Data may already be in global cache (0 reads)
+ * - Global cache provides real-time updates automatically
+ * - Only profile data is fetched independently (1 read)
+ */
 export default function Profile() {
   const navigate = useNavigate();
+  const { invalidateCache } = useProfileCache();
+  const { userProfile: globalUserProfile, myPosts: globalMyPosts, myPostsLoading: globalMyPostsLoading } = useGlobalDataCache();
+
+  /* 
+   * OPTIMIZATION: Removed redundant local 'posts' state to fix synchronization issues.
+   * We now use 'globalMyPosts' and 'globalUserProfile' directly.
+   */
+
+  // Safe defaults
+  const currentProfile = globalUserProfile || {};
+  const currentPosts = globalMyPosts || { workers: [], services: [], ads: [] };
+
+  // Local state only for critical UI interactions
   const [user, setUser] = useState(null);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
-  const [profile, setProfile] = useState(null);
   const [editMode, setEditMode] = useState(false);
   const [editingProfile, setEditingProfile] = useState({});
   const [imagePreview, setImagePreview] = useState("");
@@ -409,8 +444,6 @@ export default function Profile() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [tab, setTab] = useState("workers");
   const [servicePhase, setServicePhase] = useState("all");
-  const [posts, setPosts] = useState({ workers: [], services: [], ads: [] });
-  const [loading, setLoading] = useState(true);
   const [menuPostId, setMenuPostId] = useState(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmProps, setConfirmProps] = useState({});
@@ -423,53 +456,31 @@ export default function Profile() {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
     });
+
+    // Log cache hit on mount
+    console.group(`[Page: PROFILE]`);
+    console.log(`%c✔ Serving profile data from global cache`, "color: blue; font-weight: bold");
+    console.log(`- Source: GlobalDataCacheContext`);
+    console.log(`- Reads: 0 (Persisted listener)`);
+    console.log(`- Writes: 0`);
+    console.groupEnd();
+
     return () => unsub();
   }, []);
 
+  // Sync editing profile with global profile when not editing
   useEffect(() => {
-    if (!user) return;
-    setLoading(true);
-    async function load() {
-      try {
-        const profileRef = doc(db, "profiles", user.uid);
-        const profileSnap = await getDoc(profileRef);
-
-        const [workers, services, ads] = await Promise.all([
-          getDocs(query(collection(db, "workers"), where("createdBy", "==", user.uid))),
-          getDocs(query(collection(db, "services"), where("createdBy", "==", user.uid))),
-          getDocs(query(collection(db, "ads"), where("createdBy", "==", user.uid))),
-        ]);
-
-        const profileData = profileSnap.exists() ? profileSnap.data() : {};
-        setProfile(profileData);
-        setEditingProfile(profileData);
-        setUserProfiles({ [user.uid]: profileData });
-
-        setPosts({
-          workers: workers.docs.map((d) => ({ id: d.id, ...d.data() })),
-          services: services.docs.map((d) => ({ id: d.id, ...d.data() })),
-          ads: ads.docs.map((d) => ({ id: d.id, ...d.data() })),
-        });
-      } catch (e) {
-        console.error("Error loading profile:", e);
-      }
-      setLoading(false);
+    if (globalUserProfile && !editMode) {
+      setEditingProfile(prev => ({ ...prev, ...globalUserProfile }));
     }
-    load();
-  }, [user]);
+    // Also update local user map for consistency
+    if (globalUserProfile && user) {
+      setUserProfiles(prev => ({ ...prev, [user.uid]: globalUserProfile }));
+    }
+  }, [globalUserProfile, user, editMode]);
 
-  // Real-time profile updates
-  useEffect(() => {
-    if (!user) return;
-    const unsubscribe = onSnapshot(doc(db, 'profiles', user.uid), (profileSnap) => {
-      if (profileSnap.exists()) {
-        const profileData = profileSnap.data();
-        setProfile(profileData);
-        setUserProfiles(prev => ({ ...prev, [user.uid]: profileData }));
-      }
-    });
-    return () => unsubscribe();
-  }, [user]);
+  // Use derived loading state
+  const loading = globalMyPostsLoading || !globalUserProfile;
 
   useEffect(() => {
     // Only auto-fill location if edit mode is on AND no location is set yet
@@ -500,7 +511,7 @@ export default function Profile() {
 
   function startEditing() {
     // Only copy existing profile data, don't auto-fill location
-    setEditingProfile({ ...profile });
+    setEditingProfile({ ...currentProfile });
     setImagePreview("");
     setEditMode(true);
     setStatusMsg("");
@@ -508,7 +519,7 @@ export default function Profile() {
   }
 
   function cancelEditing() {
-    setEditingProfile({ ...profile });
+    setEditingProfile({ ...currentProfile });
     setImagePreview("");
     setEditMode(false);
     setStatusMsg("");
@@ -517,8 +528,9 @@ export default function Profile() {
   async function handleImageChange(e) {
     const file = e.target.files[0];
     if (file) {
-      setStatusMsg("Uploading image...");
-      const url = await uploadToCloudinary(file);
+      setStatusMsg("Compressing & Uploading image...");
+      const compressedFile = await compressFile(file);
+      const url = await uploadToCloudinary(compressedFile);
       setEditingProfile((prev) => ({ ...prev, profileImage: url }));
       setImagePreview(url);
       setStatusMsg("Upload successful!");
@@ -551,6 +563,8 @@ export default function Profile() {
     }
   }
 
+
+
   async function handleSave() {
     // Validate location
     const hasLatLong = editingProfile.latitude && editingProfile.longitude;
@@ -574,7 +588,7 @@ export default function Profile() {
 
     setProfileSaving(true);
     try {
-      await updateDoc(doc(db, "profiles", user.uid), {
+      const updatedData = {
         city: editingProfile.city || "",
         place: editingProfile.place || "",
         pincode: editingProfile.pincode || "",
@@ -582,10 +596,53 @@ export default function Profile() {
         longitude: editingProfile.longitude || "",
         landmark: editingProfile.landmark || "",
         profileImage: editingProfile.profileImage || "",
-      });
-      setProfile((prev) => ({ ...prev, ...editingProfile }));
+      };
+
+      await updateDoc(doc(db, "profiles", user.uid), updatedData);
+
+      console.group(`[Action: UPDATE PROFILE]`);
+      console.log(`%c✔ Firestore Write Successful`, "color: green; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+
+      // OPTIMIZATION: Propagate profile changes to all user's posts (Denormalization Sync)
+      // Only necessary if profile image changed (as that's the only visible author field editable here)
+      if (updatedData.profileImage !== currentProfile.profileImage) {
+        console.log(`Syncing new profile image to posts...`);
+        const batch = writeBatch(db);
+        let opCount = 0;
+        const BATCH_LIMIT = 450; // Safety margin below 500
+
+        const addToBatch = (collectionName, posts) => {
+          posts.forEach(post => {
+            if (opCount < BATCH_LIMIT) {
+              const postRef = doc(db, collectionName, post.id);
+              // Use dot notation to update nested field without overwriting 'author'
+              batch.update(postRef, { 'author.photoURL': updatedData.profileImage });
+              opCount++;
+            }
+          });
+        };
+
+        addToBatch('workers', currentPosts.workers || []);
+        addToBatch('services', currentPosts.services || []);
+        addToBatch('ads', currentPosts.ads || []);
+
+        if (opCount > 0) {
+          await batch.commit();
+          console.log(`- Writes (Sync): ${opCount} (Batch update)`);
+        }
+      }
+
+      console.groupEnd();
+
+      // UI update is handled automatically by global listener
       setEditMode(false);
       setStatusMsg("Profile updated successfully!");
+
+      // Update the global cache to invalidate stale data
+      // The onSnapshot listener will update with fresh data
+      invalidateCache(user.uid);
     } catch (error) {
       console.error("Error saving profile:", error);
       setStatusMsg("Error saving profile");
@@ -666,8 +723,8 @@ export default function Profile() {
     const displayLastSeen = workerCreatorProfile.lastSeen;
 
     let distanceText = "Distance away: --";
-    if (profile && profile.latitude && profile.longitude && latitude && longitude) {
-      const distance = getDistanceKm(profile.latitude, profile.longitude, latitude, longitude);
+    if (currentProfile && currentProfile.latitude && currentProfile.longitude && latitude && longitude) {
+      const distance = getDistanceKm(currentProfile.latitude, currentProfile.longitude, latitude, longitude);
       if (distance !== null && !isNaN(distance)) {
         const distValue = distance < 1 ? Math.round(distance * 1000) + "m" : distance.toFixed(1) + "km";
         distanceText = "Distance away: " + distValue + " away";
@@ -826,8 +883,8 @@ export default function Profile() {
     const isProviding = finalType === "provide";
 
     let distanceText = "Distance away: --";
-    if (profile && profile.latitude && profile.longitude && latitude && longitude) {
-      const distance = getDistanceKm(profile.latitude, profile.longitude, latitude, longitude);
+    if (currentProfile && currentProfile.latitude && currentProfile.longitude && latitude && longitude) {
+      const distance = getDistanceKm(currentProfile.latitude, currentProfile.longitude, latitude, longitude);
       if (distance !== null && !isNaN(distance)) {
         const distValue = distance < 1 ? Math.round(distance * 1000) + "m" : distance.toFixed(1) + "km";
         distanceText = "Distance away: " + distValue + " away";
@@ -1089,10 +1146,10 @@ export default function Profile() {
     const displayLastSeen = adCreatorProfile.lastSeen;
 
     let distanceText = "Distance away: --";
-    if (profile && profile.latitude && profile.longitude && latitude && longitude) {
+    if (currentProfile && currentProfile.latitude && currentProfile.longitude && latitude && longitude) {
       const distance = getDistanceKm(
-        profile.latitude,
-        profile.longitude,
+        currentProfile.latitude,
+        currentProfile.longitude,
         latitude,
         longitude
       );
@@ -1313,7 +1370,7 @@ export default function Profile() {
   // Get filtered posts for current tab
   const getFilteredPosts = () => {
     if (tab === "services") {
-      return posts.services.filter((p) => {
+      return currentPosts.services.filter((p) => {
         if (servicePhase === "all") return true;
 
         // Get the actual service type from the post
@@ -1327,7 +1384,7 @@ export default function Profile() {
         return true;
       });
     }
-    return posts[tab];
+    return currentPosts[tab];
   };
 
   const filteredPosts = getFilteredPosts();
@@ -1361,7 +1418,7 @@ export default function Profile() {
           className: "relative mb-3 mt-2"
         },
           React.createElement("img", {
-            src: editMode ? imagePreview || editingProfile.profileImage || defaultAvatar : profile?.profileImage || defaultAvatar,
+            src: editMode ? imagePreview || editingProfile.profileImage || defaultAvatar : currentProfile?.profileImage || defaultAvatar,
             alt: "Profile",
             className: "w-28 h-28 rounded-full border-4 border-white shadow-lg object-cover",
             crossOrigin: "anonymous"
@@ -1381,7 +1438,7 @@ export default function Profile() {
 
         React.createElement("h2", {
           className: "font-bold text-xl text-gray-900"
-        }, profile?.username || ""),
+        }, currentProfile?.username || ""),
         React.createElement("p", {
           className: "text-sm text-gray-500 mb-1"
         }, user?.email || ""),
@@ -1397,13 +1454,13 @@ export default function Profile() {
             React.createElement("span", {
               className: "truncate max-w-[200px]"
             },
-              (profile?.place && profile?.city ? profile.place + ", " + profile.city : "Location not set") +
-              (profile?.pincode ? ", " + profile.pincode : "")
+              (currentProfile?.place && currentProfile?.city ? currentProfile.place + ", " + currentProfile.city : "Location not set") +
+              (currentProfile?.pincode ? ", " + currentProfile.pincode : "")
             )
           ),
 
           // Location info text
-          profile?.latitude && profile?.longitude &&
+          currentProfile?.latitude && currentProfile?.longitude &&
           React.createElement("div", {
             className: "text-[10px] text-green-600 font-medium mt-1"
           },
@@ -1540,7 +1597,7 @@ export default function Profile() {
               k.charAt(0).toUpperCase() + k.slice(1),
               React.createElement("span", {
                 className: "text-xs opacity-70"
-              }, " (" + posts[k].length + ")")
+              }, " (" + currentPosts[k].length + ")")
             )
           )
         ),
@@ -1572,14 +1629,15 @@ export default function Profile() {
     menuPostId && React.createElement(PostMenu, {
       post: filteredPosts.find(p => p.id === menuPostId),
       closeMenu: () => setMenuPostId(null),
-      updatePosts: setPosts,
+      // updatePosts is no longer needed - GlobalDataCacheContext auto-updates via onSnapshot
+      updatePosts: () => { }, // No-op - changes reflect automatically from global cache
       currentTab: tab,
       setShowConfirm: setShowConfirm,
       setConfirmProps: setConfirmProps,
       setShowAbout: setShowAbout,
       navigate: navigate,
       user: user,
-      profile: profile
+      profile: currentProfile
     }),
 
     // Confirmation Modal

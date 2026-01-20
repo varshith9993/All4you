@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { auth, db } from "../firebase";
+import { db } from "../firebase";
 import {
   query,
   collection,
@@ -14,8 +14,14 @@ import {
   setDoc,
   serverTimestamp,
   addDoc,
-  arrayUnion
+  arrayUnion,
+  arrayRemove,
+  limit,
+  orderBy,
+  startAfter
 } from "firebase/firestore";
+import { useProfileCache } from "../contexts/ProfileCacheContext";
+import { usePostDetailCache, useGlobalDataCache } from "../contexts/GlobalDataCacheContext";
 import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiMoreVertical, FiTrash2, FiFileText, FiFile, FiEye, FiDownload, FiAlertCircle, FiExternalLink, FiLoader, FiChevronLeft, FiChevronRight } from "react-icons/fi";
 import MapComponent from "../components/MapComponent";
 import defaultAvatar from "../assets/images/default_profile.svg";
@@ -80,7 +86,7 @@ function getDownloadUrl(url) {
 
 // Function to check if file can be viewed online based on size
 function canViewOnline(fileSize, extension) {
-  const MAX_VIEWABLE_SIZE = 10 * 1024 * 1024; // 10MB
+  const MAX_VIEWABLE_SIZE = 2.5 * 1024 * 1024; // 2.5MB
 
   // Check file size limit
   if (fileSize > MAX_VIEWABLE_SIZE) {
@@ -118,10 +124,10 @@ function getFileInfo(url, sizeInBytes = null) {
   // Calculate file size
   let fileSize = "Unknown size";
   let isOversized = false;
-  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+  const MAX_FILE_SIZE = 2.5 * 1024 * 1024; // 2.5MB in bytes
 
   if (sizeInBytes && sizeInBytes > 0) {
-    // Check if file exceeds 10MB limit
+    // Check if file exceeds 2.5MB limit
     if (sizeInBytes > MAX_FILE_SIZE) {
       isOversized = true;
     }
@@ -205,10 +211,23 @@ async function getFileSizeFromUrl(url) {
   return null;
 }
 
+// Constants for review pagination - AGGRESSIVELY OPTIMIZED
+const REVIEWS_PAGE_SIZE = 7;
+
+/**
+ * WorkerDetail Page - Optimized with Post Detail Cache
+ * 
+ * OPTIMIZATION: Uses localStorage cache with 2-day TTL
+ * - First visit: Normal reads (1 for worker + 1 for reviews)
+ * - Return visits within 2 days: Instant display from cache
+ * - Real-time listener updates cache automatically
+ */
 export default function WorkerDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [currentUserId, setCurrentUserId] = useState("");
+  const { currentUserId, chats } = useGlobalDataCache();
+  const { fetchProfiles, getCachedProfile } = useProfileCache();
+  const { getPostDetailCache, setPostDetailCache } = usePostDetailCache();
   const [worker, setWorker] = useState(null);
   const [creatorProfile, setCreatorProfile] = useState(null);
   const [reviews, setReviews] = useState([]);
@@ -232,11 +251,42 @@ export default function WorkerDetail() {
   const [replyText, setReplyText] = useState("");
   const [expandedReplies, setExpandedReplies] = useState({});
 
-  // Get auth user
+  // Pagination state for reviews
+  const [hasMoreReviews, setHasMoreReviews] = useState(true);
+  const [loadingMoreReviews, setLoadingMoreReviews] = useState(false);
+  const lastReviewRef = useRef(null);
+  const allReviewsRef = useRef([]);
+
+  // Cache initialization ref to prevent double loading
+  const cacheInitializedRef = useRef(false);
+
+  // Initialize from cache on mount (instant display)
   useEffect(() => {
-    const unsub = auth.onAuthStateChanged(u => setCurrentUserId(u?.uid ?? ""));
-    return unsub;
-  }, []);
+    if (!id || cacheInitializedRef.current) return;
+    cacheInitializedRef.current = true;
+
+    const cached = getPostDetailCache('worker', id);
+    if (cached && cached.data) {
+      console.log('[WorkerDetail] Loading from cache - instant display');
+      const { workerData, reviewsData, profilesData } = cached.data;
+
+      if (workerData) {
+        setWorker(workerData);
+        // Creator profile will be fetched separately if needed
+      }
+      if (reviewsData && Array.isArray(reviewsData)) {
+        allReviewsRef.current = reviewsData;
+        setReviews(reviewsData);
+        const userRate = reviewsData.find(r => r.userId === currentUserId && typeof r.rating === "number" && r.rating > 0);
+        setUserRatingDoc(userRate ?? null);
+      }
+      if (profilesData) {
+        setProfiles(profilesData);
+      }
+    }
+  }, [id, getPostDetailCache, currentUserId]);
+
+
 
   // Define updateWorkerRating with useCallback to avoid infinite loops
   const updateWorkerRating = useCallback(async () => {
@@ -278,69 +328,177 @@ export default function WorkerDetail() {
           console.warn("Failed to update creator profile rating (likely permission error):", e);
         }
       }
+
+      console.group(`[Action: RECALCULATE RATINGS]`);
+      console.log(`%c✔ Ratings synchronized across database`, "color: blue; font-weight: bold");
+      console.log(`Firestore Operations:`);
+      console.log(`- Reads: ${snap.docs.length || 1} (Fetched ${snap.docs.length} reviews)`);
+      console.log(`- Writes: 2 (1 Worker Doc + 1 Profile Doc)`);
+      console.groupEnd();
     } catch (error) {
       console.error("Error calculating average rating:", error);
     }
   }, [id, worker]);
 
-  // Fetch worker and creator profile
+  // Fetch creator profile using ProfileCache
+  const fetchCreatorProfile = useCallback(async (creatorId) => {
+    if (!creatorId) return;
+    try {
+      // First check cache
+      const cached = getCachedProfile(creatorId);
+      if (cached) {
+        setCreatorProfile(cached);
+        return;
+      }
+      // Fetch using ProfileCache (batch-optimized)
+      const profiles = await fetchProfiles([creatorId]);
+      if (profiles[creatorId]) {
+        setCreatorProfile(profiles[creatorId]);
+      }
+    } catch (error) {
+      console.error("Error fetching creator profile:", error);
+    }
+  }, [fetchProfiles, getCachedProfile]);
+
+  // Fetch reviewer profiles using ProfileCache (batch optimized)
+  const fetchReviewerProfiles = useCallback(async (userIds) => {
+    if (!userIds || userIds.length === 0) return;
+    try {
+      const profilesData = await fetchProfiles(userIds);
+      setProfiles(prev => ({ ...prev, ...profilesData }));
+    } catch (error) {
+      console.error("Error batch fetching reviewer profiles:", error);
+    }
+  }, [fetchProfiles]);
+
+  // Load more reviews (pagination)
+  const loadMoreReviews = useCallback(async () => {
+    if (!id || loadingMoreReviews || !hasMoreReviews) return;
+
+    setLoadingMoreReviews(true);
+    try {
+      let reviewQ;
+      if (lastReviewRef.current) {
+        reviewQ = query(
+          collection(db, "workerReviews"),
+          where("workerId", "==", id),
+          orderBy("createdAt", "desc"),
+          startAfter(lastReviewRef.current),
+          limit(REVIEWS_PAGE_SIZE)
+        );
+      } else {
+        reviewQ = query(
+          collection(db, "workerReviews"),
+          where("workerId", "==", id),
+          orderBy("createdAt", "desc"),
+          limit(REVIEWS_PAGE_SIZE)
+        );
+      }
+
+      const snap = await getDocs(reviewQ);
+      const newReviews = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      if (newReviews.length < REVIEWS_PAGE_SIZE) {
+        setHasMoreReviews(false);
+      }
+
+      if (snap.docs.length > 0) {
+        lastReviewRef.current = snap.docs[snap.docs.length - 1];
+      }
+
+      // Merge with existing reviews (avoid duplicates)
+      const existingIds = new Set(allReviewsRef.current.map(r => r.id));
+      const uniqueNewReviews = newReviews.filter(r => !existingIds.has(r.id));
+      allReviewsRef.current = [...allReviewsRef.current, ...uniqueNewReviews];
+      setReviews([...allReviewsRef.current]);
+
+      // Fetch profiles for new reviewers using ProfileCache
+      const newUserIds = [...new Set(uniqueNewReviews.map(r => r.userId))];
+      if (newUserIds.length > 0) {
+        fetchReviewerProfiles(newUserIds);
+      }
+    } catch (error) {
+      console.error("Error loading more reviews:", error);
+    } finally {
+      setLoadingMoreReviews(false);
+    }
+  }, [id, loadingMoreReviews, hasMoreReviews, fetchReviewerProfiles]);
+
+  // Fetch worker and creator profile - OPTIMIZED: Use getDoc instead of onSnapshot
   useEffect(() => {
     if (!id) return;
-    const unsubscribeWorker = onSnapshot(doc(db, "workers", id), async (snap) => {
-      if (snap.exists()) {
-        const workerData = { id: snap.id, ...snap.data() };
-        setWorker(workerData);
 
-        // Fetch creator profile
-        if (workerData.createdBy) {
-          const profileSnap = await getDoc(doc(db, "profiles", workerData.createdBy));
-          if (profileSnap.exists()) {
-            setCreatorProfile(profileSnap.data());
+    // OPTIMIZATION: Use one-time fetch instead of continuous listener for worker document
+    const fetchWorkerData = async () => {
+      try {
+        const snap = await getDoc(doc(db, "workers", id));
+        if (snap.exists()) {
+          const workerData = { id: snap.id, ...snap.data() };
+          setWorker(workerData);
+
+          // Fetch creator profile using ProfileCache
+          if (workerData.createdBy) {
+            fetchCreatorProfile(workerData.createdBy);
           }
-        }
-      }
-    });
 
-    // Fetch reviews
-    // Note: We removed orderBy("createdAt", "desc") to avoid needing a composite index immediately.
-    // We will sort client-side instead.
+          // Update cache with latest worker data
+          const cached = getPostDetailCache('worker', id);
+          setPostDetailCache('worker', id, {
+            ...cached?.data,
+            workerData,
+          }, snap.data().updatedAt?.toMillis?.() || Date.now());
+
+          console.log('[WorkerDetail] Worker data fetched (1 read)');
+        }
+      } catch (error) {
+        console.error('Error fetching worker:', error);
+      }
+    };
+
+    fetchWorkerData();
+
+    // Fetch initial reviews with pagination (first 7) - Keep listener for live updates
     const reviewQ = query(
-      collection(db, "workerReviews"), where("workerId", "==", id)
+      collection(db, "workerReviews"),
+      where("workerId", "==", id),
+      orderBy("createdAt", "desc"),
+      limit(REVIEWS_PAGE_SIZE)
     );
+
     const unsubscribeReviews = onSnapshot(reviewQ, snap => {
       const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-      // Sort client-side
-      data.sort((a, b) => {
-        const tA = a.createdAt?.seconds || 0;
-        const tB = b.createdAt?.seconds || 0;
-        return tB - tA;
-      });
+      // Store last doc for pagination
+      if (snap.docs.length > 0) {
+        lastReviewRef.current = snap.docs[snap.docs.length - 1];
+      }
 
+      // Check if there might be more reviews
+      setHasMoreReviews(snap.docs.length >= REVIEWS_PAGE_SIZE);
+
+      allReviewsRef.current = data;
       setReviews(data);
       const userRate = data.find(r => r.userId === currentUserId && typeof r.rating === "number" && r.rating > 0);
       setUserRatingDoc(userRate ?? null);
 
+      // Fetch reviewer profiles using ProfileCache (batch optimized)
       const userIds = Array.from(new Set(data.map(r => r.userId)));
       if (userIds.length > 0) {
-        Promise.all(userIds.map(uid =>
-          getDoc(doc(db, "profiles", uid)).then(profileSnap =>
-            profileSnap.exists()
-              ? { [uid]: profileSnap.data() }
-              : { [uid]: { username: "Anonymous", profileImage: "" } }
-          )
-        )).then(profileArrs => {
-          const profilesMap = Object.assign({}, ...profileArrs);
-          setProfiles(profilesMap);
-        });
+        fetchReviewerProfiles(userIds);
       }
+
+      // Update cache with latest reviews data
+      const cached = getPostDetailCache('worker', id);
+      setPostDetailCache('worker', id, {
+        ...cached?.data,
+        reviewsData: data,
+      }, Date.now());
     });
 
     return () => {
-      unsubscribeWorker();
       unsubscribeReviews();
     };
-  }, [id, currentUserId]);
+  }, [id, currentUserId, fetchCreatorProfile, fetchReviewerProfiles, getPostDetailCache, setPostDetailCache]);
 
   // Favorite status
   useEffect(() => {
@@ -416,9 +574,19 @@ export default function WorkerDetail() {
       if (userHasFavorited) {
         await deleteDoc(favDoc);
         setUserHasFavorited(false);
+        console.group(`[Action: UNFAVORITE]`);
+        console.log(`%c✔ Removed from Favorites`, "color: orange; font-weight: bold");
+        console.log(`- Reads: 0`);
+        console.log(`- Writes: 1`);
+        console.groupEnd();
       } else {
         await setDoc(favDoc, { workerId: id, userId: currentUserId, createdAt: serverTimestamp() });
         setUserHasFavorited(true);
+        console.group(`[Action: FAVORITE]`);
+        console.log(`%c✔ Added to Favorites`, "color: green; font-weight: bold");
+        console.log(`- Reads: 0`);
+        console.log(`- Writes: 1`);
+        console.groupEnd();
       }
     } catch (error) {
       console.error("Error toggling favorite:", error);
@@ -438,6 +606,7 @@ export default function WorkerDetail() {
       }
 
       try {
+        // Add review
         await addDoc(collection(db, "workerReviews"), {
           workerId: id, userId: currentUserId, rating: newRating, text: "", createdAt: serverTimestamp()
         });
@@ -445,24 +614,34 @@ export default function WorkerDetail() {
         // Update the main worker document with new average rating
         await updateWorkerRating();
 
-        // Create notification
+        // Create notification (fire and forget for better UX)
         if (worker && worker.createdBy && worker.createdBy !== currentUserId) {
-          try {
-            await addDoc(collection(db, "notifications"), {
-              userId: worker.createdBy,
-              senderId: currentUserId,
-              type: "review",
-              title: "New Rating",
-              message: `New ${newRating}-star rating received`, // Interceptor will add user name
-              link: `/worker-detail/${id}`,
-              postId: id,
-              postType: "worker",
-              rating: newRating,
-              read: false,
-              createdAt: serverTimestamp()
-            });
-          } catch (nErr) { console.error("Notif error", nErr); }
+          addDoc(collection(db, "notifications"), {
+            userId: worker.createdBy,
+            senderId: currentUserId,
+            type: "review",
+            title: "New Rating",
+            message: `New ${newRating}-star rating received`,
+            link: `/worker-detail/${id}`,
+            postId: id,
+            postType: "worker",
+            rating: newRating,
+            read: false,
+            createdAt: serverTimestamp()
+          }).then(() => {
+            console.group(`[Child Action: NOTIFICATION]`);
+            console.log(`%c✔ Notification sent to worker owner`, "color: blue; font-weight: bold");
+            console.log(`- Writes: 1`);
+            console.groupEnd();
+          }).catch(nErr => console.error("Notif error", nErr));
         }
+
+        console.group(`[Action: SUBMIT RATING]`);
+        console.log(`%c✔ Rating Published`, "color: green; font-weight: bold");
+        console.log(`Firestore Operations:`);
+        console.log(`- Reads: 0 (Rating calc done in updateWorkerRating)`);
+        console.log(`- Writes: 2 (1 Review Doc + 1 Worker Doc Update)`);
+        console.groupEnd();
 
         setNewRating(0);
         setRateModalOpen(false);
@@ -477,28 +656,37 @@ export default function WorkerDetail() {
       if (!newReviewText.trim()) { setToast("Please write your review."); return; }
 
       try {
+        // Add review
         await addDoc(collection(db, "workerReviews"), {
           workerId: id, userId: currentUserId, rating: null, text: newReviewText.trim(), createdAt: serverTimestamp()
         });
 
-        // Create notification
+        // Create notification (fire and forget for better UX)
         if (worker && worker.createdBy && worker.createdBy !== currentUserId) {
-          try {
-            await addDoc(collection(db, "notifications"), {
-              userId: worker.createdBy,
-              senderId: currentUserId,
-              type: "review",
-              title: "New Review",
-              message: `New review received`, // Interceptor will add user name
-              link: `/worker-detail/${id}`,
-              postId: id,
-              postType: "worker",
-              text: newReviewText.trim(),
-              read: false,
-              createdAt: serverTimestamp()
-            });
-          } catch (nErr) { console.error("Notif error", nErr); }
+          addDoc(collection(db, "notifications"), {
+            userId: worker.createdBy,
+            senderId: currentUserId,
+            type: "review",
+            title: "New Review",
+            message: `New review received`,
+            link: `/worker-detail/${id}`,
+            postId: id,
+            postType: "worker",
+            text: newReviewText.trim(),
+            read: false,
+            createdAt: serverTimestamp()
+          }).then(() => {
+            console.group(`[Child Action: NOTIFICATION]`);
+            console.log(`%c✔ Notification sent to worker owner`, "color: blue; font-weight: bold");
+            console.log(`- Writes: 1`);
+            console.groupEnd();
+          }).catch(nErr => console.error("Notif error", nErr));
         }
+
+        console.group(`[Action: SUBMIT REVIEW]`);
+        console.log(`%c✔ Review Published`, "color: green; font-weight: bold");
+        console.log(`- Writes: 1`);
+        console.groupEnd();
 
         setNewReviewText("");
         setCommentModalOpen(false);
@@ -558,9 +746,20 @@ export default function WorkerDetail() {
             text: replyText.trim(), // Added text field
             read: false,
             createdAt: serverTimestamp()
+          }).then(() => {
+            console.group(`[Child Action: NOTIFICATION]`);
+            console.log(`%c✔ Notification sent to reviewer`, "color: blue; font-weight: bold");
+            console.log(`- Writes: 1`);
+            console.groupEnd();
           });
         } catch (nErr) { console.error("Notif error", nErr); }
       }
+
+      console.group(`[Action: SUBMIT REPLY]`);
+      console.log(`%c✔ Reply Published`, "color: green; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
 
       setReplyText("");
       setReplyingTo(null);
@@ -646,10 +845,18 @@ export default function WorkerDetail() {
       });
 
       if (chatId) {
-        // Chat already exists, show message and navigate
-        setToast("There is already a chat with this user");
-        setTimeout(() => setToast(""), 2500);
+        // Chat already exists - Restore it if it was logically deleted
+        await updateDoc(doc(db, "chats", chatId), {
+          deletedBy: arrayRemove(currentUserId)
+        });
         navigate(`/chat/${chatId}`);
+        return;
+      }
+
+      // CHAT LIMIT: Check if user already has 5 chats
+      if (chats.length >= 5) {
+        setToast("Chat Limit Reached: You can only have up to 5 active chats. Please hide/delete a chat to start a new one.");
+        setTimeout(() => setToast(""), 4000);
         return;
       }
 
@@ -1138,11 +1345,31 @@ export default function WorkerDetail() {
               })}
             </div>
           )}
+
+          {/* Load More Reviews Button */}
+          {hasMoreReviews && reviews.length >= REVIEWS_PAGE_SIZE && (
+            <div className="text-center mt-4">
+              <button
+                onClick={loadMoreReviews}
+                disabled={loadingMoreReviews}
+                className="px-6 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
+              >
+                {loadingMoreReviews ? (
+                  <span className="flex items-center gap-2">
+                    <span className="animate-spin h-4 w-4 border-2 border-gray-500 border-t-transparent rounded-full"></span>
+                    Loading...
+                  </span>
+                ) : (
+                  "Load More Reviews"
+                )}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Action bar */}
-      <div className="fixed left-0 right-0 bottom-0 bg-white px-4 py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t z-30"
+      <div className="fixed left-0 right-0 bottom-0 bg-white px-4 py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t z-50"
         style={{ maxWidth: 480, margin: "0 auto" }}>
         {!isOwner ? (
           <>
@@ -1253,7 +1480,7 @@ export default function WorkerDetail() {
                     </div>
                     <h4 className="text-xl font-bold text-gray-900 mb-2">File Too Large for Online Viewing</h4>
                     <p className="text-gray-600 mb-4">
-                      This file ({currentFile.size}) exceeds the 10MB limit for online viewing.
+                      This file ({currentFile.size}) exceeds the 2.5MB limit for online viewing.
                     </p>
                     <p className="text-gray-500 text-sm mb-6">
                       Please download the file to view it on your device.
@@ -1322,7 +1549,7 @@ export default function WorkerDetail() {
                   </div>
 
                   <p className="text-sm text-gray-500 mt-4">
-                    Google Docs Viewer supports: PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, TXT files up to 10MB
+                    Google Docs Viewer supports: PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, TXT files up to 2.5MB
                   </p>
                 </div>
               )}
@@ -1331,7 +1558,7 @@ export default function WorkerDetail() {
             <div className="bg-gray-50 px-6 py-4 flex justify-between items-center">
               <span className="text-sm text-gray-600">
                 {currentFile.isOversized
-                  ? 'File exceeds 10MB limit - download required'
+                  ? 'File exceeds 2.5MB limit - download required'
                   : 'File will open in a new tab for better viewing experience'}
               </span>
               <button

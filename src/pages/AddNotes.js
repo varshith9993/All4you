@@ -17,10 +17,12 @@ import {
     FiEdit3,
     FiClock
 } from "react-icons/fi";
+import { useNotesCache } from "../contexts/GlobalDataCacheContext";
 
 export default function AddNotes() {
     const navigate = useNavigate();
     const location = useLocation();
+    const { notes } = useNotesCache();
     const [currentUserId, setCurrentUserId] = useState(null);
 
     // Check if we are editing
@@ -127,9 +129,26 @@ export default function AddNotes() {
 
             if (editingNote?.id) {
                 await updateDoc(doc(db, "notes", editingNote.id), noteData);
+                console.group(`[Action: UPDATE NOTE]`);
+                console.log(`%c✔ Note updated successfully`, "color: green; font-weight: bold");
+                console.log(`- Reads: 0`);
+                console.log(`- Writes: 1`);
+                console.groupEnd();
             } else {
+                // Check limit before creating new note
+                if (notes.length >= 5) {
+                    alert("Note Limit Reached: You can only have up to 5 notes. Please delete an existing note to create a new one.");
+                    setSaving(false);
+                    return;
+                }
+
                 noteData.createdAt = serverTimestamp();
                 await addDoc(collection(db, "notes"), noteData);
+                console.group(`[Action: CREATE NOTE]`);
+                console.log(`%c✔ Note created successfully`, "color: green; font-weight: bold");
+                console.log(`- Reads: 0`);
+                console.log(`- Writes: 1`);
+                console.groupEnd();
             }
 
             setHasUnsavedChanges(false);

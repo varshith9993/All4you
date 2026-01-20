@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import axios from "axios";
 import { FiArrowLeft, FiX, FiMapPin, FiUploadCloud, FiRotateCcw } from "react-icons/fi";
 import LocationPickerModal from "../components/LocationPickerModal";
+import { compressFile } from "../utils/compressor";
 
 const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
 const CLOUDINARY_UPLOAD_PRESET = "ml_default";
 const LOCATIONIQ_API_KEY = "pk.a9310b368752337ce215643e50ac0172";
 const suggestedTags = ["discount", "offer", "sale", "new", "limited", "popular"];
-const MAX_PHOTOS = 8;
+const MAX_PHOTOS = 4;
 
 export default function EditAd() {
   const { id } = useParams();
@@ -121,8 +122,9 @@ export default function EditAd() {
   };
 
   const uploadFileToCloudinary = async (file) => {
+    const compressedFile = await compressFile(file);
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", compressedFile);
     formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
     try {
       const res = await axios.post(CLOUDINARY_UPLOAD_URL, formData);
@@ -259,7 +261,14 @@ export default function EditAd() {
         },
         latitude: latitude.trim(),
         longitude: longitude.trim(),
+        updatedAt: serverTimestamp(),
       });
+
+      console.group(`[Action: UPDATE AD]`);
+      console.log(`%c✔ Firestore Write Successful`, "color: green; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
 
       setNewPhotoFiles([]);
       setPhotos(finalPhotos);
@@ -299,7 +308,7 @@ export default function EditAd() {
         <div className="space-y-6">
           {/* Photos */}
           <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-            <label className="block font-bold text-gray-700 mb-2">Photos (Max 8) <span className="text-red-500">*</span></label>
+            <label className="block font-bold text-gray-700 mb-2">Photos (Max {MAX_PHOTOS}) <span className="text-red-500">*</span></label>
             <div className="flex flex-wrap gap-2 mb-3">
               {photoPreviews.map((src, idx) => (
                 <div key={idx} className="relative group">
@@ -317,7 +326,7 @@ export default function EditAd() {
                 <label className="w-20 h-20 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
                   <FiUploadCloud className="text-gray-400" size={20} />
                   <span className="text-[10px] text-gray-500 mt-1">Upload</span>
-                  <input type="file" accept="image/*" multiple onChange={handlePhotoChange} className="hidden" />
+                  <input type="file" accept="image/*,.svg" multiple onChange={handlePhotoChange} className="hidden" />
                 </label>
               )}
             </div>

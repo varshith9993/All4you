@@ -2,6 +2,9 @@ import React, { useState, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./firebase";
+import { ProfileCacheProvider } from "./contexts/ProfileCacheContext";
+import { GlobalDataCacheProvider } from "./contexts/GlobalDataCacheContext";
+import { PaginatedDataCacheProvider } from "./contexts/PaginatedDataCacheContext";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgetPassword from "./pages/ForgetPassword";
@@ -20,7 +23,6 @@ import AdDetail from "./pages/AdDetail";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import Favorites from "./pages/Favorites";
-import ProfileDetail from "./pages/ProfileDetail";
 import Notifications from "./pages/Notifications";
 import EditAd from "./pages/EditAd";
 import EditWorker from "./pages/EditWorker";
@@ -34,7 +36,7 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 import VerifyEmail from "./pages/VerifyEmail";
 
 export default function App() {
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [showOfflineScreen, setShowOfflineScreen] = useState(false);
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
 
@@ -47,26 +49,69 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let offlineTimer = null;
+
     const checkConnection = async () => {
+      // If navigator says offline, trust it but with a small delay
+      if (!navigator.onLine) {
+        if (!offlineTimer) {
+          offlineTimer = setTimeout(() => {
+            if (!navigator.onLine) setShowOfflineScreen(true);
+          }, 3000);
+        }
+        return;
+      }
+
       try {
-        // Try to fetch a reliable external resource to verify internet connectivity
-        // mode: 'no-cors' is used to avoid CORS errors while still detecting network failures
-        await fetch('https://www.google.com', { mode: 'no-cors', cache: 'no-store' });
-        setIsOnline(true);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        // Use a small reliable image or a ping-like fetch
+        await fetch('https://8.8.8.8', {
+          mode: 'no-cors',
+          cache: 'no-store',
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+        if (offlineTimer) {
+          clearTimeout(offlineTimer);
+          offlineTimer = null;
+        }
+        setShowOfflineScreen(false);
       } catch (error) {
-        setIsOnline(false);
+        // Only set offline if navigator also says offline to prevent flickering
+        // from blocked pings or slow DNS
+        if (!navigator.onLine) {
+          if (!offlineTimer) {
+            offlineTimer = setTimeout(() => {
+              if (!navigator.onLine) setShowOfflineScreen(true);
+            }, 3000);
+          }
+        }
       }
     };
 
     const handleOnline = () => {
-      setIsOnline(true);
+      if (offlineTimer) {
+        clearTimeout(offlineTimer);
+        offlineTimer = null;
+      }
+      setShowOfflineScreen(false);
       checkConnection();
     };
-    const handleOffline = () => setIsOnline(false);
+
+    const handleOffline = () => {
+      if (!offlineTimer) {
+        offlineTimer = setTimeout(() => {
+          if (!navigator.onLine) setShowOfflineScreen(true);
+        }, 3000);
+      }
+    };
 
     const handleUnhandledRejection = (event) => {
       if (event.reason && event.reason.message && event.reason.message.includes("offline")) {
-        setIsOnline(false);
+        handleOffline();
       }
     };
 
@@ -74,14 +119,17 @@ export default function App() {
     window.addEventListener("offline", handleOffline);
     window.addEventListener("unhandledrejection", handleUnhandledRejection);
 
-    // Check connection status immediately and periodically
+    // Initial check
     checkConnection();
-    const interval = setInterval(checkConnection, 5000);
+
+    // Check less frequently (every 60 seconds)
+    const interval = setInterval(checkConnection, 60000);
 
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+      if (offlineTimer) clearTimeout(offlineTimer);
       clearInterval(interval);
     };
   }, []);
@@ -89,10 +137,6 @@ export default function App() {
   const handleRefresh = () => {
     window.location.reload();
   };
-
-  if (!isOnline) {
-    return <NoInternet onRefresh={handleRefresh} />;
-  }
 
   if (authLoading) {
     return (
@@ -103,39 +147,47 @@ export default function App() {
   }
 
   return (
-    <Routes>
-      <Route path="/" element={user ? <Navigate to="/workers" replace /> : <Navigate to="/login" replace />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/signup" element={<Signup />} />
-      <Route path="/worker-detail/:id" element={<WorkerDetail />} />
-      <Route path="/workers" element={<Workers />} />
-      <Route path="/services" element={<Services />} />
-      <Route path="/chat/:chatId" element={<ChatDetail />} />
-      <Route path="/ad-detail/:adId" element={<AdDetail />} />
-      <Route path="/add-workers" element={<AddWorkers />} />
-      <Route path="/add-services" element={<AddServices />} />
-      <Route path="/add-ads" element={<AddAds />} />
-      <Route path="/editad/:id" element={<EditAd />} />
-      <Route path="/ads" element={<Ads />} />
-      <Route path="/chats" element={<Chats />} />
-      <Route path="/profile" element={<Profile />} />
-      <Route path="/settings" element={<Settings />} />
-      <Route path="/add-notes" element={<AddNotes />} />
-      <Route path="/favorites" element={<Favorites />} />
-      <Route path="/profile-detail/:id" element={<ProfileDetail />} />
-      <Route path="/notifications" element={<Notifications />} />
-      <Route path="/editworker/:id" element={<EditWorker />} />
-      <Route path="/editservice/:id" element={<EditService />} />
-      <Route path="/service-detail/:id" element={<ServiceDetail />} />
-      <Route path="/forgot-password" element={<ForgetPassword />} />
-      <Route path="/reset-password" element={<ResetPassword />} />
-      <Route path="/get-user-id" element={<GetUserId />} />
-      <Route path="/notes" element={<Notes />} />
-      <Route path="/notes" element={<Notes />} />
-      <Route path="/terms" element={<TermsAndConditions />} />
-      <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-      <Route path="/verify-email" element={<VerifyEmail />} />
-      <Route path="*" element={<div>404 Page Not Found</div>} />
-    </Routes>
+    <>
+      <GlobalDataCacheProvider>
+        <PaginatedDataCacheProvider>
+          <ProfileCacheProvider>
+            <Routes>
+              <Route path="/" element={user ? <Navigate to="/workers" replace /> : <Navigate to="/login" replace />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/signup" element={<Signup />} />
+              <Route path="/worker-detail/:id" element={<WorkerDetail />} />
+              <Route path="/workers" element={<Workers />} />
+              <Route path="/services" element={<Services />} />
+              <Route path="/chat/:chatId" element={<ChatDetail />} />
+              <Route path="/ad-detail/:adId" element={<AdDetail />} />
+              <Route path="/add-workers" element={<AddWorkers />} />
+              <Route path="/add-services" element={<AddServices />} />
+              <Route path="/add-ads" element={<AddAds />} />
+              <Route path="/editad/:id" element={<EditAd />} />
+              <Route path="/ads" element={<Ads />} />
+              <Route path="/chats" element={<Chats />} />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/add-notes" element={<AddNotes />} />
+              <Route path="/favorites" element={<Favorites />} />
+              <Route path="/notifications" element={<Notifications />} />
+              <Route path="/editworker/:id" element={<EditWorker />} />
+              <Route path="/editservice/:id" element={<EditService />} />
+              <Route path="/service-detail/:id" element={<ServiceDetail />} />
+              <Route path="/forgot-password" element={<ForgetPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
+              <Route path="/get-user-id" element={<GetUserId />} />
+              <Route path="/notes" element={<Notes />} />
+              <Route path="/terms" element={<TermsAndConditions />} />
+              <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+              <Route path="/verify-email" element={<VerifyEmail />} />
+              <Route path="*" element={<div>404 Page Not Found</div>} />
+            </Routes>
+          </ProfileCacheProvider>
+        </PaginatedDataCacheProvider>
+      </GlobalDataCacheProvider>
+
+      {showOfflineScreen && <NoInternet onRefresh={handleRefresh} />}
+    </>
   );
 }

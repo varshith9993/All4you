@@ -187,7 +187,7 @@ export default function MapComponent({ latitude, longitude, address, className =
     return (
         <>
             {/* Inline Map */}
-            <div className={`relative rounded-2xl overflow-hidden shadow-sm border border-gray-200 bg-gray-100 h-64 w-full ${className}`}>
+            <div className={`relative rounded-2xl overflow-hidden shadow-sm border border-gray-200 bg-gray-100 h-64 w-full z-0 ${className}`}>
                 {renderMap(false)}
 
                 {/* External Link Button (Bottom) */}

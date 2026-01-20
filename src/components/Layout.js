@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { auth, db } from "../firebase";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { useLayoutCache } from "../contexts/GlobalDataCacheContext";
 import {
     FiStar,
     FiBell,
@@ -35,113 +34,17 @@ export default function Layout({
 }) {
     const navigate = useNavigate();
     const location = useLocation();
-    const [hasUnreadChats, setHasUnreadChats] = useState(false);
-    const [hasUnreadNotifs, setHasUnreadNotifs] = useState(false);
-    const [user, setUser] = useState(null);
 
-    useEffect(() => {
-        const unsubscribe = auth.onAuthStateChanged((u) => {
-            setUser(u);
-        });
-        return unsubscribe;
-    }, []);
+    // OPTIMIZATION: Use global cache instead of creating 5 listeners on every page load
+    // This eliminates ~50% of unnecessary Firestore reads from repeated listener subscriptions
+    const { hasUnreadChats, hasUnreadNotifs, markNotificationsViewed, currentUserId } = useLayoutCache();
 
     // Clear notification dot when on the notifications page
     useEffect(() => {
-        if (location.pathname === '/notifications') {
-            setHasUnreadNotifs(false);
+        if (location.pathname === '/notifications' && currentUserId) {
+            markNotificationsViewed();
         }
-    }, [location.pathname]);
-
-    // Listen for Unread Chats and Notifications
-    useEffect(() => {
-        if (!user) return;
-
-        // 1. Unread Chats Listener (with Deduplication matching Chats.js)
-        const chatQuery = query(
-            collection(db, "chats"),
-            where("participants", "array-contains", user.uid)
-        );
-
-        const unsubChats = onSnapshot(chatQuery, (snap) => {
-            const chatMap = new Map();
-            snap.forEach(d => {
-                const data = { id: d.id, ...d.data() };
-                const otherId = data.participants?.find(x => x !== user.uid);
-                if (otherId) {
-                    const existing = chatMap.get(otherId);
-                    const currentTime = data.updatedAt?.toMillis?.() || 0;
-                    const existingTime = existing?.updatedAt?.toMillis?.() || 0;
-                    if (!existing || currentTime > existingTime) {
-                        chatMap.set(otherId, data);
-                    }
-                }
-            });
-
-            let unread = false;
-            chatMap.forEach(chat => {
-                const unseen = (chat.unseenCounts && chat.unseenCounts[user.uid]) || 0;
-                const isBlocked = chat.blockedBy && chat.blockedBy.includes(user.uid);
-                if (unseen > 0 && !isBlocked) unread = true;
-            });
-            setHasUnreadChats(unread);
-        });
-
-        // 2. Unread Notifications Listener (System + Replies)
-        const sysQuery = query(
-            collection(db, "notifications"),
-            where("userId", "==", user.uid)
-        );
-
-        // Helper to check for new items against current localStorage value
-        const getHasNew = (snap, lastViewed) => {
-            let found = false;
-            snap.forEach(doc => {
-                const data = doc.data();
-                const time = data.createdAt?.toMillis?.() || 0;
-                if (time > lastViewed) found = true;
-            });
-            return found;
-        };
-
-        const unsubSystem = onSnapshot(sysQuery, (snap) => {
-            // Only update if not on the notifications page
-            if (location.pathname === '/notifications') return;
-
-            const lastViewed = parseInt(localStorage.getItem('lastNotificationView') || '0');
-            if (getHasNew(snap, lastViewed)) {
-                setHasUnreadNotifs(true);
-            }
-        });
-
-        // Listen for replies
-        const reviewCols = ["workerReviews", "serviceReviews", "adReviews"];
-        const replyUnsubs = reviewCols.map(col =>
-            onSnapshot(query(collection(db, col), where("userId", "==", user.uid)), (snap) => {
-                if (location.pathname === '/notifications') return;
-
-                const lastViewed = parseInt(localStorage.getItem('lastNotificationView') || '0');
-                let newReplyFound = false;
-                snap.forEach(doc => {
-                    const data = doc.data();
-                    if (data.reply) {
-                        const time = data.updatedAt?.toMillis?.() || data.createdAt?.toMillis?.() || 0;
-                        if (time > lastViewed) newReplyFound = true;
-                    }
-                });
-
-                if (newReplyFound) {
-                    setHasUnreadNotifs(true);
-                }
-            })
-        );
-
-        return () => {
-            unsubChats();
-            unsubSystem();
-            replyUnsubs.forEach(u => u());
-        };
-    }, [user, location.pathname]);
+    }, [location.pathname, currentUserId, markNotificationsViewed]);
 
 
     // Navigation Items
@@ -198,14 +101,14 @@ export default function Layout({
                             className="hover:text-blue-600 transition-colors"
                             aria-label="Favorites"
                         >
-                            <FiStar size={22} />
+                            <FiStar size={22.5} />
                         </button>
                         <button
                             onClick={() => navigate('/notifications')}
                             className="relative hover:text-blue-600 transition-colors"
                             aria-label="Notifications"
                         >
-                            <FiBell size={22} />
+                            <FiBell size={22.5} />
                             {hasUnreadNotifs && (
                                 <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-600 rounded-full border border-white"></span>
                             )}
@@ -215,7 +118,7 @@ export default function Layout({
                             className="hover:text-blue-600 transition-colors"
                             aria-label="Settings"
                         >
-                            <FiSettings size={22} />
+                            <FiSettings size={22.5} />
                         </button>
                     </div>
                 </div>

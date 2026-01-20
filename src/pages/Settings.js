@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { auth, db } from "../firebase";
+import { auth } from "../firebase";
 import { userStatusManager } from "../auth/UserStatusManager";
-import { collection, addDoc, serverTimestamp, doc, getDoc } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../firebase";
+import { useGlobalDataCache } from "../contexts/GlobalDataCacheContext";
 import {
   FiArrowLeft,
   FiUser,
@@ -32,30 +34,27 @@ export default function Settings() {
   const [copySuccess, setCopySuccess] = useState(false);
   const [userName, setUserName] = useState("");
 
+  // OPTIMIZATION: Use GlobalDataCache instead of fetching profile separately
+  const { userProfile } = useGlobalDataCache();
+
   useEffect(() => {
-    const fetchUserName = async () => {
-      const user = auth.currentUser;
-      if (user) {
-        try {
-          // Try to get from profiles collection first
-          const docRef = doc(db, "profiles", user.uid);
-          const docSnap = await getDoc(docRef);
+    const user = auth.currentUser;
+    if (user) {
+      // Use cached profile data from GlobalDataCache (0 reads)
+      if (userProfile && userProfile.username) {
+        setUserName(userProfile.username);
 
-          if (docSnap.exists() && docSnap.data().username) {
-            setUserName(docSnap.data().username);
-          } else {
-            // Fallback to auth display name or email part
-            setUserName(user.displayName || user.email?.split('@')[0] || "Anonymous");
-          }
-        } catch (err) {
-          console.error("Error fetching profile:", err);
-          setUserName(user.displayName || "Anonymous");
-        }
+        console.group(`[Data Fetch: SETTINGS PROFILE]`);
+        console.log(`%c✔ Profile Loaded from Cache`, "color: blue; font-weight: bold");
+        console.log(`- Reads: 0 (Served from GlobalDataCache)`);
+        console.log(`- Writes: 0`);
+        console.groupEnd();
+      } else {
+        // Fallback to auth display name or email part
+        setUserName(user.displayName || user.email?.split('@')[0] || "Anonymous");
       }
-    };
-
-    fetchUserName();
-  }, []);
+    }
+  }, [userProfile]);
 
   const handleLogout = async () => {
     try {
@@ -86,6 +85,12 @@ export default function Settings() {
         submittedAt: new Date().toLocaleString(),
         status: "pending"
       });
+
+      console.group(`[Action: SUBMIT FEEDBACK]`);
+      console.log(`%c✔ Feedback recorded`, "color: green; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
 
       setSubmitSuccess(true);
       setFeedbackText("");

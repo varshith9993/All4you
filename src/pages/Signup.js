@@ -136,6 +136,13 @@ export default function Signup() {
   const isUsernameTaken = async (un) => {
     const q = query(collection(db, "profiles"), where("username", "==", un));
     const snap = await getDocs(q);
+
+    console.group(`[Action: USERNAME CHECK]`);
+    console.log(`%c✔ Checked availability for "${un}"`, "color: gray; font-weight: bold");
+    console.log(`- Reads: ${snap.empty ? '0 (Optimized Index)' : '1'}`);
+    console.log(`- Writes: 0`);
+    console.groupEnd();
+
     return !snap.empty;
   };
 
@@ -287,6 +294,12 @@ export default function Signup() {
         email: cleanEmail
       });
 
+      console.group(`[Action: CREATE PROFILE]`);
+      console.log(`%c✔ User and Profile created`, "color: green; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
+
       // 3. Do NOT sign out. Wait for them to click the link.
       setWaitingForVerification(true);
       setMessage("Verification link sent! Waiting for you to click it...");
@@ -304,18 +317,58 @@ export default function Signup() {
   };
 
   const handleGoogleSignIn = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setError("");
+    setMessage("");
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-      // State updates and navigation are now handled by the onAuthStateChanged listener
-      // to ensure consistency across page reloads and auth states.
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+
+      // Check if user already has a profile
+      const docRef = doc(db, "profiles", user.uid);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        // User already has a profile, redirect to workers
+        navigate("/workers");
+      } else {
+        // User authenticated but no profile - show completion form
+        setGoogleUser(user);
+        if (user.email) setEmail(user.email);
+        // Pre-fill username suggestion from display name
+        if (user.displayName) {
+          const suggestedUsername = user.displayName.replace(/\s+/g, '_').toLowerCase().substring(0, 12);
+          setUsername(suggestedUsername);
+        }
+        setMessage("Google sign-in successful! Please complete your profile.");
+      }
     } catch (err) {
       console.error("Google Sign In Error:", err);
+      // Handle specific error codes
       if (err.code === 'auth/popup-closed-by-user') {
         setError("Sign-in cancelled.");
+      } else if (err.code === 'auth/cancelled-popup-request') {
+        setError("Sign-in was cancelled. Please try again.");
+      } else if (err.code === 'auth/popup-blocked') {
+        setError("Popup was blocked by your browser. Please allow popups and try again.");
+      } else if (err.code === 'auth/network-request-failed') {
+        setError("Network error. Please check your internet connection and try again.");
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError("This domain is not authorized for Google sign-in. Please contact support.");
+      } else if (err.code === 'auth/operation-not-allowed') {
+        setError("Google sign-in is not enabled. Please contact support.");
+      } else if (err.code === 'auth/account-exists-with-different-credential') {
+        setError("An account already exists with the same email but different sign-in credentials.");
+      } else if (err.code === 'permission-denied' || err.message?.includes('permission')) {
+        // Firestore permission error - handle gracefully
+        setError("Unable to verify account. Please try again or use email signup.");
       } else {
-        setError("Failed to sign in with Google. Please try again.");
+        setError(`Sign-in failed: ${err.message || 'Please try again.'}`);
       }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -381,6 +434,12 @@ export default function Signup() {
         uid: googleUser.uid,
         email: googleUser.email
       });
+
+      console.group(`[Action: GOOGLE SIGNUP COMPLETE]`);
+      console.log(`%c✔ Google Profile initialized`, "color: blue; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
 
       // Navigate to workers
       navigate("/workers");
@@ -663,10 +722,20 @@ export default function Signup() {
               <div className="flex flex-col items-center justify-center py-8">
                 <button
                   onClick={handleGoogleSignIn}
-                  className="flex items-center gap-3 bg-white border border-gray-200 text-gray-700 font-bold py-4 px-8 rounded-xl shadow-sm hover:shadow-md hover:bg-gray-50 transition-all active:scale-[0.98] w-full justify-center"
+                  disabled={submitting}
+                  className="flex items-center gap-3 bg-white border border-gray-200 text-gray-700 font-bold py-4 px-8 rounded-xl shadow-sm hover:shadow-md hover:bg-gray-50 transition-all active:scale-[0.98] w-full justify-center disabled:opacity-70 disabled:cursor-not-allowed"
                 >
-                  <FcGoogle size={24} />
-                  <span>Sign up with Google</span>
+                  {submitting ? (
+                    <>
+                      <div className="w-6 h-6 border-2 border-gray-300 border-t-indigo-600 rounded-full animate-spin"></div>
+                      <span>Signing in...</span>
+                    </>
+                  ) : (
+                    <>
+                      <FcGoogle size={24} />
+                      <span>Sign up with Google</span>
+                    </>
+                  )}
                 </button>
                 <p className="text-gray-400 text-xs mt-4 text-center">
                   Securely sign up with your Google account.<br />

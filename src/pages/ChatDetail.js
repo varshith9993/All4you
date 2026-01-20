@@ -3,8 +3,6 @@ import { auth, db } from "../firebase";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   doc,
-  getDoc,
-  getDocs,
   collection,
   query,
   orderBy,
@@ -13,10 +11,10 @@ import {
   updateDoc,
   arrayUnion,
   arrayRemove,
-  deleteDoc,
   serverTimestamp,
   increment,
-  limit
+  limit,
+  writeBatch
 } from "firebase/firestore";
 import {
   FiArrowLeft,
@@ -36,8 +34,9 @@ import {
 } from "react-icons/fi";
 import { MdDone, MdDoneAll, MdAdd, MdMic } from "react-icons/md";
 import { uploadToCloudinary } from "../utils/cloudinaryUpload";
+import { compressFile } from "../utils/compressor";
 import defaultProfile from "../assets/images/default_profile.svg";
-
+import { useGlobalDataCache } from "../contexts/GlobalDataCacheContext";
 
 function formatTime(date) {
   if (!date) return "";
@@ -82,15 +81,20 @@ function getDateLabel(date) {
 }
 
 function isUserOnline(online, lastSeen) {
-  if (online === true) {
-    if (!lastSeen) return true;
+  // CRITICAL FIX: Check lastSeen timestamp first
+  if (lastSeen) {
     try {
       let date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
-      return (new Date().getTime() - date.getTime()) < 60000;
+      const minutesSinceLastSeen = (Date.now() - date.getTime()) / 60000;
+      if (minutesSinceLastSeen > 5) return false;
+      if (minutesSinceLastSeen < 2) return true;
     } catch (error) {
-      return true;
+      console.error('Error checking lastSeen:', error);
     }
   }
+
+  if (online === true) return true;
+  if (online === false) return false;
   return false;
 }
 
@@ -125,7 +129,7 @@ function MessageTickIcon({ message, otherUserId, isOwnMessage }) {
   }
 }
 
-function MessageActionsComponent({ message, onReply, onCopy, onEdit, onDelete, isOwnMessage }) {
+function MessageActionsComponent({ message, onReply, onCopy, onEdit, onDelete, isOwnMessage, showUpwards }) {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef(null);
 
@@ -157,7 +161,7 @@ function MessageActionsComponent({ message, onReply, onCopy, onEdit, onDelete, i
       ),
       showMenu && React.createElement(
         "div",
-        { className: `absolute ${isOwnMessage ? 'right-0' : 'left-0'} top-6 bg-white rounded-lg shadow-xl border py-1 z-50 min-w-[140px]` },
+        { className: `absolute ${isOwnMessage ? 'right-0' : 'left-0'} ${showUpwards ? 'bottom-full mb-1' : 'top-6'} bg-white rounded-lg shadow-xl border py-1 z-50 min-w-[140px]` },
         React.createElement(
           "button",
           {
@@ -185,7 +189,7 @@ function MessageActionsComponent({ message, onReply, onCopy, onEdit, onDelete, i
     ),
     showMenu && React.createElement(
       "div",
-      { className: `absolute ${isOwnMessage ? 'right-0' : 'left-0'} top-6 bg-white rounded-lg shadow-xl border py-1 z-50 min-w-[140px]` },
+      { className: `absolute ${isOwnMessage ? 'right-0' : 'left-0'} ${showUpwards ? 'bottom-full mb-1' : 'top-6'} bg-white rounded-lg shadow-xl border py-1 z-50 min-w-[140px]` },
       React.createElement(
         "button",
         {
@@ -306,9 +310,9 @@ export default function ChatDetail() {
   const fileInputRef = useRef(null);
   const chatContainerRef = useRef(null);
 
-  // Pagination State
-  const INITIAL_LIMIT = 20;
-  const [limitCount, setLimitCount] = useState(INITIAL_LIMIT);
+  // Pagination State - OPTIMIZED: Reduced from 20 to 10 messages
+  const INITIAL_LIMIT = 10; // Reduced from 20 for 50% fewer reads
+  const [limitCount, setLimitCount] = useState(10);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const scrollRef = useRef({ scrollTop: 0, scrollHeight: 0 });
@@ -351,6 +355,9 @@ export default function ChatDetail() {
   // Get other user ID
   const otherUserId = chat?.participants?.find(p => p !== uid);
 
+  // Global Message Cache
+  const { getMessageCache, setMessageCache } = useGlobalDataCache();
+
   // Initialize
   useEffect(() => {
     return auth.onAuthStateChanged((user) => setUid(user ? user.uid : ""));
@@ -364,12 +371,13 @@ export default function ChatDetail() {
     }
   }, [toastMessage]);
 
-  // Load Chat, Blocking Status & Profile
+  // Load Chat and Blocking Status
+  // OPTIMIZATION: Separated chat listener from profile listener to prevent accumulated listeners
   useEffect(() => {
     if (!chatId || !uid) return;
 
     // Use onSnapshot for real-time chat updates (blocking, muting)
-    const unsubChat = onSnapshot(doc(db, "chats", chatId), async (chatSnap) => {
+    const unsubChat = onSnapshot(doc(db, "chats", chatId), (chatSnap) => {
       if (!chatSnap.exists()) {
         navigate("/chats");
         return;
@@ -378,88 +386,117 @@ export default function ChatDetail() {
       const chatData = { id: chatSnap.id, ...chatSnap.data() };
       setChat(chatData);
 
-      const otherId = chatData.participants.find(x => x !== uid);
+      console.group(`[Chat: SYNC]`);
+      console.log(`%c✔ Chat metadata synchronized`, "color: blue; font-weight: bold");
+      console.log(`- Reads: 1 (Active listener)`);
+      console.log(`- Writes: 0`);
+      console.groupEnd();
 
       const meBlocked = chatData.blockedBy?.includes(uid) || false;
+      const otherId = chatData.participants?.find(x => x !== uid);
       const themBlocked = otherId ? (chatData.blockedBy?.includes(otherId) || false) : false;
 
       setIsBlockedByMe(meBlocked);
       setIsBlockedByThem(themBlocked);
       setIsMuted(chatData.mutedBy?.includes(uid) || false);
-
-      if (otherId) {
-        // Initial profile load
-        const profSnap = await getDoc(doc(db, "profiles", otherId));
-        if (profSnap.exists()) {
-          setProfile(profSnap.data());
-        }
-
-        // Real-time profile listener
-        const unsubProfile = onSnapshot(doc(db, "profiles", otherId), (snap) => {
-          if (snap.exists()) {
-            const data = snap.data();
-            setProfile(prev => ({ ...prev, ...data }));
-            const isOnline = isUserOnline(data.online, data.lastSeen);
-            setUserStatus({ online: isOnline, lastSeen: data.lastSeen });
-          }
-        });
-        return () => unsubProfile();
-      }
     }, (err) => console.error(err));
 
     return () => unsubChat();
   }, [chatId, uid, navigate]);
 
-  // Messages Listener with Pagination and Block Filtering
+  // OPTIMIZATION: Separate profile listener - only recreates when otherUserId changes
+  // This fixes the bug where profile listeners accumulated on every chat update
   useEffect(() => {
-    if (!chatId || !uid) return;
+    if (!otherUserId) return;
 
+    const unsubProfile = onSnapshot(doc(db, "profiles", otherUserId), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setProfile(data);
+        const isOnline = isUserOnline(data.online, data.lastSeen);
+        setUserStatus({ online: isOnline, lastSeen: data.lastSeen });
+
+        console.group(`[Chat: PROFILE SYNC]`);
+        console.log(`%c✔ Other user profile synchronized`, "color: blue; font-weight: bold");
+        console.log(`- Reads: 1 (Active listener)`);
+        console.log(`- Writes: 0`);
+        console.groupEnd();
+      }
+    }, (err) => console.error("Profile listener error:", err));
+
+    return () => unsubProfile();
+  }, [otherUserId]);
+
+  // Messages Listener with Pagination and Block Filtering
+  // OPTIMIZATION: Zero-read revisit - only subscribe if cache is stale or missing
+  useEffect(() => {
+    if (!chatId || !uid || !chat) return;
+
+    const cachedData = getMessageCache(chatId);
+    const lastChatUpdate = chat?.updatedAt?.toMillis?.() || 0;
+
+    // IF we have cache AND it matches precisely the last server update,
+    // AND we are not already loading more messages, we can SKIP the listener
+    // because the global chats listener already keeps us updated on whether something changed.
+    if (cachedData && cachedData.lastUpdate === lastChatUpdate && lastChatUpdate !== 0 && !isLoadingMore && cachedData.messages?.length >= limitCount) {
+      setMessages(cachedData.messages);
+
+      console.group(`[Chat: CACHE RESTORE]`);
+      console.log(`%c✔ Messages restored from local cache (0 reads)`, "color: green; font-weight: bold");
+      console.log(`- Last Update: ${new Date(lastChatUpdate).toLocaleTimeString()}`);
+      console.groupEnd();
+      return;
+    }
+
+    // Otherwise, we need to subscribe to get the latest (or more) messages
     const q = query(
       collection(db, "chats", chatId, "messages"),
       orderBy("createdAt", "desc"),
       limit(limitCount)
     );
 
-    const unsub = onSnapshot(q, (snap) => {
+    const unsub = onSnapshot(q, { includeMetadataChanges: true }, (snap) => {
+      // If snap.metadata.fromCache is true, 0 reads are consumed.
+      const isFromCache = snap.metadata.fromCache;
       const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-      // Requirement: Check if either user is blocked. 
-      // Filter out messages that were sent when either person was blocked, 
-      // unless I am the sender of that message and I am not the one who blocked.
-      // Actually, simplified logic based on requirements:
-      // "Blocked users cannot exchange new messages"
-      // "Messages sent by User2 while blocked should remain undelivered"
-
       const filteredMsgs = msgs.filter(msg => {
-        // If message is not marked as blocked, everyone sees it
         if (!msg.isBlocked) return true;
-
-        // If it IS marked as blocked, only the sender sees it
         return msg.senderId === uid;
       });
 
       setMessages(filteredMsgs);
-      setHasMore(snap.docs.length >= limitCount);
+      setHasMore(snap.docs.length === limitCount);
       setIsLoadingMore(false);
 
-      // Preserve scroll position when loading more (adjusted for column-reverse)
-      if (isLoadingMore && chatContainerRef.current) {
-        const newHeight = chatContainerRef.current.scrollHeight;
-        const diff = newHeight - scrollRef.current.scrollHeight;
-        // In column-reverse, we want to maintain the visual position relative to the bottom (newest messages)
-        // So, we adjust scrollTop by the difference in height.
-        chatContainerRef.current.scrollTop = scrollRef.current.scrollTop + diff;
+      // Persist to global cache for zero-read revisit
+      if (!isFromCache && lastChatUpdate !== 0) {
+        setMessageCache(chatId, filteredMsgs, lastChatUpdate);
+      }
+
+      console.group(`[Chat: MESSAGES SYNC]`);
+      console.log(`%c✔ Messages synchronized`, "color: blue; font-weight: bold");
+      console.log(`- Source: ${isFromCache ? 'Local Cache (0 reads)' : 'Server (reads consumed)'}`);
+      console.log(`- Messages: ${snap.docs.length}`);
+      console.groupEnd();
+
+      if (isLoadingMore && scrollRef.current.scrollHeight > 0) {
+        const container = chatContainerRef.current;
+        if (container) {
+          container.scrollTop = container.scrollHeight - scrollRef.current.scrollHeight;
+        }
       }
     });
 
     return () => unsub();
-  }, [chatId, uid, limitCount, isBlockedByMe, isBlockedByThem, isLoadingMore]);
+  }, [chatId, uid, limitCount, isBlockedByMe, isBlockedByThem, isLoadingMore, chat, getMessageCache, setMessageCache]);
 
   // Update message delivery and seen status when user views chat
+  // OPTIMIZATION: Use batch writes instead of individual updateDoc calls
   useEffect(() => {
     if (!chatId || !uid || !otherUserId) return;
 
-    // Mark messages from other user as delivered and seen
+    // Mark messages from other user as delivered and seen using batch write
     const markMessagesAsDeliveredAndSeen = async () => {
       try {
         // Get messages from other user (not deleted)
@@ -467,15 +504,25 @@ export default function ChatDetail() {
           msg.senderId === otherUserId && !msg.isDeleted
         );
 
-        // Mark as delivered first
+        // Collect messages that need delivery update
         const undeliveredMessages = messagesFromOther.filter(msg =>
           !msg.deliveredTo?.includes(uid)
         );
 
-        for (const msg of undeliveredMessages) {
-          await updateDoc(doc(db, "chats", chatId, "messages", msg.id), {
-            deliveredTo: arrayUnion(uid)
+        // OPTIMIZATION: Batch write for delivered status
+        if (undeliveredMessages.length > 0) {
+          const batch = writeBatch(db);
+          undeliveredMessages.forEach(msg => {
+            const msgRef = doc(db, "chats", chatId, "messages", msg.id);
+            batch.update(msgRef, { deliveredTo: arrayUnion(uid) });
           });
+          await batch.commit();
+
+          console.group(`[Chat: STATUS UPDATE]`);
+          console.log(`%c✔ Messages marked as delivered`, "color: purple; font-weight: bold");
+          console.log(`- Reads: 0`);
+          console.log(`- Writes: ${undeliveredMessages.length}`);
+          console.groupEnd();
         }
 
         // Mark as seen after a short delay (simulating WhatsApp behavior)
@@ -484,17 +531,25 @@ export default function ChatDetail() {
             !msg.seenBy?.includes(uid)
           );
 
-          for (const msg of unseenMessages) {
-            await updateDoc(doc(db, "chats", chatId, "messages", msg.id), {
-              seenBy: arrayUnion(uid)
-            });
-          }
-
-          // Reset unseen count for current user
+          // OPTIMIZATION: Batch write for seen status
           if (unseenMessages.length > 0) {
-            await updateDoc(doc(db, "chats", chatId), {
-              [`unseenCounts.${uid}`]: 0
+            const seenBatch = writeBatch(db);
+            unseenMessages.forEach(msg => {
+              const msgRef = doc(db, "chats", chatId, "messages", msg.id);
+              seenBatch.update(msgRef, { seenBy: arrayUnion(uid) });
             });
+
+            // Also reset unseen count for current user in the same batch
+            const chatRef = doc(db, "chats", chatId);
+            seenBatch.update(chatRef, { [`unseenCounts.${uid}`]: 0 });
+
+            await seenBatch.commit();
+
+            console.group(`[Chat: STATUS UPDATE]`);
+            console.log(`%c✔ Messages marked as seen`, "color: purple; font-weight: bold");
+            console.log(`- Reads: 0`);
+            console.log(`- Writes: ${unseenMessages.length + 1}`);
+            console.groupEnd();
           }
         }, 500); // Reduced delay for better UX
 
@@ -507,6 +562,7 @@ export default function ChatDetail() {
   }, [messages, chatId, uid, otherUserId]);
 
   // Listen for messages from current user and update their delivery status
+  // OPTIMIZATION: Use batch writes instead of individual updateDoc calls
   useEffect(() => {
     if (!chatId || !uid || !otherUserId) return;
 
@@ -520,13 +576,20 @@ export default function ChatDetail() {
           (!msg.deliveredTo || !msg.deliveredTo.includes(otherUserId))
         );
 
-        // If the other user is online, mark messages as delivered
+        // OPTIMIZATION: Batch write for delivery status when recipient is online
         if (userStatus.online && ownUndeliveredMessages.length > 0) {
-          for (const msg of ownUndeliveredMessages) {
-            await updateDoc(doc(db, "chats", chatId, "messages", msg.id), {
-              deliveredTo: arrayUnion(otherUserId)
-            });
-          }
+          const batch = writeBatch(db);
+          ownUndeliveredMessages.forEach(msg => {
+            const msgRef = doc(db, "chats", chatId, "messages", msg.id);
+            batch.update(msgRef, { deliveredTo: arrayUnion(otherUserId) });
+          });
+          await batch.commit();
+
+          console.group(`[Chat: STATUS UPDATE]`);
+          console.log(`%c✔ Own messages marked as delivered`, "color: purple; font-weight: bold");
+          console.log(`- Reads: 0`);
+          console.log(`- Writes: ${ownUndeliveredMessages.length}`);
+          console.groupEnd();
         }
       } catch (error) {
         console.error("Error marking own messages as delivered:", error);
@@ -579,6 +642,11 @@ export default function ChatDetail() {
       await updateDoc(doc(db, "chats", chatId), { blockedBy: arrayUnion(uid) });
       setIsBlockedByMe(true);
       setToastMessage("User blocked");
+      console.group(`[Action: BLOCK USER]`);
+      console.log(`%c✔ User blocked`, "color: red; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
     } catch (e) { console.error(e); setToastMessage("Error blocking user"); }
     setShowBlockModal(false);
   };
@@ -588,6 +656,16 @@ export default function ChatDetail() {
       await updateDoc(doc(db, "chats", chatId), { blockedBy: arrayRemove(uid) });
       setIsBlockedByMe(false);
       setToastMessage("User unblocked");
+      console.group(`[Action: UNBLOCK USER]`);
+      console.log(`%c✔ User unblocked`, "color: green; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
+      console.group(`[Action: UNBLOCK USER]`);
+      console.log(`%c✔ User unblocked`, "color: green; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
     } catch (e) { console.error(e); setToastMessage("Error unblocking user"); }
   };
 
@@ -596,6 +674,11 @@ export default function ChatDetail() {
       await updateDoc(doc(db, "chats", chatId), { mutedBy: arrayUnion(uid) });
       setIsMuted(true);
       setToastMessage("Notifications muted");
+      console.group(`[Action: MUTE CHAT]`);
+      console.log(`%c✔ Chat muted`, "color: gray; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
     } catch (e) { console.error(e); setToastMessage("Error muting chat"); }
     setShowMuteModal(false);
   };
@@ -605,14 +688,30 @@ export default function ChatDetail() {
       await updateDoc(doc(db, "chats", chatId), { mutedBy: arrayRemove(uid) });
       setIsMuted(false);
       setToastMessage("Notifications unmuted");
+      console.group(`[Action: UNMUTE CHAT]`);
+      console.log(`%c✔ Chat unmuted`, "color: blue; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
     } catch (e) { console.error(e); setToastMessage("Error unmuting chat"); }
   };
 
   const handleDeleteChat = async () => {
     try {
-      await deleteDoc(doc(db, "chats", chatId));
+      // Logic deletion: Add current user to 'deletedBy' array
+      // This allows the chat to be "cleared" for one user but remain for the other
+      // AND allows restoration if they chat again
+      await updateDoc(doc(db, "chats", chatId), {
+        deletedBy: arrayUnion(uid)
+      });
+
+      console.group(`[Action: HIDE CHAT]`);
+      console.log(`%c✔ Chat hidden for current user`, "color: red; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
       navigate("/chats");
-    } catch (e) { console.error(e); setToastMessage("Error deleting chat"); }
+    } catch (e) { console.error(e); setToastMessage("Error hiding chat"); }
     setShowDeleteModal(false);
   };
 
@@ -641,6 +740,11 @@ export default function ChatDetail() {
         type: "text"
       });
       setToastMessage("Message deleted successfully");
+      console.group(`[Action: DELETE MESSAGE]`);
+      console.log(`%c✔ Message deleted`, "color: red; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
     } catch (e) {
       console.error(e);
       setToastMessage("Error deleting message");
@@ -734,16 +838,17 @@ export default function ChatDetail() {
       return;
     }
 
-    // Check file size (max 10MB for images)
-    if (file.size > 10 * 1024 * 1024) {
-      setToastMessage("Image size must be less than 10MB");
+    // Check file size (max 2.5MB for images)
+    if (file.size > 2.5 * 1024 * 1024) {
+      setToastMessage("Image size must be less than 2.5MB");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
 
     setUploading(true);
     try {
-      const url = await uploadToCloudinary(file, "image");
+      const compressedFile = await compressFile(file);
+      const url = await uploadToCloudinary(compressedFile, "image");
       await sendMessageInternal({ type: "image", fileUrl: url, text: "Image" });
     } catch (err) {
       console.error("Image upload failed", err);
@@ -768,6 +873,12 @@ export default function ChatDetail() {
         setEditingId(null);
         setText("");
         setToastMessage("Message edited successfully");
+
+        console.group(`[Action: EDIT MESSAGE]`);
+        console.log(`%c✔ Message updated`, "color: blue; font-weight: bold");
+        console.log(`- Reads: 0`);
+        console.log(`- Writes: 1`);
+        console.groupEnd();
       } catch (err) {
         console.error(err);
         setToastMessage("Failed to update message");
@@ -802,7 +913,8 @@ export default function ChatDetail() {
     };
 
     try {
-      await addDoc(collection(db, "chats", chatId, "messages"), msgData);
+      // OPTIMIZATION: Use addDoc return value instead of querying all messages
+      const docRef = await addDoc(collection(db, "chats", chatId, "messages"), msgData);
 
       // If NOT blocked, update chat meta and unseen counts
       if (!isBlockedByThem && otherUserId) {
@@ -816,19 +928,17 @@ export default function ChatDetail() {
 
       setReplyTo(null);
 
-      // Simulate delivery to recipient if they are online
-      if (userStatus.online) {
+      console.group(`[Action: SEND MESSAGE]`);
+      console.log(`%c✔ Message Sent`, "color: green; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: ${(!isBlockedByThem && otherUserId) ? '2' : '1'} (Message Doc + Chat Meta Update)`);
+      console.groupEnd();
+      if (userStatus.online && otherUserId) {
         setTimeout(async () => {
           try {
-            // Get the latest message (the one we just sent)
-            const q = query(collection(db, "chats", chatId, "messages"), orderBy("createdAt", "desc"), orderBy("senderId"));
-            const querySnapshot = await getDocs(q);
-            if (!querySnapshot.empty && otherUserId) {
-              const latestMsgDoc = querySnapshot.docs[0];
-              await updateDoc(doc(db, "chats", chatId, "messages", latestMsgDoc.id), {
-                deliveredTo: arrayUnion(otherUserId)
-              });
-            }
+            await updateDoc(doc(db, "chats", chatId, "messages", docRef.id), {
+              deliveredTo: arrayUnion(otherUserId)
+            });
           } catch (error) {
             console.error("Error updating delivery status:", error);
           }
@@ -865,7 +975,8 @@ export default function ChatDetail() {
             onCopy: () => { navigator.clipboard.writeText(msg.text); setToastMessage("Copied") },
             onEdit: () => handleEditMessage(msg),
             onDelete: () => handleDeleteMessageRequest(msg),
-            isOwnMessage: false
+            isOwnMessage: false,
+            showUpwards: index < 3
           }
         ),
         // For deleted messages from others
@@ -874,7 +985,8 @@ export default function ChatDetail() {
           {
             message: msg,
             onDelete: () => handleDeleteMessageRequest(msg),
-            isOwnMessage: false
+            isOwnMessage: false,
+            showUpwards: index < 3
           }
         ),
         React.createElement(
@@ -974,7 +1086,8 @@ export default function ChatDetail() {
             onCopy: () => !msg.isDeleted && navigator.clipboard.writeText(msg.text),
             onEdit: () => !msg.isDeleted && handleEditMessage(msg),
             onDelete: () => handleDeleteMessageRequest(msg),
-            isOwnMessage: true
+            isOwnMessage: true,
+            showUpwards: index < 3
           }
         )
       ),

@@ -7,6 +7,7 @@ import { FiCamera, FiMapPin, FiX, FiImage, FiFileText, FiUpload, FiArrowLeft, Fi
 
 import defaultAvatar from "../assets/images/default_profile.svg";
 import LocationPickerModal from "../components/LocationPickerModal";
+import { compressFile } from "../utils/compressor";
 
 const suggestedTags = ["mechanic", "engineer", "tutor", "electrician", "driver", "teacher", "plumber", "carpenter", "painter", "cleaner", "cook", "gardener"];
 const LOCATIONIQ_API_KEY = "pk.c46b235dc808aed78cb86bd70c83fab0";
@@ -99,8 +100,9 @@ export default function EditWorker() {
   }, [id]);
 
   const uploadFileToCloudinary = async (file) => {
+    const compressedFile = await compressFile(file);
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", compressedFile);
     formData.append("upload_preset", "ml_default");
 
     // Use 'auto' resource type for all files
@@ -172,10 +174,10 @@ export default function EditWorker() {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
 
-    // Validate file size (Max 10MB)
+    // Validate file size (Max 2.5MB)
     for (const file of files) {
-      if (file.size > 10 * 1024 * 1024) {
-        alert(`File "${file.name}" exceeds the 10MB limit.`);
+      if (file.size > 2.5 * 1024 * 1024) {
+        alert(`File "${file.name}" exceeds the 2.5MB limit.`);
         return;
       }
     }
@@ -275,6 +277,12 @@ export default function EditWorker() {
       };
 
       await updateDoc(doc(db, "workers", id), updateData);
+
+      console.group(`[Action: UPDATE WORKER]`);
+      console.log(`%c✔ Firestore Write Successful`, "color: green; font-weight: bold");
+      console.log(`- Reads: 0`);
+      console.log(`- Writes: 1`);
+      console.groupEnd();
       setSaveConfirm(false);
       navigate(-1);
     } catch (err) {
@@ -449,7 +457,7 @@ export default function EditWorker() {
                 <span className="text-sm text-gray-600">
                   Click to upload files
                 </span>
-                <p className="text-xs text-gray-500 mt-1">Images, PDFs, Docs (Max 10MB)</p>
+                <p className="text-xs text-gray-500 mt-1">Images, PDFs, Docs (Max 2.5MB)</p>
               </div>
               <input
                 type="file"

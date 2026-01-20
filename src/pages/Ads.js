@@ -1,11 +1,11 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { onAuthStateChanged } from "firebase/auth";
-import { db, auth } from "../firebase";
-import { collection, query, onSnapshot, doc } from "firebase/firestore";
-import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiPlus, FiWifi, FiChevronLeft, FiChevronRight, FiSearch } from "react-icons/fi";
+import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiPlus, FiWifi, FiChevronLeft, FiChevronRight, FiSearch, FiLoader } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.svg";
 import Layout from "../components/Layout";
+import { useProfileCache } from "../contexts/ProfileCacheContext";
+import { usePaginatedAds } from "../contexts/PaginatedDataCacheContext";
+import { useDebounce } from "../hooks/useDebounce";
 import {
   buildFuseIndex,
   performSearch,
@@ -55,40 +55,43 @@ function formatLastSeen(lastSeen) {
 }
 
 function isUserOnline(userId, currentUserId, online, lastSeen) {
+  // Current user is always shown as online
   if (userId === currentUserId) return true;
-  if (online === true) {
-    if (!lastSeen) return true;
+
+  // CRITICAL FIX: Check lastSeen timestamp first
+  if (lastSeen) {
     try {
       let date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
-      const now = new Date();
-      const diffMs = now.getTime() - date.getTime();
-      return diffMs < 5000;
+      const minutesSinceLastSeen = (Date.now() - date.getTime()) / 60000;
+      if (minutesSinceLastSeen > 5) return false;
+      if (minutesSinceLastSeen < 2) return true;
     } catch (error) {
-      return true;
+      console.error('Error checking lastSeen:', error);
     }
   }
+
+  if (online === true) return true;
   if (online === false) return false;
-  if (!lastSeen) return false;
-  try {
-    let date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    return diffMs < 5000;
-  } catch (error) {
-    return false;
-  }
+  return false;
 }
 
 // --- AdCard Component ---
 function AdCard({ ad, profile, userProfiles, currentUserId, navigate }) {
-  const { title, photos = [], rating = 0, location = {}, tags = [], latitude, longitude, createdBy } = ad;
+  const { title, photos = [], rating = 0, location = {}, tags = [], latitude, longitude, createdBy, author } = ad;
   const [currentPhotoIndex, setCurrentPhotoIndex] = React.useState(0);
   const [imagesPreloaded, setImagesPreloaded] = React.useState(false);
+
+  // Strategy: Use Denormalized Author -> Real-time Profile -> Defaults
   const adCreatorProfile = userProfiles[createdBy] || {};
-  const displayUsername = adCreatorProfile.username || "Unknown User";
-  const displayProfileImage = adCreatorProfile.photoURL || adCreatorProfile.profileImage || defaultAvatar;
-  const displayOnline = adCreatorProfile.online;
-  const displayLastSeen = adCreatorProfile.lastSeen;
+
+  // Prefer ad-specific overrides (like old AddAds flat fields) or Author object
+  // Ad flat fields: ad.username, ad.profileImage (legacy)
+  const displayUsername = author?.username || ad.username || adCreatorProfile.username || "Unknown User";
+  const displayProfileImage = author?.photoURL || ad.profileImage || adCreatorProfile.photoURL || adCreatorProfile.profileImage || defaultAvatar;
+
+  // Online Status: Real-time > Snapshot
+  const displayOnline = adCreatorProfile.online !== undefined ? adCreatorProfile.online : (author?.online || ad.online);
+  const displayLastSeen = adCreatorProfile.lastSeen !== undefined ? adCreatorProfile.lastSeen : (author?.lastSeen || ad.lastSeen);
 
   // PERFORMANCE: Preload all images for instant swiping
   React.useEffect(() => {
@@ -514,11 +517,27 @@ function FilterModal({ isOpen, onClose, filters, setFilters, applyFilters }) {
 }
 // --- Main Ads Component ---
 export default function Ads() {
-  const [ads, setAds] = useState([]);
+  // PAGINATION OPTIMIZATION: Use paginated data fetching
+  // - Initial load: 15 documents (1 read)
+  // - Page return: 0 reads if no changes
+  // - Load more: 15 documents per scroll (1 read)
+  const {
+    ads,
+    loading: adsLoading,
+    loadingMore,
+    hasMore,
+    fetchAds,
+    loadMoreAds,
+    currentUserId,
+    userProfile: profile
+  } = usePaginatedAds();
+
   const [searchValue, setSearchValue] = useState("");
-  const [profile, setProfile] = useState(null);
+  // OPTIMIZATION: Debounce search value to reduce computation and potential Firestore calls
+  // The search only executes after the user stops typing for 300ms (optimized from 1200ms)
+  const debouncedSearchValue = useDebounce(searchValue, 300);
+
   const [userProfiles, setUserProfiles] = useState({});
-  const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const [showSort, setShowSort] = useState(false);
   const [filters, setFilters] = useState({
@@ -532,74 +551,108 @@ export default function Ads() {
     pincode: "",
     tags: ""
   });
+
+  // Pagination display state (for client-side pagination of already-loaded data)
+  // Normal browsing: 15 items per page
+  // Search results: 10 items per page
+  const [displayCount, setDisplayCount] = useState(15);
+  const listContainerRef = useRef(null);
+
+  // Determine page size based on search state
+  const currentPageSize = debouncedSearchValue.trim() ? 10 : 15;
+
+  // Reset displayCount when search query changes
+  useEffect(() => {
+    setDisplayCount(currentPageSize);
+  }, [debouncedSearchValue, currentPageSize]);
+
+  // OPTIMIZATION: Debounce filters to reduce computation and potential Firestore calls
+  // Filter updates only apply after the user stops interacting with filter inputs for 500ms (optimized from 1200ms)
+  const debouncedFilters = useDebounce(filters, 500);
+
   const [sortBy, setSortBy] = useState("distance-low-high");
-  const [currentUserId, setCurrentUserId] = useState(null);
   const navigate = useNavigate();
 
-  // 1. Authentication & Current User Profile
+  // OPTIMIZATION: Use ProfileCache for batch profile fetching
+  const { fetchProfiles, getAllCachedProfiles, subscribeToOnlineStatus } = useProfileCache();
+
+  // Data fetch when filters or sort change
   useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setCurrentUserId(user.uid);
-        // Listen to current user profile in real-time
-        const profileRef = doc(db, 'profiles', user.uid);
-        const unsubscribeProfile = onSnapshot(profileRef, (docSnap) => {
-          if (docSnap.exists()) {
-            setProfile(docSnap.data());
-          }
-        }, (error) => {
-          console.error("Error listening to user profile:", error);
-        });
+    // Determine sort field from sortBy
+    let sortField = 'createdAt';
+    let sortDirection = 'desc';
 
-        return () => unsubscribeProfile();
-      } else {
-        setCurrentUserId(null);
-        setLoading(false);
-      }
-    });
-    return () => unsubscribeAuth();
-  }, []);
+    if (sortBy === 'rating-high-low') {
+      sortField = 'rating';
+      sortDirection = 'desc';
+    } else if (sortBy === 'rating-low-high') {
+      sortField = 'rating';
+      sortDirection = 'asc';
+    }
 
-  // 2. Fetch Ads (Real-time) and their Creator Profiles
-  useEffect(() => {
-    const adsQuery = query(collection(db, "ads"));
-    let creatorUnsubs = {};
-
-    const unsubscribeAds = onSnapshot(adsQuery, (snapshot) => {
-      const adsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setAds(adsData);
-
-      // Fetch creator profiles
-      const creatorIds = Array.from(new Set(adsData.map(ad => ad.createdBy))).filter(Boolean);
-
-      creatorIds.forEach(creatorId => {
-        // Only start a new listener if we don't already have one for this creator
-        if (!creatorUnsubs[creatorId]) {
-          creatorUnsubs[creatorId] = onSnapshot(doc(db, 'profiles', creatorId), (profileSnap) => {
-            if (profileSnap.exists()) {
-              setUserProfiles(prev => ({
-                ...prev,
-                [creatorId]: profileSnap.data()
-              }));
-            }
-          });
-        }
-      });
-
-      setLoading(false);
-    }, (error) => {
-      console.error("Error fetching ads:", error);
-      setLoading(false);
+    // OPTIMIZATION: Context now handles smart change detection.
+    fetchAds({
+      sortField,
+      sortDirection,
+      forceRefresh: false
     });
 
-    return () => {
-      unsubscribeAds();
-      // Clean up all creator profile listeners
-      Object.values(creatorUnsubs).forEach(unsub => unsub());
-    };
-  }, [currentUserId]);
+    setDisplayCount(debouncedSearchValue.trim() ? 10 : 15);
+  }, [debouncedFilters, sortBy, fetchAds, debouncedSearchValue]);
 
-  // 3. Prepare ads for advanced search with Fuse.js
+  // OPTIMIZATION: Batch fetch creator profiles when ads data changes
+  const fetchCreatorProfiles = useCallback(async (creatorIds) => {
+    if (!creatorIds || creatorIds.length === 0) return;
+
+    try {
+      const profiles = await fetchProfiles(creatorIds);
+      setUserProfiles(prev => ({ ...prev, ...profiles }));
+    } catch (error) {
+      console.error("Error batch fetching creator profiles:", error);
+    }
+  }, [fetchProfiles]);
+
+  // Fetch profiles when ads data changes (from global cache)
+  useEffect(() => {
+    if (ads.length > 0) {
+      // READ OPTIMIZATION: Only fetch profiles if 'author' data is missing
+      const creatorIds = Array.from(new Set(ads.map(ad => {
+        if (ad.author && ad.author.username) return null;
+        return ad.createdBy;
+      }))).filter(Boolean);
+
+      fetchCreatorProfiles(creatorIds);
+    }
+  }, [ads, fetchCreatorProfiles]);
+
+  // OPTIMIZATION: Subscribe to online status updates for real-time status display
+  // This refreshes every 15 seconds to show accurate online/offline status
+  useEffect(() => {
+    if (ads.length === 0) return;
+
+    const creatorIds = Array.from(new Set(ads.map(ad => ad.createdBy))).filter(Boolean);
+    if (creatorIds.length === 0) return;
+
+    const unsubscribe = subscribeToOnlineStatus(creatorIds, (updatedProfiles) => {
+      setUserProfiles(prev => ({ ...prev, ...updatedProfiles }));
+    });
+
+    return () => unsubscribe();
+  }, [ads, subscribeToOnlineStatus]);
+
+  // Sync with global profile cache updates
+  useEffect(() => {
+    const cachedProfiles = getAllCachedProfiles();
+    if (Object.keys(cachedProfiles).length > 0) {
+      setUserProfiles(prev => ({ ...prev, ...cachedProfiles }));
+    }
+  }, [getAllCachedProfiles]);
+
+  // Use adsLoading from global cache
+  const loading = adsLoading;
+
+
+  // Prepare ads for advanced search with Fuse.js
   const searchableAds = useMemo(() => {
     return ads.map(ad => {
       const creatorProfile = userProfiles[ad.createdBy] || {};
@@ -623,8 +676,8 @@ export default function Ads() {
     let searchScoreMap = new Map();
 
     // Apply advanced search using Fuse.js if search query exists
-    if (searchValue.trim() && adFuseIndex) {
-      let searchResults = performSearch(adFuseIndex, searchValue, {
+    if (debouncedSearchValue.trim() && adFuseIndex) {
+      let searchResults = performSearch(adFuseIndex, debouncedSearchValue, {
         expandSynonyms: true,
         maxResults: 500, // INCREASED: Show ALL results
         // Use default minScore: 1.0 for Google-like behavior
@@ -632,7 +685,7 @@ export default function Ads() {
 
       if (searchResults && searchResults.length > 0) {
         // RE-RANK RESULTS BY RELEVANCE (exact prefix matches first)
-        searchResults = reRankByRelevance(searchResults, searchValue);
+        searchResults = reRankByRelevance(searchResults, debouncedSearchValue);
 
         const searchIds = new Set(searchResults.map(r => r.item.id));
         result = result.filter(ad => {
@@ -660,64 +713,64 @@ export default function Ads() {
         const distance = getDistanceKm(profile.latitude, profile.longitude, ad.latitude, ad.longitude);
         if (distance === null) return true;
 
-        let minDistanceKm = filters.distance.min || 0;
-        let maxDistanceKm = filters.distance.max;
+        let minDistanceKm = debouncedFilters.distance.min || 0;
+        let maxDistanceKm = debouncedFilters.distance.max;
 
-        if (filters.distanceUnit === 'm') {
+        if (debouncedFilters.distanceUnit === 'm') {
           minDistanceKm = minDistanceKm / 1000;
           if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
         }
 
-        const meetsMin = filters.distance.min === 0 || distance >= minDistanceKm;
-        const meetsMax = !filters.distance.max || distance <= maxDistanceKm;
+        const meetsMin = debouncedFilters.distance.min === 0 || distance >= minDistanceKm;
+        const meetsMax = !debouncedFilters.distance.max || distance <= maxDistanceKm;
         return meetsMin && meetsMax;
       });
     }
 
     result = result.filter(ad => {
       const rating = ad.rating || 0;
-      return rating >= filters.rating.min && rating <= filters.rating.max;
+      return rating >= debouncedFilters.rating.min && rating <= debouncedFilters.rating.max;
     });
 
-    if (filters.onlineStatus !== "all") {
+    if (debouncedFilters.onlineStatus !== "all") {
       result = result.filter(ad => {
         const adCreatorProfile = userProfiles[ad.createdBy] || {};
         const isOnline = isUserOnline(ad.createdBy, currentUserId, adCreatorProfile.online, adCreatorProfile.lastSeen);
-        return filters.onlineStatus === "online" ? isOnline : !isOnline;
+        return debouncedFilters.onlineStatus === "online" ? isOnline : !isOnline;
       });
     }
 
-    const areaFilters = filters.area ? filters.area.split(',').map(a => a.trim().toLowerCase()).filter(a => a) : [];
-    const cityFilters = filters.city ? filters.city.split(',').map(c => c.trim().toLowerCase()).filter(c => c) : [];
-    const landmarkFilters = filters.landmark ? filters.landmark.split(',').map(l => l.trim().toLowerCase()).filter(l => l) : [];
-    const pincodeFilters = filters.pincode ? filters.pincode.split(',').map(p => p.trim()).filter(p => p) : [];
+    const areaFilters = debouncedFilters.area ? debouncedFilters.area.split(',').map(a => a.trim().toLowerCase()).filter(a => a) : [];
+    const cityFilters = debouncedFilters.city ? debouncedFilters.city.split(',').map(c => c.trim().toLowerCase()).filter(c => c) : [];
+    const landmarkFilters = debouncedFilters.landmark ? debouncedFilters.landmark.split(',').map(l => l.trim().toLowerCase()).filter(l => l) : [];
+    const pincodeFilters = debouncedFilters.pincode ? debouncedFilters.pincode.split(',').map(p => p.trim()).filter(p => p) : [];
 
     result = result.filter(ad => {
-      const matchesArea = !filters.area || areaFilters.some(area =>
+      const matchesArea = !debouncedFilters.area || areaFilters.some(area =>
         ad.location?.area?.toLowerCase().includes(area)
       );
 
-      const matchesCity = !filters.city || cityFilters.some(city =>
+      const matchesCity = !debouncedFilters.city || cityFilters.some(city =>
         ad.location?.city?.toLowerCase().includes(city)
       );
 
-      const matchesLandmark = !filters.landmark || landmarkFilters.some(landmark =>
+      const matchesLandmark = !debouncedFilters.landmark || landmarkFilters.some(landmark =>
         ad.location?.landmark?.toLowerCase().includes(landmark)
       );
 
-      const matchesPincode = !filters.pincode || pincodeFilters.some(pincode =>
+      const matchesPincode = !debouncedFilters.pincode || pincodeFilters.some(pincode =>
         ad.location?.pincode?.includes(pincode)
       );
 
       return matchesArea && matchesCity && matchesLandmark && matchesPincode;
     });
 
-    const tagsFilters = filters.tags ? filters.tags.split(',').map(t => t.trim().toLowerCase()).filter(t => t) : [];
-    result = result.filter(ad => !filters.tags || tagsFilters.some(tag => (ad.tags || []).some(wt => wt.toLowerCase().includes(tag))));
+    const tagsFilters = debouncedFilters.tags ? debouncedFilters.tags.split(',').map(t => t.trim().toLowerCase()).filter(t => t) : [];
+    result = result.filter(ad => !debouncedFilters.tags || tagsFilters.some(tag => (ad.tags || []).some(wt => wt.toLowerCase().includes(tag))));
 
     result.sort((a, b) => {
       // IF SEARCHING: Sort by relevance score (custom score)
-      if (searchValue.trim() && searchScoreMap.size > 0) {
+      if (debouncedSearchValue.trim() && searchScoreMap.size > 0) {
         const scoreA = searchScoreMap.get(a.id) || 0;
         const scoreB = searchScoreMap.get(b.id) || 0;
         return scoreB - scoreA; // Higher score first
@@ -746,7 +799,37 @@ export default function Ads() {
     });
 
     return result;
-  }, [searchableAds, adFuseIndex, searchValue, filters, sortBy, profile, userProfiles, currentUserId]);
+  }, [searchableAds, adFuseIndex, debouncedSearchValue, debouncedFilters, sortBy, profile, userProfiles, currentUserId]);
+
+  // OPTIMIZATION: Infinite Scroll - Auto-load when user scrolls near bottom
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!listContainerRef.current) return;
+
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const scrollHeight = document.documentElement.scrollHeight;
+      const clientHeight = window.innerHeight;
+
+      // Load more when user is 300px from bottom
+      const isNearBottom = scrollHeight - (scrollTop + clientHeight) < 300;
+
+      if (isNearBottom && !loadingMore) {
+        // Auto-load next batch of cached items
+        if (displayCount < filteredAds.length) {
+          setDisplayCount(prev => prev + currentPageSize);
+        }
+        // Auto-load from Firestore if all cached items shown
+        else if (hasMore) {
+          loadMoreAds().then(() => {
+            setDisplayCount(prev => prev + currentPageSize);
+          });
+        }
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [displayCount, filteredAds.length, hasMore, loadingMore, loadMoreAds, currentPageSize]);
 
   const hasActiveFilters = filters.distance.min > 0 || filters.distance.max || filters.rating.min > 0 || filters.rating.max < 5 || filters.onlineStatus !== "all" || filters.area || filters.city || filters.landmark || filters.pincode || filters.tags;
 
@@ -846,7 +929,7 @@ export default function Ads() {
         )
       }
     >
-      <div className="p-4 pb-20">
+      <div className="p-4 pb-20" ref={listContainerRef}>
         {loading ? (
           <div className="flex justify-center items-center py-20">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -854,18 +937,44 @@ export default function Ads() {
         ) : filteredAds.length === 0 ? (
           <div className="text-center py-20">
             <p className="text-gray-500">No ads found</p>
+            {ads.length === 0 && (
+              <div className="mt-6">
+                <button
+                  onClick={() => navigate("/add-ads")}
+                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Add First Ad
+                </button>
+              </div>
+            )}
           </div>
         ) : (
-          filteredAds.map(ad => (
-            <AdCard
-              key={ad.id}
-              ad={ad}
-              profile={profile}
-              userProfiles={userProfiles}
-              currentUserId={currentUserId}
-              navigate={navigate}
-            />
-          ))
+          <>
+            <div className="space-y-3">
+              {/* Show only first displayCount ads (paginated display) */}
+              {filteredAds.slice(0, displayCount).map(ad => (
+                <AdCard
+                  key={ad.id}
+                  ad={ad}
+                  profile={profile}
+                  userProfiles={userProfiles}
+                  currentUserId={currentUserId}
+                  navigate={navigate}
+                />
+              ))}
+            </div>
+
+            {/* Loading Indicator for Infinite Scroll */}
+            {loadingMore && (
+              <div className="flex justify-center mt-6">
+                <div className="flex items-center gap-2 text-gray-600">
+                  <FiLoader className="animate-spin" size={20} />
+                  <span className="text-sm">Loading more ads...</span>
+                </div>
+              </div>
+            )}
+
+          </>
         )}
       </div>
 

@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { auth, db } from "../firebase";
+import { db } from "../firebase";
 import {
     onSnapshot,
     doc,
@@ -14,8 +14,14 @@ import {
     setDoc,
     serverTimestamp,
     addDoc,
-    arrayUnion
+    arrayUnion,
+    arrayRemove,
+    limit,
+    orderBy,
+    startAfter
 } from "firebase/firestore";
+import { useProfileCache } from "../contexts/ProfileCacheContext";
+import { usePostDetailCache, useGlobalDataCache } from "../contexts/GlobalDataCacheContext";
 import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiCalendar, FiMoreVertical, FiTrash2, FiFile, FiFileText, FiDownload, FiAlertCircle, FiExternalLink, FiEye, FiLoader, FiChevronLeft, FiChevronRight } from "react-icons/fi";
 import MapComponent from "../components/MapComponent";
 import defaultAvatar from "../assets/images/default_profile.svg";
@@ -71,7 +77,7 @@ function getDownloadUrl(url) {
 
 // Function to check if file can be viewed online based on size
 function canViewOnline(fileSize, extension) {
-    const MAX_VIEWABLE_SIZE = 10 * 1024 * 1024; // 10MB
+    const MAX_VIEWABLE_SIZE = 2.5 * 1024 * 1024; // 2.5MB
 
     // Check file size limit
     if (fileSize > MAX_VIEWABLE_SIZE) {
@@ -109,10 +115,10 @@ function getFileInfo(file, sizeInBytes = null) {
     // Calculate file size
     let fileSize = "Unknown size";
     let isOversized = false;
-    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+    const MAX_FILE_SIZE = 2.5 * 1024 * 1024; // 2.5MB in bytes
 
     if (sizeInBytes && sizeInBytes > 0) {
-        // Check if file exceeds 10MB limit
+        // Check if file exceeds 2.5MB limit
         if (sizeInBytes > MAX_FILE_SIZE) {
             isOversized = true;
         }
@@ -208,10 +214,23 @@ function Modal({ children, onClose }) {
     );
 }
 
+// Constants for review pagination - AGGRESSIVELY OPTIMIZED
+const REVIEWS_PAGE_SIZE = 7;
+
+/**
+ * ServiceDetail Page - Optimized with Post Detail Cache
+ * 
+ * OPTIMIZATION: Uses localStorage cache with 2-day TTL
+ * - First visit: Normal reads (1 for service + 1 for reviews)
+ * - Return visits within 2 days: Instant display from cache
+ * - Real-time listener updates cache automatically
+ */
 function ServiceDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
-    const [currentUserId, setCurrentUserId] = useState("");
+    const { currentUserId, chats } = useGlobalDataCache();
+    const { fetchProfiles, getCachedProfile } = useProfileCache();
+    const { getPostDetailCache, setPostDetailCache } = usePostDetailCache();
     const [service, setService] = useState(null);
     const [creator, setCreator] = useState(null);
     const [reviews, setReviews] = useState([]);
@@ -235,69 +254,201 @@ function ServiceDetail() {
     const [replyText, setReplyText] = useState("");
     const [expandedReplies, setExpandedReplies] = useState({});
 
-    // Get auth user
-    useEffect(() => {
-        const unsub = auth.onAuthStateChanged(u => setCurrentUserId(u?.uid ?? ""));
-        return unsub;
-    }, []);
+    // Pagination state for reviews
+    const [hasMoreReviews, setHasMoreReviews] = useState(true);
+    const [loadingMoreReviews, setLoadingMoreReviews] = useState(false);
+    const lastReviewRef = useRef(null);
+    const allReviewsRef = useRef([]);
 
-    // Fetch service and creator profile
+    // Cache initialization ref to prevent double loading
+    const cacheInitializedRef = useRef(false);
+
+    // Initialize from cache on mount (instant display)
+    useEffect(() => {
+        if (!id || cacheInitializedRef.current) return;
+        cacheInitializedRef.current = true;
+
+        const cached = getPostDetailCache('service', id);
+        if (cached && cached.data) {
+            console.log('[ServiceDetail] Loading from cache - instant display');
+            const { serviceData, reviewsData, profilesData } = cached.data;
+
+            if (serviceData) {
+                setService(serviceData);
+            }
+            if (reviewsData && Array.isArray(reviewsData)) {
+                allReviewsRef.current = reviewsData;
+                setReviews(reviewsData);
+                const userRate = reviewsData.find(r => r.userId === currentUserId && typeof r.rating === "number" && r.rating > 0);
+                setUserRatingDoc(userRate ?? null);
+            }
+            if (profilesData) {
+                setProfiles(profilesData);
+            }
+        }
+    }, [id, getPostDetailCache, currentUserId]);
+
+
+
+    // Fetch creator profile using ProfileCache
+    const fetchCreatorProfile = useCallback(async (creatorId) => {
+        if (!creatorId) return;
+        try {
+            // First check cache
+            const cached = getCachedProfile(creatorId);
+            if (cached) {
+                setCreator(cached);
+                return;
+            }
+            // Fetch using ProfileCache (batch-optimized)
+            const profiles = await fetchProfiles([creatorId]);
+            if (profiles[creatorId]) {
+                setCreator(profiles[creatorId]);
+            }
+        } catch (error) {
+            console.error("Error fetching creator profile:", error);
+        }
+    }, [fetchProfiles, getCachedProfile]);
+
+    // Fetch reviewer profiles using ProfileCache (batch optimized)
+    const fetchReviewerProfiles = useCallback(async (userIds) => {
+        if (!userIds || userIds.length === 0) return;
+        try {
+            const profilesData = await fetchProfiles(userIds);
+            setProfiles(prev => ({ ...prev, ...profilesData }));
+        } catch (error) {
+            console.error("Error batch fetching reviewer profiles:", error);
+        }
+    }, [fetchProfiles]);
+
+    // Load more reviews (pagination)
+    const loadMoreReviews = useCallback(async () => {
+        if (!id || loadingMoreReviews || !hasMoreReviews) return;
+
+        setLoadingMoreReviews(true);
+        try {
+            let reviewQ;
+            if (lastReviewRef.current) {
+                reviewQ = query(
+                    collection(db, "serviceReviews"),
+                    where("serviceId", "==", id),
+                    orderBy("createdAt", "desc"),
+                    startAfter(lastReviewRef.current),
+                    limit(REVIEWS_PAGE_SIZE)
+                );
+            } else {
+                reviewQ = query(
+                    collection(db, "serviceReviews"),
+                    where("serviceId", "==", id),
+                    orderBy("createdAt", "desc"),
+                    limit(REVIEWS_PAGE_SIZE)
+                );
+            }
+
+            const snap = await getDocs(reviewQ);
+            const newReviews = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            if (newReviews.length < REVIEWS_PAGE_SIZE) {
+                setHasMoreReviews(false);
+            }
+
+            if (snap.docs.length > 0) {
+                lastReviewRef.current = snap.docs[snap.docs.length - 1];
+            }
+
+            // Merge with existing reviews (avoid duplicates)
+            const existingIds = new Set(allReviewsRef.current.map(r => r.id));
+            const uniqueNewReviews = newReviews.filter(r => !existingIds.has(r.id));
+            allReviewsRef.current = [...allReviewsRef.current, ...uniqueNewReviews];
+            setReviews([...allReviewsRef.current]);
+
+            // Fetch profiles for new reviewers using ProfileCache
+            const newUserIds = [...new Set(uniqueNewReviews.map(r => r.userId))];
+            if (newUserIds.length > 0) {
+                fetchReviewerProfiles(newUserIds);
+            }
+        } catch (error) {
+            console.error("Error loading more reviews:", error);
+        } finally {
+            setLoadingMoreReviews(false);
+        }
+    }, [id, loadingMoreReviews, hasMoreReviews, fetchReviewerProfiles]);
+
+    // Fetch service and creator profile - OPTIMIZED: Use getDoc instead of onSnapshot
     useEffect(() => {
         if (!id) return;
 
-        const unsubscribeService = onSnapshot(doc(db, "services", id), async (snap) => {
-            if (snap.exists()) {
-                const serviceData = { id: snap.id, ...snap.data() };
-                setService(serviceData);
+        // OPTIMIZATION: Use one-time fetch instead of continuous listener for service document
+        const fetchServiceData = async () => {
+            try {
+                const snap = await getDoc(doc(db, "services", id));
+                if (snap.exists()) {
+                    const serviceData = { id: snap.id, ...snap.data() };
+                    setService(serviceData);
 
-                // Fetch creator profile
-                if (serviceData.createdBy) {
-                    const profileSnap = await getDoc(doc(db, "profiles", serviceData.createdBy));
-                    if (profileSnap.exists()) {
-                        setCreator(profileSnap.data());
+                    // Fetch creator profile using ProfileCache
+                    if (serviceData.createdBy) {
+                        fetchCreatorProfile(serviceData.createdBy);
                     }
-                }
-            }
-        });
 
-        // Fetch reviews
+                    // Update cache with latest service data
+                    const cached = getPostDetailCache('service', id);
+                    setPostDetailCache('service', id, {
+                        ...cached?.data,
+                        serviceData,
+                    }, snap.data().updatedAt?.toMillis?.() || Date.now());
+
+                    console.log('[ServiceDetail] Service data fetched (1 read)');
+                }
+            } catch (error) {
+                console.error('Error fetching service:', error);
+            }
+        };
+
+        fetchServiceData();
+
+        // Fetch initial reviews with pagination (first 7) - Keep listener for live updates
         const reviewQ = query(
-            collection(db, "serviceReviews"), where("serviceId", "==", id)
+            collection(db, "serviceReviews"),
+            where("serviceId", "==", id),
+            orderBy("createdAt", "desc"),
+            limit(REVIEWS_PAGE_SIZE)
         );
+
         const unsubscribeReviews = onSnapshot(reviewQ, snap => {
             const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-            // Sort client-side
-            data.sort((a, b) => {
-                const tA = a.createdAt?.seconds || 0;
-                const tB = b.createdAt?.seconds || 0;
-                return tB - tA;
-            });
+            // Store last doc for pagination
+            if (snap.docs.length > 0) {
+                lastReviewRef.current = snap.docs[snap.docs.length - 1];
+            }
 
+            // Check if there might be more reviews
+            setHasMoreReviews(snap.docs.length >= REVIEWS_PAGE_SIZE);
+
+            allReviewsRef.current = data;
             setReviews(data);
             const userRate = data.find(r => r.userId === currentUserId && typeof r.rating === "number" && r.rating > 0);
             setUserRatingDoc(userRate ?? null);
 
+            // Fetch reviewer profiles using ProfileCache (batch optimized)
             const userIds = Array.from(new Set(data.map(r => r.userId)));
             if (userIds.length > 0) {
-                Promise.all(userIds.map(uid =>
-                    getDoc(doc(db, "profiles", uid)).then(profileSnap =>
-                        profileSnap.exists()
-                            ? { [uid]: profileSnap.data() }
-                            : { [uid]: { username: "Anonymous", profileImage: "" } }
-                    )
-                )).then(profileArrs => {
-                    const profilesMap = Object.assign({}, ...profileArrs);
-                    setProfiles(profilesMap);
-                });
+                fetchReviewerProfiles(userIds);
             }
+
+            // Update cache with latest reviews data
+            const cached = getPostDetailCache('service', id);
+            setPostDetailCache('service', id, {
+                ...cached?.data,
+                reviewsData: data,
+            }, Date.now());
         });
 
         return () => {
-            unsubscribeService();
             unsubscribeReviews();
         };
-    }, [id, currentUserId]);
+    }, [id, currentUserId, fetchCreatorProfile, fetchReviewerProfiles, getPostDetailCache, setPostDetailCache]);
 
     // Favorite status
     useEffect(() => {
@@ -407,9 +558,19 @@ function ServiceDetail() {
             if (userHasFavorited) {
                 await deleteDoc(favDoc);
                 setUserHasFavorited(false);
+                console.group(`[Action: UNFAVORITE]`);
+                console.log(`%c✔ Service removed from Favorites`, "color: orange; font-weight: bold");
+                console.log(`- Reads: 0`);
+                console.log(`- Writes: 1`);
+                console.groupEnd();
             } else {
                 await setDoc(favDoc, { serviceId: id, userId: currentUserId, createdAt: serverTimestamp() });
                 setUserHasFavorited(true);
+                console.group(`[Action: FAVORITE]`);
+                console.log(`%c✔ Service added to Favorites`, "color: green; font-weight: bold");
+                console.log(`- Reads: 0`);
+                console.log(`- Writes: 1`);
+                console.groupEnd();
             }
         } catch (error) {
             console.error("Error toggling favorite:", error);
@@ -435,22 +596,20 @@ function ServiceDetail() {
 
                 await updateServiceRating();
 
-                // Create notification
+                // Create notification (fire and forget for better UX)
                 if (service && service.createdBy && service.createdBy !== currentUserId) {
-                    try {
-                        await addDoc(collection(db, "notifications"), {
-                            userId: service.createdBy,
-                            senderId: currentUserId,
-                            type: "review",
-                            title: "New Rating",
-                            message: `New ${newRating}-star rating received`, link: `/service-detail/${id}`,
-                            postId: id,
-                            postType: "service",
-                            rating: newRating,
-                            read: false,
-                            createdAt: serverTimestamp()
-                        });
-                    } catch (nErr) { console.error("Notif error", nErr); }
+                    addDoc(collection(db, "notifications"), {
+                        userId: service.createdBy,
+                        senderId: currentUserId,
+                        type: "review",
+                        title: "New Rating",
+                        message: `New ${newRating}-star rating received`, link: `/service-detail/${id}`,
+                        postId: id,
+                        postType: "service",
+                        rating: newRating,
+                        read: false,
+                        createdAt: serverTimestamp()
+                    }).catch(nErr => console.error("Notif error", nErr));
                 }
 
                 setNewRating(0);
@@ -470,23 +629,31 @@ function ServiceDetail() {
                     serviceId: id, userId: currentUserId, rating: null, text: newReviewText.trim(), createdAt: serverTimestamp()
                 });
 
-                // Create notification
+                // Create notification (fire and forget for better UX)
                 if (service && service.createdBy && service.createdBy !== currentUserId) {
-                    try {
-                        await addDoc(collection(db, "notifications"), {
-                            userId: service.createdBy,
-                            senderId: currentUserId,
-                            type: "review",
-                            title: "New Review",
-                            message: `New review received`, link: `/service-detail/${id}`,
-                            postId: id,
-                            postType: "service",
-                            text: newReviewText.trim(),
-                            read: false,
-                            createdAt: serverTimestamp()
-                        });
-                    } catch (nErr) { console.error("Notif error", nErr); }
+                    addDoc(collection(db, "notifications"), {
+                        userId: service.createdBy,
+                        senderId: currentUserId,
+                        type: "review",
+                        title: "New Review",
+                        message: `New review received`, link: `/service-detail/${id}`,
+                        postId: id,
+                        postType: "service",
+                        text: newReviewText.trim(),
+                        read: false,
+                        createdAt: serverTimestamp()
+                    }).then(() => {
+                        console.group(`[Child Action: NOTIFICATION]`);
+                        console.log(`%c✔ Notification sent to service owner`, "color: blue; font-weight: bold");
+                        console.log(`- Writes: 1`);
+                        console.groupEnd();
+                    }).catch(nErr => console.error("Notif error", nErr));
                 }
+
+                console.group(`[Action: SUBMIT REVIEW]`);
+                console.log(`%c✔ Review Published`, "color: green; font-weight: bold");
+                console.log(`- Writes: 1`);
+                console.groupEnd();
 
                 setNewReviewText("");
                 setCommentModalOpen(false);
@@ -545,9 +712,20 @@ function ServiceDetail() {
                         text: replyText.trim(),
                         read: false,
                         createdAt: serverTimestamp()
+                    }).then(() => {
+                        console.group(`[Child Action: NOTIFICATION]`);
+                        console.log(`%c✔ Notification sent to reviewer`, "color: blue; font-weight: bold");
+                        console.log(`- Writes: 1`);
+                        console.groupEnd();
                     });
                 } catch (nErr) { console.error("Notif error", nErr); }
             }
+
+            console.group(`[Action: SUBMIT REPLY]`);
+            console.log(`%c✔ Reply Published`, "color: green; font-weight: bold");
+            console.log(`- Reads: 0`);
+            console.log(`- Writes: 1`);
+            console.groupEnd();
 
             setReplyText("");
             setReplyingTo(null);
@@ -632,13 +810,22 @@ function ServiceDetail() {
             });
 
             if (chatId) {
-                // Chat already exists, show message and navigate
-                setToast("There is already a chat with this user");
-                setTimeout(() => setToast(""), 2500);
+                // Restore chat if logically deleted
+                await updateDoc(doc(db, "chats", chatId), {
+                    deletedBy: arrayRemove(currentUserId)
+                });
                 navigate(`/chat/${chatId}`);
                 return;
             }
 
+            // CHAT LIMIT: Check if user already has 5 chats
+            if (chats.length >= 5) {
+                setToast("Chat Limit Reached: You can only have up to 5 active chats. Please hide/delete a chat to start a new one.");
+                setTimeout(() => setToast(""), 4000);
+                return;
+            }
+
+            // Create new chat only if none exists
             console.log("Creating new chat...");
             const newDoc = await addDoc(chatsRef, {
                 participants: [currentUserId, recipientId],
@@ -1020,159 +1207,181 @@ function ServiceDetail() {
                             <p className="text-sm mt-1">Be the first to share your experience!</p>
                         </div>
                     ) : (
-                        <div className="space-y-4">
-                            {reviews.filter(r => r.text && r.text.trim()).map(r => {
-                                const user = profiles[r.userId] || { username: "Unknown", profileImage: "" };
-                                const dt = r.createdAt && r.createdAt.seconds ? new Date(r.createdAt.seconds * 1000) : null;
-                                return (
-                                    <div key={r.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm relative">
-                                        <div className="flex items-start gap-3">
-                                            <img
-                                                src={user.profileImage || defaultAvatar}
-                                                alt={user.username}
-                                                className="w-10 h-10 rounded-full object-cover border border-gray-200 flex-shrink-0"
-                                                onError={(e) => { e.target.src = defaultAvatar; }}
-                                                crossOrigin="anonymous"
-                                            />
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex justify-between items-start">
-                                                    <h4 className="font-semibold text-gray-900 truncate pr-2">
-                                                        {user.username || "Unknown User"}
-                                                    </h4>
+                        <>
+                            <div className="space-y-4">
+                                {reviews.filter(r => r.text && r.text.trim()).map(r => {
+                                    const user = profiles[r.userId] || { username: "Unknown", profileImage: "" };
+                                    const dt = r.createdAt && r.createdAt.seconds ? new Date(r.createdAt.seconds * 1000) : null;
+                                    return (
+                                        <div key={r.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm relative">
+                                            <div className="flex items-start gap-3">
+                                                <img
+                                                    src={user.profileImage || defaultAvatar}
+                                                    alt={user.username}
+                                                    className="w-10 h-10 rounded-full object-cover border border-gray-200 flex-shrink-0"
+                                                    onError={(e) => { e.target.src = defaultAvatar; }}
+                                                    crossOrigin="anonymous"
+                                                />
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex justify-between items-start">
+                                                        <h4 className="font-semibold text-gray-900 truncate pr-2">
+                                                            {user.username || "Unknown User"}
+                                                        </h4>
 
-                                                    {(isOwner || r.userId === currentUserId) && (
-                                                        <div className="relative ml-auto">
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setActiveMenuId(activeMenuId === r.id ? null : r.id);
-                                                                }}
-                                                                className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
-                                                            >
-                                                                <FiMoreVertical size={18} />
-                                                            </button>
+                                                        {(isOwner || r.userId === currentUserId) && (
+                                                            <div className="relative ml-auto">
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setActiveMenuId(activeMenuId === r.id ? null : r.id);
+                                                                    }}
+                                                                    className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                                                                >
+                                                                    <FiMoreVertical size={18} />
+                                                                </button>
 
-                                                            {activeMenuId === r.id && (
-                                                                <div className="absolute right-0 top-8 bg-white shadow-lg border border-gray-100 rounded-lg py-1 z-10 w-32 animate-scale-in">
-                                                                    {isOwner && (
-                                                                        <button
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                setReplyingTo(r.id);
-                                                                                setActiveMenuId(null);
-                                                                            }}
-                                                                            className="w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-2"
-                                                                        >
-                                                                            <FiMessageSquare size={14} /> Reply
-                                                                        </button>
-                                                                    )}
-                                                                    {(isOwner || r.userId === currentUserId) && (
-                                                                        <button
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                deleteReview(r.id, r.rating > 0);
-                                                                            }}
-                                                                            className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
-                                                                        >
-                                                                            <FiTrash2 size={14} /> Delete
-                                                                        </button>
-                                                                    )}
+                                                                {activeMenuId === r.id && (
+                                                                    <div className="absolute right-0 top-8 bg-white shadow-lg border border-gray-100 rounded-lg py-1 z-10 w-32 animate-scale-in">
+                                                                        {isOwner && (
+                                                                            <button
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    setReplyingTo(r.id);
+                                                                                    setActiveMenuId(null);
+                                                                                }}
+                                                                                className="w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-2"
+                                                                            >
+                                                                                <FiMessageSquare size={14} /> Reply
+                                                                            </button>
+                                                                        )}
+                                                                        {(isOwner || r.userId === currentUserId) && (
+                                                                            <button
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    deleteReview(r.id, r.rating > 0);
+                                                                                }}
+                                                                                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                                                            >
+                                                                                <FiTrash2 size={14} /> Delete
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="text-xs text-gray-500 mb-1">
+                                                        {dt ? formatDateTime(dt) : ""}
+                                                    </div>
+
+                                                    {r.rating > 0 && (
+                                                        <div className="flex text-yellow-400 text-xs mb-1">
+                                                            {[1, 2, 3, 4, 5].map(star => (
+                                                                <FiStar key={star} className={star <= r.rating ? "fill-current" : "text-gray-300"} />
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    <p className="text-gray-700 text-sm leading-normal mt-1 tracking-normal" style={{ wordSpacing: '0.05em' }}>{r.text}</p>
+
+                                                    {/* Display Replies Toggle */}
+                                                    {(r.reply || (r.replies && r.replies.length > 0)) && (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setExpandedReplies(prev => ({ ...prev, [r.id]: !prev[r.id] }));
+                                                            }}
+                                                            className="mt-2 text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                                                        >
+                                                            <FiMessageSquare size={12} />
+                                                            {expandedReplies[r.id] ? "Hide Replies" : `View Replies (${(r.replies?.length || 0) + (r.reply ? 1 : 0)})`}
+                                                        </button>
+                                                    )}
+
+                                                    {/* Display Replies List */}
+                                                    {expandedReplies[r.id] && (
+                                                        <div className="mt-2 space-y-2 ml-2">
+                                                            {/* Support legacy single reply */}
+                                                            {r.reply && (
+                                                                <div className="p-2 border-l-2 border-blue-200 bg-gray-50/50 rounded-r-lg">
+                                                                    <p className="text-sm text-gray-700">{r.reply}</p>
+                                                                    <div className="text-[10px] text-gray-400 mt-1">
+                                                                        {r.replyCreatedAt ? formatDateTime(new Date(r.replyCreatedAt.seconds * 1000)) : ""}
+                                                                    </div>
                                                                 </div>
                                                             )}
+                                                            {/* Support multiple replies */}
+                                                            {r.replies && r.replies.map((reply, index) => (
+                                                                <div key={index} className="p-2 border-l-2 border-blue-200 bg-gray-50/50 rounded-r-lg">
+                                                                    <p className="text-sm text-gray-700">{reply.text}</p>
+                                                                    <div className="text-[10px] text-gray-400 mt-1">
+                                                                        {reply.createdAt ? formatDateTime(new Date(reply.createdAt)) : ""}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+
+                                                    {/* Reply Input */}
+                                                    {replyingTo === r.id && (
+                                                        <div className="mt-3 ml-2 animate-fade-in" onClick={e => e.stopPropagation()}>
+                                                            <textarea
+                                                                value={replyText}
+                                                                onChange={(e) => setReplyText(e.target.value)}
+                                                                placeholder="Write your reply..."
+                                                                className="w-full border border-gray-300 p-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                                                                rows={2}
+                                                                autoFocus
+                                                            />
+                                                            <div className="flex justify-end gap-2 mt-2">
+                                                                <button
+                                                                    onClick={() => { setReplyingTo(null); setReplyText(""); }}
+                                                                    className="px-3 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded font-medium"
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => submitReply(r.id, r.userId)}
+                                                                    className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 font-bold"
+                                                                >
+                                                                    Post Reply
+                                                                </button>
+                                                            </div>
                                                         </div>
                                                     )}
                                                 </div>
-
-                                                <div className="text-xs text-gray-500 mb-1">
-                                                    {dt ? formatDateTime(dt) : ""}
-                                                </div>
-
-                                                {r.rating > 0 && (
-                                                    <div className="flex text-yellow-400 text-xs mb-1">
-                                                        {[1, 2, 3, 4, 5].map(star => (
-                                                            <FiStar key={star} className={star <= r.rating ? "fill-current" : "text-gray-300"} />
-                                                        ))}
-                                                    </div>
-                                                )}
-                                                <p className="text-gray-700 text-sm leading-normal mt-1 tracking-normal" style={{ wordSpacing: '0.05em' }}>{r.text}</p>
-
-                                                {/* Display Replies Toggle */}
-                                                {(r.reply || (r.replies && r.replies.length > 0)) && (
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setExpandedReplies(prev => ({ ...prev, [r.id]: !prev[r.id] }));
-                                                        }}
-                                                        className="mt-2 text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                                                    >
-                                                        <FiMessageSquare size={12} />
-                                                        {expandedReplies[r.id] ? "Hide Replies" : `View Replies (${(r.replies?.length || 0) + (r.reply ? 1 : 0)})`}
-                                                    </button>
-                                                )}
-
-                                                {/* Display Replies List */}
-                                                {expandedReplies[r.id] && (
-                                                    <div className="mt-2 space-y-2 ml-2">
-                                                        {/* Support legacy single reply */}
-                                                        {r.reply && (
-                                                            <div className="p-2 border-l-2 border-blue-200 bg-gray-50/50 rounded-r-lg">
-                                                                <p className="text-sm text-gray-700">{r.reply}</p>
-                                                                <div className="text-[10px] text-gray-400 mt-1">
-                                                                    {r.replyCreatedAt ? formatDateTime(new Date(r.replyCreatedAt.seconds * 1000)) : ""}
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                        {/* Support multiple replies */}
-                                                        {r.replies && r.replies.map((reply, index) => (
-                                                            <div key={index} className="p-2 border-l-2 border-blue-200 bg-gray-50/50 rounded-r-lg">
-                                                                <p className="text-sm text-gray-700">{reply.text}</p>
-                                                                <div className="text-[10px] text-gray-400 mt-1">
-                                                                    {reply.createdAt ? formatDateTime(new Date(reply.createdAt)) : ""}
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-
-                                                {/* Reply Input */}
-                                                {replyingTo === r.id && (
-                                                    <div className="mt-3 ml-2 animate-fade-in" onClick={e => e.stopPropagation()}>
-                                                        <textarea
-                                                            value={replyText}
-                                                            onChange={(e) => setReplyText(e.target.value)}
-                                                            placeholder="Write your reply..."
-                                                            className="w-full border border-gray-300 p-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                                                            rows={2}
-                                                            autoFocus
-                                                        />
-                                                        <div className="flex justify-end gap-2 mt-2">
-                                                            <button
-                                                                onClick={() => { setReplyingTo(null); setReplyText(""); }}
-                                                                className="px-3 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded font-medium"
-                                                            >
-                                                                Cancel
-                                                            </button>
-                                                            <button
-                                                                onClick={() => submitReply(r.id, r.userId)}
-                                                                className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 font-bold"
-                                                            >
-                                                                Post Reply
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                )}
                                             </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Load More Reviews Button */}
+                            {hasMoreReviews && reviews.length >= REVIEWS_PAGE_SIZE && (
+                                <div className="text-center mt-4">
+                                    <button
+                                        onClick={loadMoreReviews}
+                                        disabled={loadingMoreReviews}
+                                        className="px-6 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
+                                    >
+                                        {loadingMoreReviews ? (
+                                            <span className="flex items-center gap-2">
+                                                <span className="animate-spin h-4 w-4 border-2 border-gray-500 border-t-transparent rounded-full"></span>
+                                                Loading...
+                                            </span>
+                                        ) : (
+                                            "Load More Reviews"
+                                        )}
+                                    </button>
+                                </div>
+                            )}
+                        </>
                     )}
                 </div>
             </div>
 
             {/* Action bar */}
-            <div className="fixed left-0 right-0 bottom-0 bg-white px-4 py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t z-30"
+            <div className="fixed left-0 right-0 bottom-0 bg-white px-4 py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t z-50"
                 style={{ maxWidth: 480, margin: "0 auto" }}>
                 {!isOwner ? (
                     <>
@@ -1291,7 +1500,7 @@ function ServiceDetail() {
                                             </div>
                                             <h4 className="text-xl font-bold text-gray-900 mb-2">File Too Large for Online Viewing</h4>
                                             <p className="text-gray-600 mb-4">
-                                                This file ({currentFile.size}) exceeds the 10MB limit for online viewing.
+                                                This file ({currentFile.size}) exceeds the 2.5MB limit for online viewing.
                                             </p>
                                             <p className="text-gray-500 text-sm mb-6">
                                                 Please download the file to view it on your device.
@@ -1390,7 +1599,7 @@ function ServiceDetail() {
                                         </div>
 
                                         <p className="text-sm text-gray-500 mt-4">
-                                            Google Docs Viewer supports: PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, TXT files up to 10MB
+                                            Google Docs Viewer supports: PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, TXT files up to 2.5MB
                                         </p>
                                     </div>
                                 )}
@@ -1399,7 +1608,7 @@ function ServiceDetail() {
                             <div className="bg-gray-50 px-6 py-4 flex justify-between items-center">
                                 <span className="text-sm text-gray-600">
                                     {currentFile.isOversized
-                                        ? 'File exceeds 10MB limit - download required'
+                                        ? 'File exceeds 2.5MB limit - download required'
                                         : currentFile.extension === 'pdf' && currentFile.url.includes("cloudinary.com")
                                             ? 'Cloudinary PDF - Opens directly in browser PDF viewer'
                                             : 'File will open in a new tab for better viewing experience'}

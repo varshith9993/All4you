@@ -11,12 +11,13 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck } from "react-icons/fi";
 import LocationPickerModal from "../components/LocationPickerModal";
+import { compressFile } from "../utils/compressor";
 
 const suggestedTags = ["discount", "offer", "sale", "new", "limited", "popular", "urgent", "exchange"];
 const LOCATIONIQ_API_KEY = "pk.a9310b368752337ce215643e50ac0172";
 const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
 const CLOUDINARY_UPLOAD_PRESET = "ml_default";
-const MAX_PHOTOS = 8;
+const MAX_PHOTOS = 4;
 
 export default function AddAds() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -52,8 +53,11 @@ export default function AddAds() {
   }, [navigate]);
 
   const uploadFileToCloudinary = async (file) => {
+    // Compress file before upload (images only, SVGs skipped)
+    const compressedFile = await compressFile(file);
+
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", compressedFile);
     formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
 
     try {
@@ -69,6 +73,14 @@ export default function AddAds() {
     if (files.length + photos.length > MAX_PHOTOS) {
       setError(`You can upload maximum ${MAX_PHOTOS} photos.`);
       return;
+    }
+
+    // Validate file size (Max 2.5MB)
+    for (const file of files) {
+      if (file.size > 2.5 * 1024 * 1024) {
+        setError(`Photo "${file.name}" exceeds the 2.5MB limit.`);
+        return;
+      }
     }
 
     // Create previews immediately
@@ -176,9 +188,23 @@ export default function AddAds() {
         uploadedUrls.push(url);
       }
 
-      await addDoc(collection(db, "ads"), {
+      const docRef = await addDoc(collection(db, "ads"), {
+        // Flat fields kept for compatibility (can be removed if migration script runs)
         username: userProfile.username || "",
         profileImage: userProfile.profileImage || "",
+        online: !!userProfile.online,
+        lastSeen: null,
+
+        // Denormalized Author Data
+        author: {
+          uid: currentUser.uid,
+          username: userProfile.username || "Unknown",
+          photoURL: userProfile.profileImage || "",
+          online: !!userProfile.online,
+          lastSeen: userProfile.lastSeen || null,
+          verified: !!userProfile.verified
+        },
+
         photos: uploadedUrls,
         title: title.trim(),
         description: description.trim(),
@@ -193,12 +219,18 @@ export default function AddAds() {
         longitude: longitude.toString(),
         rating: 0,
         distance: "---",
-        online: !!userProfile.online,
-        lastSeen: null,
         status: "active",
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
         createdBy: currentUser.uid,
       });
+
+      console.group(`[Action: CREATE AD]`);
+      console.log(`%c✔ Firestore Operations Successful`, "color: green; font-weight: bold");
+      console.log(`- Reads: 1 (Fetch profile snap)`);
+      console.log(`- Writes: 1 (Add ad document)`);
+      console.log(`Document ID: ${docRef.id}`);
+      console.groupEnd();
 
       navigate("/ads");
     } catch (err) {
@@ -277,12 +309,12 @@ export default function AddAds() {
                 <span className="text-sm text-gray-600">
                   Click to upload photos
                 </span>
-                <p className="text-xs text-gray-500 mt-1">Supports JPG, PNG</p>
+                <p className="text-xs text-gray-500 mt-1">Supports JPG, PNG, SVG (Max 2.5MB)</p>
               </div>
               <input
                 type="file"
                 multiple
-                accept="image/*"
+                accept="image/*,.svg"
                 onChange={handlePhotoChange}
                 className="hidden"
                 disabled={photos.length >= MAX_PHOTOS}

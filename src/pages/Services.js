@@ -1,11 +1,11 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { onAuthStateChanged } from "firebase/auth";
-import { db, auth } from "../firebase";
-import { collection, query, onSnapshot, doc } from "firebase/firestore";
-import { FiMapPin, FiWifi, FiFilter, FiChevronDown, FiX, FiPlus, FiStar, FiSearch } from "react-icons/fi";
+import { FiMapPin, FiWifi, FiFilter, FiChevronDown, FiX, FiPlus, FiStar, FiSearch, FiLoader } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.svg";
 import Layout from "../components/Layout";
+import { useProfileCache } from "../contexts/ProfileCacheContext";
+import { usePaginatedServices } from "../contexts/PaginatedDataCacheContext";
+import { useDebounce } from "../hooks/useDebounce";
 import {
   buildFuseIndex,
   performSearch,
@@ -75,53 +75,36 @@ function formatLastSeen(lastSeen) {
 
 // Check if user is online
 function isUserOnline(userId, currentUserId, online, lastSeen) {
-  // Current user is always online
+  // Current user is always shown as online
   if (userId === currentUserId) return true;
 
-  // If online field is explicitly true, check lastSeen timestamp
-  if (online === true) {
-    if (!lastSeen) return true;
-
+  // CRITICAL FIX: Check lastSeen timestamp first
+  // If lastSeen is more than 5 minutes old, user is offline regardless of online field
+  if (lastSeen) {
     try {
-      let date = lastSeen.toDate ? lastSeen.toDate() :
-        lastSeen.seconds ? new Date(lastSeen.seconds * 1000) :
-          new Date(lastSeen);
+      let date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
+      const minutesSinceLastSeen = (Date.now() - date.getTime()) / 60000;
 
-      // Check if timestamp is in the future (invalid)
-      const now = new Date();
-      if (date > now) {
+      // If last seen more than 5 minutes ago, definitely offline
+      if (minutesSinceLastSeen > 5) {
         return false;
       }
 
-      // User is online only if lastSeen is within the last 5 seconds
-      return (now.getTime() - date.getTime()) < 5000;
+      // If last seen within 2 minutes, definitely online
+      if (minutesSinceLastSeen < 2) {
+        return true;
+      }
     } catch (error) {
-      return true;
+      console.error('Error checking lastSeen:', error);
     }
   }
 
-  // If online field is explicitly false, user is offline
+  // Check the online field as secondary indicator
+  if (online === true) return true;
   if (online === false) return false;
 
-  // If online field is not set (undefined/null), use lastSeen
-  if (!lastSeen) return false;
-
-  try {
-    let date = lastSeen.toDate ? lastSeen.toDate() :
-      lastSeen.seconds ? new Date(lastSeen.seconds * 1000) :
-        new Date(lastSeen);
-
-    // Check if timestamp is in the future (invalid)
-    const now = new Date();
-    if (date > now) {
-      return false;
-    }
-
-    // User is online only if lastSeen is within the last 5 seconds
-    return (now.getTime() - date.getTime()) < 5000;
-  } catch (error) {
-    return false;
-  }
+  // Fallback: if no lastSeen data, assume offline
+  return false;
 }
 
 // Filter Modal Component
@@ -462,37 +445,59 @@ function FilterModal({ isOpen, onClose, filters, setFilters, applyFilters }) {
 function ServiceCard({ service, profile, userProfiles, currentUserId, navigate }) {
   const { title, location = {}, tags = [], latitude, longitude, createdBy, profilePhotoUrl, type, serviceType, expiry, rating = 0 } = service;
 
-  // Get profile data with fallbacks
+  // Get profile data with fallbacks - Now supports Denormalized 'author' object
   const getProfileData = () => {
-    if (!createdBy) {
+    // 1. Use Denormalized Data (Best Case - 0 Reads)
+    if (service.author) {
       return {
-        username: "Unknown User",
-        photoURL: defaultAvatar,
-        online: false,
-        lastSeen: null,
-        rating: 0
+        username: service.author.username || "Unknown",
+        photoURL: service.author.photoURL || service.author.profileImage || defaultAvatar,
+        online: service.author.online,
+        lastSeen: service.author.lastSeen,
+        rating: service.rating || 0, // Service rating or author rating? Usually service rating is preferred here
+        verified: service.author.verified
       };
     }
 
+    // 2. Fallback to Fetched Profile (Legacy / Real-time update)
     const profile = userProfiles[createdBy];
-    if (!profile) {
+    if (profile) {
+      return profile;
+    }
+
+    // 3. Fallback to Service-level flat fields (Legacy Compatibility)
+    if (profilePhotoUrl) {
       return {
-        username: "Loading...",
-        photoURL: defaultAvatar,
+        username: "Unknown User", // or fetch name?
+        photoURL: profilePhotoUrl,
         online: false,
         lastSeen: null,
-        rating: 0
+        rating: rating
       };
     }
 
-    return profile;
+    // 4. Loading / Unknown
+    return {
+      username: !createdBy ? "Unknown User" : "Loading...",
+      photoURL: defaultAvatar,
+      online: false,
+      lastSeen: null,
+      rating: 0
+    };
   };
 
   const creatorProfile = getProfileData();
-  const displayUsername = creatorProfile.username || "Unknown User";
-  const displayProfileImage = profilePhotoUrl || creatorProfile.photoURL || creatorProfile.profileImage || defaultAvatar;
-  const displayOnline = creatorProfile.online;
-  const displayLastSeen = creatorProfile.lastSeen;
+
+  // Merge Real-time Online Status if available
+  // If we have a live profile from 'userProfiles', allow it to override the static 'author' status
+  const realTimeProfile = userProfiles[createdBy];
+  const displayUsername = creatorProfile.username;
+  const displayProfileImage = creatorProfile.photoURL || creatorProfile.profileImage || defaultAvatar;
+
+  // Use real-time status if available, otherwise fallback to snapshot
+  const displayOnline = realTimeProfile?.online !== undefined ? realTimeProfile.online : creatorProfile.online;
+  const displayLastSeen = realTimeProfile?.lastSeen !== undefined ? realTimeProfile.lastSeen : creatorProfile.lastSeen;
+
   const creatorRating = creatorProfile.rating || rating;
 
   // Determine type (providing/asking)
@@ -544,9 +549,10 @@ function ServiceCard({ service, profile, userProfiles, currentUserId, navigate }
 
   const untilText = getUntilText();
 
-  // Format expiry text based on post type
+  // Format expiry text based on post type - OPTIMIZED
   let expiryText = "";
   let expiryColor = "text-green-600";
+  let isExpiringSoon = false; // For animation
 
   if (expiry) {
     if (isUntilIChange()) {
@@ -561,29 +567,35 @@ function ServiceCard({ service, profile, userProfiles, currentUserId, navigate }
         const diffMs = expiryDate - now;
         const diffMins = Math.floor(diffMs / (1000 * 60));
         const diffHours = Math.floor(diffMins / 60);
-        const diffDays = Math.floor(diffHours / 24);
+
+        // Check if same day
+        const isSameDay = expiryDate.getDate() === now.getDate() &&
+          expiryDate.getMonth() === now.getMonth() &&
+          expiryDate.getFullYear() === now.getFullYear();
 
         if (diffMs < 0) {
+          // Post is expired - will be filtered out
           expiryText = "Expired";
           expiryColor = "text-red-600";
-        } else if (diffMins < 60) {
-          // Show minutes when less than 1 hour
-          expiryText = `Expires in ${diffMins}min`;
+        } else if (diffMins < 5) {
+          // <5 minutes: "Expiring now" with animation
+          expiryText = "Expiring now";
           expiryColor = "text-red-600";
-        } else if (diffHours < 24) {
-          // Show hours when less than 1 day
-          expiryText = `Expires in ${diffHours}h`;
-          expiryColor = "text-orange-600";
-        } else if (diffDays < 7) {
-          // Show days when less than 1 week
-          expiryText = `Expires in ${diffDays}d`;
+          isExpiringSoon = true;
+        } else if (diffHours < 1) {
+          // <1 hour: "Expires in 1hr"
+          expiryText = "Expires in 1hr";
+          expiryColor = "text-red-600";
+        } else if (isSameDay) {
+          // Expires today: "Expires today"
+          expiryText = "Expires today";
           expiryColor = "text-orange-600";
         } else {
-          // Show date when more than 1 week
+          // Other: Show dd/mm/yyyy
           const day = String(expiryDate.getDate()).padStart(2, '0');
           const month = String(expiryDate.getMonth() + 1).padStart(2, '0');
-          const yearShort = expiryDate.getFullYear();
-          expiryText = `Expires: ${day}/${month}/${yearShort}`;
+          const year = expiryDate.getFullYear();
+          expiryText = `Expires: ${day}/${month}/${year}`;
           expiryColor = "text-blue-600";
         }
       } catch (error) {
@@ -609,6 +621,7 @@ function ServiceCard({ service, profile, userProfiles, currentUserId, navigate }
               className="w-14 h-14 rounded-full object-cover border-2 border-gray-300"
               onError={(e) => { e.target.src = defaultAvatar; }}
               crossOrigin="anonymous"
+              loading="lazy"
             />
             {isOnline && <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>}
           </div>
@@ -664,9 +677,9 @@ function ServiceCard({ service, profile, userProfiles, currentUserId, navigate }
                 {untilText}
               </span>
             )}
-            {/* Expiry text on the right */}
+            {/* Expiry text on the right with animation for expiring soon */}
             {expiryText && (
-              <span className={`${expiryColor} whitespace-nowrap font-medium`}>
+              <span className={`${expiryColor} whitespace-nowrap font-medium ${isExpiringSoon ? 'animate-pulse' : ''}`}>
                 {expiryText}
               </span>
             )}
@@ -738,13 +751,28 @@ function SortDropdown({ sortBy, setSortBy, showSort, setShowSort }) {
 }
 
 export default function Services() {
-  const [services, setServices] = useState([]);
+  // PAGINATION OPTIMIZATION: Use paginated data fetching
+  // - Initial load: 15 documents (1 read)
+  // - Page return: 0 reads if no changes
+  // - Load more: 15 documents per scroll (1 read)
+  const {
+    services,
+    loading: servicesLoading,
+    loadingMore,
+    hasMore,
+    fetchServices,
+    loadMoreServices,
+    currentUserId,
+    userProfile
+  } = usePaginatedServices();
+
   const [searchValue, setSearchValue] = useState("");
+  // OPTIMIZATION: Debounce search value to reduce computation and potential Firestore calls
+  // The search only executes after the user stops typing for 300ms (optimized from 1200ms)
+  const debouncedSearchValue = useDebounce(searchValue, 300);
+
   const [phase, setPhase] = useState("all");
-  const [loading, setLoading] = useState(true);
-  const [userProfile, setUserProfile] = useState(null);
   const [userProfiles, setUserProfiles] = useState({});
-  const [currentUserId, setCurrentUserId] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
   const [showSort, setShowSort] = useState(false);
   const [sortBy, setSortBy] = useState("distance-low-high");
@@ -762,77 +790,112 @@ export default function Services() {
     expiryDate: "",
     expiryDirection: "above"
   });
+
+  // Pagination display state (for client-side pagination of already-loaded data)
+  // Normal browsing: 15 items per page
+  // Search results: 10 items per page
+  const [displayCount, setDisplayCount] = useState(15);
+  const listContainerRef = useRef(null);
+
+  // Determine page size based on search state
+  const currentPageSize = debouncedSearchValue.trim() ? 10 : 15;
+
+  // Reset displayCount when search query changes
+  useEffect(() => {
+    setDisplayCount(currentPageSize);
+  }, [debouncedSearchValue, currentPageSize]);
+
+  // OPTIMIZATION: Debounce filters to reduce computation and potential Firestore calls
+  // Filter updates only apply after the user stops interacting with filter inputs for 500ms (optimized from 1200ms)
+  const debouncedFilters = useDebounce(filters, 500);
+
   const navigate = useNavigate();
 
-  // 1. Authentication & Current User Profile
+  // OPTIMIZATION: Use ProfileCache for batch profile fetching
+  const { fetchProfiles, getAllCachedProfiles, subscribeToOnlineStatus } = useProfileCache();
+
+  // Data fetch when filters or sort change
   useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setCurrentUserId(user.uid);
-        // Listen to current user profile in real-time
-        const profileRef = doc(db, 'profiles', user.uid);
-        const unsubscribeProfile = onSnapshot(profileRef, (docSnap) => {
-          if (docSnap.exists()) {
-            setUserProfile(docSnap.data());
-          }
-        }, (error) => {
-          console.error("Error listening to user profile:", error);
-        });
+    // Determine sort field from sortBy
+    let sortField = 'createdAt';
+    let sortDirection = 'desc';
 
-        return () => unsubscribeProfile();
-      } else {
-        setCurrentUserId(null);
-        setLoading(false);
-      }
-    });
-    return () => unsubscribeAuth();
-  }, []);
+    if (sortBy === 'rating-high-low') {
+      sortField = 'rating';
+      sortDirection = 'desc';
+    } else if (sortBy === 'rating-low-high') {
+      sortField = 'rating';
+      sortDirection = 'asc';
+    } else if (sortBy === 'expiry-soon-late') {
+      sortField = 'expiry';
+      sortDirection = 'asc';
+    } else if (sortBy === 'expiry-late-soon') {
+      sortField = 'expiry';
+      sortDirection = 'desc';
+    }
 
-  // 2. Fetch Services (Real-time) and their Creator Profiles
-  useEffect(() => {
-    const q = query(collection(db, "services"));
-    let creatorUnsubs = {};
-
-    const unsubscribeServices = onSnapshot(q, (snapshot) => {
-      const allServices = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setServices(allServices);
-
-      // Fetch creator profiles
-      const creatorIds = Array.from(new Set(allServices.map(s => s.createdBy))).filter(Boolean);
-
-      creatorIds.forEach(creatorId => {
-        // Only start a new listener if we don't already have one for this creator
-        if (!creatorUnsubs[creatorId]) {
-          creatorUnsubs[creatorId] = onSnapshot(doc(db, 'profiles', creatorId), (profileSnap) => {
-            if (profileSnap.exists()) {
-              setUserProfiles(prev => ({
-                ...prev,
-                [creatorId]: profileSnap.data()
-              }));
-            }
-          }, (error) => {
-            console.error(`Error in profile listener for ${creatorId}:`, error);
-          });
-        }
-      });
-
-      setLoading(false);
-    }, (error) => {
-      console.error("Error fetching services:", error);
-      setLoading(false);
+    // OPTIMIZATION: Context now handles smart change detection.
+    fetchServices({
+      sortField,
+      sortDirection,
+      forceRefresh: false
     });
 
-    return () => {
-      unsubscribeServices();
-      // Clean up all creator profile listeners
-      Object.values(creatorUnsubs).forEach(unsub => unsub());
-    };
-  }, [currentUserId]);
+    setDisplayCount(debouncedSearchValue.trim() ? 10 : 15);
+  }, [debouncedFilters, sortBy, fetchServices, debouncedSearchValue]);
 
-  // 3. Prepare services for advanced search with Fuse.js
+  // OPTIMIZATION: Batch fetch creator profiles when services data changes
+  const fetchCreatorProfiles = useCallback(async (creatorIds) => {
+    if (!creatorIds || creatorIds.length === 0) return;
+
+    try {
+      const profiles = await fetchProfiles(creatorIds);
+      setUserProfiles(prev => ({ ...prev, ...profiles }));
+    } catch (error) {
+      console.error("Error batch fetching creator profiles:", error);
+    }
+  }, [fetchProfiles]);
+
+  // Fetch profiles when services data changes (from global cache)
+  useEffect(() => {
+    if (services.length > 0) {
+      // READ OPTIMIZATION: Only fetch profiles if 'author' data is missing from the service document
+      // This logic ensures 0 extra reads for new posts created with the denormalized structure
+      const creatorIds = Array.from(new Set(services.map(s => {
+        if (s.author && s.author.username) return null; // Skip if we have author info
+        return s.createdBy;
+      }))).filter(Boolean);
+
+      fetchCreatorProfiles(creatorIds);
+    }
+  }, [services, fetchCreatorProfiles]);
+
+  // OPTIMIZATION: Subscribe to online status updates for real-time status display
+  // This refreshes every 15 seconds to show accurate online/offline status
+  useEffect(() => {
+    if (services.length === 0) return;
+
+    const creatorIds = Array.from(new Set(services.map(s => s.createdBy))).filter(Boolean);
+    if (creatorIds.length === 0) return;
+
+    const unsubscribe = subscribeToOnlineStatus(creatorIds, (updatedProfiles) => {
+      setUserProfiles(prev => ({ ...prev, ...updatedProfiles }));
+    });
+
+    return () => unsubscribe();
+  }, [services, subscribeToOnlineStatus]);
+
+  // Sync with global profile cache updates
+  useEffect(() => {
+    const cachedProfiles = getAllCachedProfiles();
+    if (Object.keys(cachedProfiles).length > 0) {
+      setUserProfiles(prev => ({ ...prev, ...cachedProfiles }));
+    }
+  }, [getAllCachedProfiles]);
+
+  // Use servicesLoading from global cache
+  const loading = servicesLoading;
+
   const searchableServices = useMemo(() => {
     return services.map(service => {
       const creatorProfile = userProfiles[service.createdBy] || {};
@@ -869,8 +932,8 @@ export default function Services() {
     let searchFiltered = servicesWithDistance;
     let searchScoreMap = new Map();
 
-    if (searchValue.trim() && serviceFuseIndex) {
-      let searchResults = performSearch(serviceFuseIndex, searchValue, {
+    if (debouncedSearchValue.trim() && serviceFuseIndex) {
+      let searchResults = performSearch(serviceFuseIndex, debouncedSearchValue, {
         expandSynonyms: true,
         maxResults: 500, // INCREASED: Show ALL results
         // Use default minScore: 1.0 for Google-like behavior
@@ -878,7 +941,7 @@ export default function Services() {
 
       if (searchResults && searchResults.length > 0) {
         // RE-RANK RESULTS BY RELEVANCE (exact prefix matches first)
-        searchResults = reRankByRelevance(searchResults, searchValue);
+        searchResults = reRankByRelevance(searchResults, debouncedSearchValue);
 
         const searchIds = new Set(searchResults.map(r => r.item.id));
         searchFiltered = servicesWithDistance.filter(s => searchIds.has(s.id));
@@ -919,36 +982,35 @@ export default function Services() {
       }
 
       // Phase filter
+      const finalType = service.type || service.serviceType || "provide";
       const matchesPhase =
-        phase === "all" ? true :
-          phase === "provide" ? service.type === "provide" || service.serviceType === "provide" :
-            service.type === "ask" || service.serviceType === "ask";
+        phase === "all" ? true : finalType === phase;
 
       if (!matchesPhase) return false;
 
       // Distance filter
-      let minDistanceKm = filters.distance.min || 0;
-      let maxDistanceKm = filters.distance.max;
-      if (filters.distanceUnit === 'm') {
+      let minDistanceKm = debouncedFilters.distance.min || 0;
+      let maxDistanceKm = debouncedFilters.distance.max;
+      if (debouncedFilters.distanceUnit === 'm') {
         minDistanceKm = minDistanceKm / 1000;
         if (maxDistanceKm) maxDistanceKm = maxDistanceKm / 1000;
       }
 
       const distance = service.distance;
-      if (filters.distance.min && (distance === null || distance < minDistanceKm)) return false;
-      if (filters.distance.max && (distance === null || distance > maxDistanceKm)) return false;
+      if (debouncedFilters.distance.min && (distance === null || distance < minDistanceKm)) return false;
+      if (debouncedFilters.distance.max && (distance === null || distance > maxDistanceKm)) return false;
 
       // Rating filter
       const creatorRating = userProfiles[service.createdBy]?.rating || 0;
       const rating = service.rating || creatorRating || 0;
 
-      if (rating < filters.rating.min) return false;
-      if (rating > filters.rating.max) return false;
+      if (rating < debouncedFilters.rating.min) return false;
+      if (rating > debouncedFilters.rating.max) return false;
 
       // Online status filter
       const isOnline = isUserOnline(service.createdBy, currentUserId, creatorProfile.online, creatorProfile.lastSeen);
-      if (filters.onlineStatus === "online" && !isOnline) return false;
-      if (filters.onlineStatus === "offline" && isOnline) return false;
+      if (debouncedFilters.onlineStatus === "online" && !isOnline) return false;
+      if (debouncedFilters.onlineStatus === "offline" && isOnline) return false;
 
       // Location filters
       const checkLocationFilter = (filterValue, serviceValue) => {
@@ -957,14 +1019,14 @@ export default function Services() {
         return filterValues.some(fv => serviceValue?.toLowerCase().includes(fv));
       };
 
-      if (!checkLocationFilter(filters.area, service.location?.area)) return false;
-      if (!checkLocationFilter(filters.city, service.location?.city)) return false;
-      if (!checkLocationFilter(filters.landmark, service.location?.landmark)) return false;
-      if (!checkLocationFilter(filters.pincode, service.location?.pincode)) return false;
+      if (!checkLocationFilter(debouncedFilters.area, service.location?.area)) return false;
+      if (!checkLocationFilter(debouncedFilters.city, service.location?.city)) return false;
+      if (!checkLocationFilter(debouncedFilters.landmark, service.location?.landmark)) return false;
+      if (!checkLocationFilter(debouncedFilters.pincode, service.location?.pincode)) return false;
 
       // Tags filter
-      if (filters.tags) {
-        const tagFilters = filters.tags.split(',').map(t => t.trim().toLowerCase()).filter(t => t);
+      if (debouncedFilters.tags) {
+        const tagFilters = debouncedFilters.tags.split(',').map(t => t.trim().toLowerCase()).filter(t => t);
         const hasMatchingTag = tagFilters.some(tag =>
           (service.tags || []).some(st => st.toLowerCase().includes(tag))
         );
@@ -972,20 +1034,20 @@ export default function Services() {
       }
 
       // Expiry Type Filter
-      if (filters.expiryType !== "all") {
-        if (filters.expiryType === "noExpiry" && !isUntilIChange) return false;
-        if (filters.expiryType === "withExpiry" && isUntilIChange) return false;
+      if (debouncedFilters.expiryType !== "all") {
+        if (debouncedFilters.expiryType === "noExpiry" && !isUntilIChange) return false;
+        if (debouncedFilters.expiryType === "withExpiry" && isUntilIChange) return false;
       }
 
       // Date Filter
-      if (!isUntilIChange && filters.expiryDate && service.expiry) {
+      if (!isUntilIChange && debouncedFilters.expiryDate && service.expiry) {
         const expiryDate = service.expiry?.toDate ? service.expiry.toDate() : new Date(service.expiry);
-        const filterDate = new Date(filters.expiryDate);
+        const filterDate = new Date(debouncedFilters.expiryDate);
 
         const expiryDateOnly = new Date(expiryDate.getFullYear(), expiryDate.getMonth(), expiryDate.getDate());
         const filterDateOnly = new Date(filterDate.getFullYear(), filterDate.getMonth(), filterDate.getDate());
 
-        if (filters.expiryDirection === "above") {
+        if (debouncedFilters.expiryDirection === "above") {
           if (expiryDateOnly < filterDateOnly) return false;
         } else {
           if (expiryDateOnly > filterDateOnly) return false;
@@ -998,7 +1060,7 @@ export default function Services() {
     // Apply sorting
     const sortedServices = [...filteredServices].sort((a, b) => {
       // IF SEARCHING: Sort by relevance score (custom score)
-      if (searchValue.trim() && searchScoreMap.size > 0) {
+      if (debouncedSearchValue.trim() && searchScoreMap.size > 0) {
         const scoreA = searchScoreMap.get(a.id) || 0;
         const scoreB = searchScoreMap.get(b.id) || 0;
         return scoreB - scoreA; // Higher score first
@@ -1047,7 +1109,37 @@ export default function Services() {
     });
 
     return sortedServices;
-  }, [searchableServices, serviceFuseIndex, searchValue, filters, sortBy, userProfile, userProfiles, currentUserId, phase]);
+  }, [searchableServices, serviceFuseIndex, debouncedSearchValue, debouncedFilters, sortBy, userProfile, userProfiles, currentUserId, phase]);
+
+  // OPTIMIZATION: Infinite Scroll - Auto-load when user scrolls near bottom
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!listContainerRef.current) return;
+
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const scrollHeight = document.documentElement.scrollHeight;
+      const clientHeight = window.innerHeight;
+
+      // Load more when user is 300px from bottom
+      const isNearBottom = scrollHeight - (scrollTop + clientHeight) < 300;
+
+      if (isNearBottom && !loadingMore) {
+        // Auto-load next batch of cached items
+        if (displayCount < displayedServices.length) {
+          setDisplayCount(prev => prev + currentPageSize);
+        }
+        // Auto-load from Firestore if all cached items shown
+        else if (hasMore) {
+          loadMoreServices().then(() => {
+            setDisplayCount(prev => prev + currentPageSize);
+          });
+        }
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [displayCount, displayedServices.length, hasMore, loadingMore, loadMoreServices, currentPageSize]);
 
   const hasActiveFilters =
     filters.distance.min > 0 ||
@@ -1219,7 +1311,7 @@ export default function Services() {
       }
     >
       {/* Main Content */}
-      <div className="px-4 py-3 pb-20">
+      <div className="px-4 py-3 pb-20" ref={listContainerRef}>
         {displayedServices.length === 0 ? (
           <div className="text-center text-gray-500 mt-10">
             <p className="text-lg">No services found.</p>
@@ -1240,18 +1332,32 @@ export default function Services() {
             )}
           </div>
         ) : (
-          <div className="space-y-3">
-            {displayedServices.map((service) => (
-              <ServiceCard
-                key={service.id}
-                service={service}
-                profile={userProfile}
-                userProfiles={userProfiles}
-                currentUserId={currentUserId}
-                navigate={navigate}
-              />
-            ))}
-          </div>
+          <>
+            <div className="space-y-3">
+              {/* Show only first displayCount services (paginated display) */}
+              {displayedServices.slice(0, displayCount).map((service) => (
+                <ServiceCard
+                  key={service.id}
+                  service={service}
+                  profile={userProfile}
+                  userProfiles={userProfiles}
+                  currentUserId={currentUserId}
+                  navigate={navigate}
+                />
+              ))}
+            </div>
+
+            {/* Loading Indicator for Infinite Scroll */}
+            {loadingMore && (
+              <div className="flex justify-center mt-6">
+                <div className="flex items-center gap-2 text-gray-600">
+                  <FiLoader className="animate-spin" size={20} />
+                  <span className="text-sm">Loading more services...</span>
+                </div>
+              </div>
+            )}
+
+          </>
         )}
       </div>
 

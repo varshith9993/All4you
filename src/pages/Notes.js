@@ -1,15 +1,11 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-    collection,
-    query,
-    where,
-    onSnapshot,
     deleteDoc,
     doc,
 } from "firebase/firestore";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth, db } from "../firebase";
+import { db } from "../firebase";
+import { useNotesCache } from "../contexts/GlobalDataCacheContext";
 import {
     FiArrowLeft,
     FiSearch,
@@ -21,11 +17,20 @@ import {
     FiCalendar,
 } from "react-icons/fi";
 
+/**
+ * Notes Page - Optimized with GlobalDataCacheContext
+ * 
+ * OPTIMIZATION: Uses persistent listener from GlobalDataCacheContext
+ * - First visit: 1 read operation (listener initialization)
+ * - Subsequent visits: 0 reads (data served from persistent cache)
+ * - Real-time updates: Listener stays active, updates reflected immediately
+ */
 export default function Notes() {
     const navigate = useNavigate();
-    const [currentUserId, setCurrentUserId] = useState(null);
-    const [notes, setNotes] = useState([]);
-    const [loading, setLoading] = useState(true);
+
+    // Use global notes cache instead of local listener
+    const { notes, loading } = useNotesCache();
+
     const [searchQuery, setSearchQuery] = useState("");
 
     // UI State
@@ -45,55 +50,38 @@ export default function Notes() {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    // Handle Auth State
-    useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (user) => {
-            if (user) {
-                setCurrentUserId(user.uid);
-            } else {
-                setCurrentUserId(null);
-                setLoading(false);
-            }
-        });
-        return () => unsubscribe();
-    }, []);
+    // NOTE: Auth state and notes fetching are now handled by GlobalDataCacheContext
+    // The useNotesCache() hook provides:
+    // - notes: Pre-sorted list of user's notes (most recent first)
+    // - loading: Loading state
+    // - currentUserId: Current authenticated user ID
+    // 
+    // Benefits:
+    // - First visit: 1 Firestore read to initialize listener
+    // - Subsequent visits: 0 reads (cached data from persistent listener)
+    // - Real-time updates: Changes from AddNotes automatically reflected
 
-    // Fetch notes
-    useEffect(() => {
-        if (!currentUserId) return;
+    // Memoized filtered notes for search (avoids recalculation on every render)
+    const filteredNotes = useMemo(() => {
+        if (!searchQuery.trim()) return notes;
 
-        const q = query(
-            collection(db, "notes"),
-            where("userId", "==", currentUserId)
+        const query = searchQuery.toLowerCase();
+        return notes.filter(
+            (note) =>
+                note.title?.toLowerCase().includes(query) ||
+                note.content?.toLowerCase().includes(query)
         );
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const notesData = snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data(),
-            }));
-
-            // Client-side sorting to avoid index issues
-            notesData.sort((a, b) => {
-                const timeA = a.updatedAt?.toMillis ? a.updatedAt.toMillis() : (a.updatedAt || 0);
-                const timeB = b.updatedAt?.toMillis ? b.updatedAt.toMillis() : (b.updatedAt || 0);
-                return timeB - timeA;
-            });
-
-            setNotes(notesData);
-            setLoading(false);
-        }, (error) => {
-            console.error("Error fetching notes:", error);
-            setLoading(false);
-        });
-
-        return () => unsubscribe();
-    }, [currentUserId]);
+    }, [notes, searchQuery]);
 
     const handleDeleteNote = async (noteId) => {
         if (window.confirm("Are you sure you want to delete this note?")) {
             try {
                 await deleteDoc(doc(db, "notes", noteId));
+                console.group(`[Action: DELETE NOTE]`);
+                console.log(`%c✔ Note removed from database`, "color: red; font-weight: bold");
+                console.log(`- Reads: 0`);
+                console.log(`- Writes: 1`);
+                console.groupEnd();
                 setMenuOpenId(null);
             } catch (error) {
                 console.error("Error deleting note:", error);
@@ -116,14 +104,12 @@ export default function Notes() {
     };
 
     const startCreateNote = () => {
+        if (notes.length >= 5) {
+            alert("Note Limit Reached: You can only have up to 5 notes. Please delete an existing note to create a new one.");
+            return;
+        }
         navigate("/add-notes");
     };
-
-    const filteredNotes = notes.filter(
-        (note) =>
-            note.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            note.content?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
 
     const formatDateTime = (timestamp) => {
         if (!timestamp) return "";

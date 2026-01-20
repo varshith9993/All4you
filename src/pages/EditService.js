@@ -7,6 +7,7 @@ import axios from "axios";
 import { FiClock, FiCalendar, FiCamera, FiMapPin, FiX, FiImage, FiFileText, FiUpload, FiArrowLeft, FiRotateCcw } from "react-icons/fi";
 import defaultAvatar from "../assets/images/default_profile.svg";
 import LocationPickerModal from "../components/LocationPickerModal";
+import { compressFile } from "../utils/compressor";
 
 const suggestedTags = ["note-taking", "delivery", "electrician", "repairs", "consulting"];
 const LOCATIONIQ_API_KEY = "pk.f85d97d836243abb9099ada5ebe13c73";
@@ -157,10 +158,10 @@ export default function EditService() {
         const files = Array.from(e.target.files);
         if (files.length === 0) return;
 
-        // Validate file size (Max 10MB)
+        // Validate file size (Max 2.5MB)
         for (const file of files) {
-            if (file.size > 10 * 1024 * 1024) {
-                alert(`File "${file.name}" exceeds the 10MB limit.`);
+            if (file.size > 2.5 * 1024 * 1024) {
+                alert(`File "${file.name}" exceeds the 2.5MB limit.`);
                 return;
             }
         }
@@ -240,8 +241,9 @@ export default function EditService() {
         try {
             let profilePhotoUrl = existingProfilePhotoUrl;
             if (profilePhoto) {
+                const compressedPhoto = await compressFile(profilePhoto);
                 const photoRef = ref(storage, `profile-photos/${Date.now()}_${profilePhoto.name}`);
-                const photoSnapshot = await uploadBytes(photoRef, profilePhoto);
+                const photoSnapshot = await uploadBytes(photoRef, compressedPhoto);
                 profilePhotoUrl = await getDownloadURL(photoSnapshot.ref);
             }
 
@@ -250,8 +252,9 @@ export default function EditService() {
                 if (f.isExisting) {
                     finalAttachments.push({ name: f.name, url: f.url });
                 } else if (f.file) {
+                    const compressedFile = await compressFile(f.file);
                     const fileRef = ref(storage, `service-files/${Date.now()}_${f.name}`);
-                    const fileSnapshot = await uploadBytes(fileRef, f.file);
+                    const fileSnapshot = await uploadBytes(fileRef, compressedFile);
                     const fileUrl = await getDownloadURL(fileSnapshot.ref);
                     finalAttachments.push({ name: f.name, url: fileUrl });
                 }
@@ -272,6 +275,7 @@ export default function EditService() {
                 attachments: finalAttachments,
                 profilePhotoUrl,
                 serviceType,
+                type: serviceType, // Keep type in sync with serviceType
                 updatedAt: serverTimestamp(),
             };
 
@@ -280,6 +284,12 @@ export default function EditService() {
             }
 
             await updateDoc(doc(db, "services", id), updateData);
+
+            console.group(`[Action: UPDATE SERVICE]`);
+            console.log(`%c✔ Firestore Write Successful`, "color: green; font-weight: bold");
+            console.log(`- Reads: 0`);
+            console.log(`- Writes: 1`);
+            console.groupEnd();
             setSaveConfirm(false);
             navigate(-1);
         } catch (err) {
@@ -515,7 +525,7 @@ export default function EditService() {
                                 <span className="text-sm text-gray-600">
                                     Click to upload files
                                 </span>
-                                <p className="text-xs text-gray-500 mt-1">Images, PDFs, Docs (Max 10MB)</p>
+                                <p className="text-xs text-gray-500 mt-1">Images, PDFs, Docs (Max 2.5MB)</p>
                             </div>
                             <input
                                 type="file"
