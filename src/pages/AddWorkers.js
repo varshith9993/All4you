@@ -5,7 +5,7 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck, FiUser } from "react-icons/fi";
 import LocationPickerModal from "../components/LocationPickerModal";
-import { compressFile } from "../utils/compressor";
+import { compressFile, compressProfileImage } from "../utils/compressor";
 
 const suggestedTags = ["mechanic", "engineer", "tutor", "electrician", "driver", "teacher", "plumber", "carpenter", "painter", "cleaner", "cook", "gardener"];
 const LOCATIONIQ_API_KEY = "pk.c46b235dc808aed78cb86bd70c83fab0";
@@ -45,8 +45,8 @@ export default function AddWorkers() {
     return () => unsubscribe();
   }, [navigate]);
 
-  const uploadFileToCloudinary = async (file) => {
-    const compressedFile = await compressFile(file);
+  const uploadFileToCloudinary = async (file, isProfile = false) => {
+    const compressedFile = isProfile ? await compressProfileImage(file) : await compressFile(file);
     const formData = new FormData();
     formData.append("file", compressedFile);
     formData.append("upload_preset", "ml_default");
@@ -83,7 +83,7 @@ export default function AddWorkers() {
 
     try {
       setUploading(true);
-      const url = await uploadFileToCloudinary(file);
+      const url = await uploadFileToCloudinary(file, true);
       setProfilePhotoUrl(url);
       setError("");
     } catch (err) {
@@ -254,7 +254,7 @@ export default function AddWorkers() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-pink-50">
-      <div className="max-w-2xl mx-auto px-4 py-6">
+      <div className="max-w-2xl mx-auto px-3 py-4 sm:px-4 sm:py-6">
         {/* Header */}
         <div className="mb-6">
           <button
@@ -263,13 +263,13 @@ export default function AddWorkers() {
           >
             ← Back
           </button>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Create Worker Post</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Create Worker Post</h1>
           <p className="text-gray-600">Share your skills or find talented workers</p>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-6">
           {/* Profile Photo */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <FiUser className="text-indigo-600" />
               Profile Photo <span className="text-sm font-normal text-gray-500">(Optional)</span>
@@ -301,7 +301,7 @@ export default function AddWorkers() {
           </div>
 
           {/* Title & Description */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <FiFileText className="text-indigo-600" />
               Worker Details
@@ -338,7 +338,7 @@ export default function AddWorkers() {
           </div>
 
           {/* Tags */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <FiTag className="text-indigo-600" />
               Skills & Tags
@@ -404,37 +404,37 @@ export default function AddWorkers() {
           </div>
 
           {/* Location */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <FiMapPin className="text-indigo-600" />
               Location
             </h2>
-            <div className="flex gap-3 mb-4">
+            <div className="flex flex-row gap-2 mb-4">
               <button
                 type="button"
                 onClick={autofillLocation}
                 disabled={locationLoading}
-                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="flex-1 px-3 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium text-xs sm:text-sm disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
               >
                 {locationLoading ? (
                   <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                    Getting location...
+                    <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
+                    Locating...
                   </>
                 ) : (
                   <>
-                    <FiMapPin size={16} />
-                    Get Current Location
+                    <FiMapPin size={14} />
+                    Current Loc
                   </>
                 )}
               </button>
               <button
                 type="button"
                 onClick={() => setShowLocationPicker(true)}
-                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium flex items-center justify-center gap-2"
+                className="flex-1 px-3 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium text-xs sm:text-sm flex items-center justify-center gap-1.5"
               >
-                <FiMapPin size={16} />
-                Pin Location on Map
+                <FiMapPin size={14} />
+                Pin on Map
               </button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -494,7 +494,7 @@ export default function AddWorkers() {
           </div>
 
           {/* Work Gallery */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <FiImage className="text-indigo-600" />
               Work Gallery <span className="text-sm font-normal text-gray-500">(Optional)</span>

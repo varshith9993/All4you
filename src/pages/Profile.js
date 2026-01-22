@@ -41,7 +41,7 @@ import defaultAvatar from "../assets/images/default_profile.svg";
 import LocationPickerModal from "../components/LocationPickerModal";
 import { useProfileCache } from "../contexts/ProfileCacheContext";
 import { useGlobalDataCache } from "../contexts/GlobalDataCacheContext";
-import { compressFile } from "../utils/compressor";
+import { compressProfileImage } from "../utils/compressor";
 
 const OPENCAGE_API_KEY = "988148bc222049e2831059ea74476abb";
 const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
@@ -529,7 +529,7 @@ export default function Profile() {
     const file = e.target.files[0];
     if (file) {
       setStatusMsg("Compressing & Uploading image...");
-      const compressedFile = await compressFile(file);
+      const compressedFile = await compressProfileImage(file);
       const url = await uploadToCloudinary(compressedFile);
       setEditingProfile((prev) => ({ ...prev, profileImage: url }));
       setImagePreview(url);

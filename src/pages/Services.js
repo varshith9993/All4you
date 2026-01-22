@@ -769,7 +769,7 @@ export default function Services() {
   const [searchValue, setSearchValue] = useState("");
   // OPTIMIZATION: Debounce search value to reduce computation and potential Firestore calls
   // The search only executes after the user stops typing for 300ms (optimized from 1200ms)
-  const debouncedSearchValue = useDebounce(searchValue, 300);
+  const debouncedSearchValue = useDebounce(searchValue, 1000);
 
   const [phase, setPhase] = useState("all");
   const [userProfiles, setUserProfiles] = useState({});

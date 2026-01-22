@@ -404,6 +404,22 @@ export default function ChatDetail() {
     return () => unsubChat();
   }, [chatId, uid, navigate]);
 
+  // Bug Fix: Unconditionally reset unseen count when entering chat
+  // This handles specific edge cases where unread count > 0 but no unread messages exist (phantom red dot)
+  useEffect(() => {
+    if (!chat || !uid) return;
+
+    // Check if we have an unseen count > 0
+    const count = (chat.unseenCounts && chat.unseenCounts[uid]) || 0;
+
+    if (count > 0) {
+      console.log("Fixing phantom unread count...");
+      updateDoc(doc(db, "chats", chatId), {
+        [`unseenCounts.${uid}`]: 0
+      }).catch(err => console.error("Error clearing badge:", err));
+    }
+  }, [chat, uid, chatId]);
+
   // OPTIMIZATION: Separate profile listener - only recreates when otherUserId changes
   // This fixes the bug where profile listeners accumulated on every chat update
   useEffect(() => {

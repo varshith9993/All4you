@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { FiClock, FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck } from "react-icons/fi";
 import LocationPickerModal from "../components/LocationPickerModal";
-import { compressFile } from "../utils/compressor";
+import { compressFile, compressProfileImage } from "../utils/compressor";
 
 const suggestedTags = ["note-taking", "delivery", "electrician", "repairs", "consulting", "cleaning", "plumbing", "tutoring", "moving", "gardening", "coding", "design", "writing"];
 const LOCATIONIQ_API_KEY = "pk.f85d97d836243abb9099ada5ebe13c73";
@@ -49,8 +49,8 @@ export default function AddServices() {
     return () => unsubscribe();
   }, []);
 
-  const uploadFileToCloudinary = async (file) => {
-    const compressedFile = await compressFile(file);
+  const uploadFileToCloudinary = async (file, isProfile = false) => {
+    const compressedFile = isProfile ? await compressProfileImage(file) : await compressFile(file);
     const formData = new FormData();
     formData.append("file", compressedFile);
     formData.append("upload_preset", "ml_default");
@@ -182,7 +182,7 @@ export default function AddServices() {
     try {
       setUploading(true);
       setError("");
-      const url = await uploadFileToCloudinary(file);
+      const url = await uploadFileToCloudinary(file, true);
       setProfilePhotoUrl(url);
     } catch (err) {
       setError("Failed to upload profile photo");
@@ -319,7 +319,7 @@ export default function AddServices() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      <div className="max-w-2xl mx-auto px-4 py-6">
+      <div className="max-w-2xl mx-auto px-3 py-4 sm:px-4 sm:py-6">
         {/* Header */}
         <div className="mb-6">
           <button
@@ -328,13 +328,13 @@ export default function AddServices() {
           >
             ← Back
           </button>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Create Service Post</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Create Service Post</h1>
           <p className="text-gray-600">Share your service or request help from the community</p>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-6">
           {/* Service Type Selection */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <FiFileText className="text-blue-600" />
               Service Type
@@ -372,7 +372,7 @@ export default function AddServices() {
           </div>
 
           {/* Profile Photo */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <FiImage className="text-blue-600" />
               Profile Photo <span className="text-sm font-normal text-gray-500">(Optional)</span>
@@ -400,7 +400,7 @@ export default function AddServices() {
           </div>
 
           {/* Title & Description */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4">Service Details</h2>
             <div className="space-y-4">
               <div>
@@ -434,7 +434,7 @@ export default function AddServices() {
           </div>
 
           {/* Tags */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <FiTag className="text-blue-600" />
               Tags
@@ -494,37 +494,37 @@ export default function AddServices() {
           </div>
 
           {/* Location */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <FiMapPin className="text-blue-600" />
               Location
             </h2>
-            <div className="flex gap-3 mb-4">
+            <div className="flex flex-row gap-2 mb-4">
               <button
                 type="button"
                 onClick={autofillLocation}
                 disabled={locationLoading}
-                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="flex-1 px-3 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium text-xs sm:text-sm disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
               >
                 {locationLoading ? (
                   <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                    Getting location...
+                    <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
+                    Locating...
                   </>
                 ) : (
                   <>
-                    <FiMapPin size={16} />
-                    Get Current Location
+                    <FiMapPin size={14} />
+                    Current Loc
                   </>
                 )}
               </button>
               <button
                 type="button"
                 onClick={() => setShowLocationPicker(true)}
-                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium flex items-center justify-center gap-2"
+                className="flex-1 px-3 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium text-xs sm:text-sm flex items-center justify-center gap-1.5"
               >
-                <FiMapPin size={16} />
-                Pin Location on Map
+                <FiMapPin size={14} />
+                Pin on Map
               </button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -584,7 +584,7 @@ export default function AddServices() {
           </div>
 
           {/* Post Expiry */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <FiClock className="text-blue-600" />
               Post Expiry
@@ -638,7 +638,7 @@ export default function AddServices() {
           </div>
 
           {/* Attachments */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <FiUpload className="text-blue-600" />
               Attachments <span className="text-sm font-normal text-gray-500">(Optional)</span>

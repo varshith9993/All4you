@@ -11,6 +11,7 @@ import Fuse from "fuse.js";
 // ============================================================================
 
 // Stop words to filter out (common words that add noise to search)
+// ENHANCED: Comprehensive list to prevent false matches on common words
 const STOP_WORDS = new Set([
   "a", "an", "the", "and", "or", "for", "in", "on", "of", "at", "by",
   "with", "is", "are", "was", "were", "be", "have",
@@ -966,7 +967,7 @@ export function generateSearchTokens(text = "") {
 
 /**
  * Build a Fuse.js search index with optimized configuration
- * ULTRA-FUZZY: Handles severe typos like "vets" → "pets", "r" → "are"
+ * BALANCED: Handles typos while maintaining accuracy
  * @param {Array} items - Array of items to index
  * @param {Object} options - Fuse.js configuration options
  * @returns {Fuse} Configured Fuse instance
@@ -974,11 +975,11 @@ export function generateSearchTokens(text = "") {
 export function buildFuseIndex(items, options = {}) {
   const defaultOptions = {
     includeScore: true,
-    threshold: 0.6, // INCREASED: 0.6 for ultra-fuzzy matching (handles severe typos)
+    threshold: 0.4, // BALANCED: 0.4 for good fuzzy matching with accuracy (0=exact, 1=match anything)
     distance: 1000, // INCREASED: Allow matches very far apart to avoid interfering with custom relevance ranking
     minMatchCharLength: 1, // Match from single character
     ignoreLocation: true, // Search entire string (don't use distance for location)
-    useExtendedSearch: false, // Keep false for performance
+    useExtendedSearch: true, // ENABLED: Supports complex queries and better multi-word matching
     findAllMatches: true, // Find ALL matches for better coverage
     isCaseSensitive: false, // Case-insensitive
     shouldSort: false, // CHANGED: Don't sort by score here - we'll do custom sorting
@@ -1003,18 +1004,20 @@ export function performSearch(fuse, query, options = {}) {
   if (!query || !query.trim()) return null;
 
   const {
-    expandSynonyms = true,
-    maxResults = 500, // INCREASED: Show more results
+    maxResults = 250, // INCREASED: Show more results
     minScore = 1.0, // INCREASED: Accept more results (lower score is better, max 1.0)
   } = options;
 
-  // Expand query with synonyms if enabled
-  let searchQuery = query;
-  if (expandSynonyms) {
-    const expandedTokens = expandQueryWithSynonyms(query);
-    if (expandedTokens.length === 0) return []; // Return empty if query becomes empty (e.g. only stop words)
-    searchQuery = expandedTokens.join(" ");
-  }
+  // PREPARE QUERY: Tokenize and filter stop words
+  // We do NOT expand synonyms here anymore - they are now in the index ("expandedTerms")
+  // This prevents query bloat and threshold issues (e.g. searching for 20 words against 2 words)
+  const tokens = tokenize(query);
+  if (tokens.length === 0) return []; // Return empty if query becomes empty (e.g. only stop words)
+
+  // Use FUZZY OR matching ('token | 'token) for multiple terms
+  // This ensures "plumber carpenter" shows BOTH plumbers and carpenters
+  // The reRankByRelevance function will handle sorting them properly
+  const searchQuery = tokens.map(t => `'${t}`).join(" | ");
 
   if (!searchQuery.trim()) return [];
 
@@ -1035,11 +1038,13 @@ export function performSearch(fuse, query, options = {}) {
 
 /**
  * CUSTOM RELEVANCE SCORING: Re-rank results based on strict hierarchy
+ * ENHANCED: Prioritizes meaningful keyword matches (non-stop-words)
  * Prioritizes:
- * 1. Exact substring match in title/tags (highest)
- * 2. Prefix match in title/tags
- * 3. Ordered subsequence match (characters in sequence)
- * 4. Partial overlap matches (fuzzy matches)
+ * 1. Exact meaningful keyword match in title/tags (highest)
+ * 2. Exact substring match in title/tags
+ * 3. Prefix match in title/tags
+ * 4. Ordered subsequence match (characters in sequence)
+ * 5. Partial overlap matches (fuzzy matches)
  * @param {Array} results - Fuse.js search results
  * @param {string} query - Original search query
  * @returns {Array} Re-ranked results with custom scores
@@ -1050,6 +1055,9 @@ export function reRankByRelevance(results, query) {
   const normalizedQuery = normalizeText(query).trim();
   const queryLower = normalizedQuery.toLowerCase();
 
+  // Extract meaningful keywords (non-stop-words) from query
+  const meaningfulKeywords = tokenize(query); // tokenize already filters stop words
+
   // Calculate custom relevance score for each result
   const scoredResults = results.map(result => {
     const item = result.item;
@@ -1057,9 +1065,49 @@ export function reRankByRelevance(results, query) {
     const tags = (item.tags || []).map(t => normalizeText(t).toLowerCase()).join(" ");
     const username = normalizeText(item.searchData?.username || "").toLowerCase();
 
+    // Extract meaningful keywords from title and tags
+    const titleKeywords = tokenize(title);
+    const tagKeywords = tokenize(tags);
+    const titleKeywordsSet = new Set(titleKeywords);
+    const tagKeywordsSet = new Set(tagKeywords);
+
     let customScore = 0;
 
-    // 1. EXACT SUBSTRING MATCH (highest priority - score 1000+)
+    // 0. EXACT MEANINGFUL KEYWORD MATCH (ULTRA-HIGH PRIORITY - score 2000+)
+    // This ensures "plumber" query matches "plumber" post, not "i am electrician"
+    let titleKeywordMatches = 0;
+    let tagKeywordMatches = 0;
+
+    meaningfulKeywords.forEach(keyword => {
+      if (titleKeywordsSet.has(keyword)) {
+        titleKeywordMatches++;
+        customScore += 2000; // MASSIVE boost for each meaningful keyword match in title
+      }
+      if (tagKeywordsSet.has(keyword)) {
+        tagKeywordMatches++;
+        customScore += 1800; // MASSIVE boost for each meaningful keyword match in tags
+      }
+    });
+
+    // Bonus for matching ALL meaningful keywords
+    if (meaningfulKeywords.length > 0) {
+      const titleMatchRatio = titleKeywordMatches / meaningfulKeywords.length;
+      const tagMatchRatio = tagKeywordMatches / meaningfulKeywords.length;
+
+      if (titleMatchRatio === 1.0) {
+        customScore += 3000; // ALL keywords matched in title
+      } else if (titleMatchRatio >= 0.5) {
+        customScore += 1500; // At least half matched in title
+      }
+
+      if (tagMatchRatio === 1.0) {
+        customScore += 2800; // ALL keywords matched in tags
+      } else if (tagMatchRatio >= 0.5) {
+        customScore += 1400; // At least half matched in tags
+      }
+    }
+
+    // 1. EXACT SUBSTRING MATCH (high priority - score 1000+)
     if (title.includes(queryLower)) {
       customScore += 1000;
       // Bonus for exact word match
@@ -1126,10 +1174,19 @@ export function reRankByRelevance(results, query) {
     const fusePoints = (1 - (result.score || 0)) * 100;
     customScore += fusePoints;
 
+    // 8. PENALTY for matches with NO meaningful keyword overlap
+    // ONLY apply penalty if query has MULTIPLE meaningful keywords and NONE match
+    // This prevents penalizing valid fuzzy matches for single-keyword queries like "plumber"
+    if (meaningfulKeywords.length > 1 && titleKeywordMatches === 0 && tagKeywordMatches === 0) {
+      customScore -= 3000; // Penalty for multi-keyword queries with no keyword match
+    }
+
     return {
       ...result,
       customScore,
-      originalFuseScore: result.score
+      originalFuseScore: result.score,
+      meaningfulKeywordMatches: titleKeywordMatches + tagKeywordMatches,
+      totalMeaningfulKeywords: meaningfulKeywords.length
     };
   });
 
@@ -1235,19 +1292,20 @@ export function performTieredSearch(items, query, keys) {
 
 /**
  * Get default weighted keys for Workers search
- * ULTRA-FUZZY: Includes n-grams and prefixes for severe typo tolerance
- * Title & Tags = 60%, N-grams = 20%, Username = 15%, Location = 5%
+ * OPTIMIZED: Prioritizes exact matches in title/tags, reduces fuzzy matching weight
+ * Title & Tags = 60%, Prefixes = 8%, N-grams = 8%, Phonetics = 6%, Username = 13%, Location = 5%
  * @returns {Array} Weighted keys configuration
  */
 export function getWorkerSearchKeys() {
   return [
     { name: "searchData.title", weight: 0.25 },      // 25% - Post title (PRIMARY)
     { name: "searchData.tags", weight: 0.25 },       // 25% - Skills/categories (PRIMARY)
-    { name: "searchData.ngrams", weight: 0.12 },     // 12% - Character-level matching (TYPOS)
-    { name: "searchData.prefixes", weight: 0.10 },   // 10% - Prefix matching (PARTIAL)
-    { name: "searchData.doubleMetaphonePrimary", weight: 0.05 },  // 5% - Phonetic matching (PRIMARY)
-    { name: "searchData.doubleMetaphoneSecondary", weight: 0.05 },  // 5% - Phonetic matching (SECONDARY)
-    { name: "searchData.username", weight: 0.13 },   // 13% - Creator name
+    { name: "searchData.expandedTerms", weight: 0.15 }, // 15% - Synonyms (NEW: Indexed synonyms)
+    { name: "searchData.prefixes", weight: 0.05 },   // 5% - Prefix matching (PARTIAL)
+    { name: "searchData.ngrams", weight: 0.05 },     // 5% - Character-level matching (TYPOS)
+    { name: "searchData.doubleMetaphonePrimary", weight: 0.03 },  // 3% - Phonetic matching (PRIMARY)
+    { name: "searchData.doubleMetaphoneSecondary", weight: 0.03 },  // 3% - Phonetic matching (SECONDARY)
+    { name: "searchData.username", weight: 0.12 },   // 12% - Creator name
     { name: "searchData.city", weight: 0.02 },       // 2% - Location (minimal)
     { name: "searchData.area", weight: 0.015 },      // 1.5% - Location (minimal)
     { name: "searchData.landmark", weight: 0.01 },   // 1% - Location (minimal)
@@ -1257,19 +1315,20 @@ export function getWorkerSearchKeys() {
 
 /**
  * Get default weighted keys for Services search
- * ULTRA-FUZZY: Includes n-grams and prefixes for severe typo tolerance
- * Title & Tags = 60%, N-grams = 20%, Username = 15%, Location = 5%
+ * OPTIMIZED: Prioritizes exact matches in title/tags, reduces fuzzy matching weight
+ * Title & Tags = 60%, Prefixes = 8%, N-grams = 8%, Phonetics = 6%, Username = 13%, Location = 5%
  * @returns {Array} Weighted keys configuration
  */
 export function getServiceSearchKeys() {
   return [
     { name: "searchData.title", weight: 0.25 },      // 25% - Service title (PRIMARY)
     { name: "searchData.tags", weight: 0.25 },       // 25% - Service categories (PRIMARY)
-    { name: "searchData.ngrams", weight: 0.12 },     // 12% - Character-level matching (TYPOS)
-    { name: "searchData.prefixes", weight: 0.10 },   // 10% - Prefix matching (PARTIAL)
-    { name: "searchData.doubleMetaphonePrimary", weight: 0.05 },  // 5% - Phonetic matching (PRIMARY)
-    { name: "searchData.doubleMetaphoneSecondary", weight: 0.05 },  // 5% - Phonetic matching (SECONDARY)
-    { name: "searchData.username", weight: 0.13 },   // 13% - Creator name
+    { name: "searchData.expandedTerms", weight: 0.15 }, // 15% - Synonyms (NEW: Indexed synonyms)
+    { name: "searchData.prefixes", weight: 0.05 },   // 5% - Prefix matching (PARTIAL)
+    { name: "searchData.ngrams", weight: 0.05 },     // 5% - Character-level matching (TYPOS)
+    { name: "searchData.doubleMetaphonePrimary", weight: 0.03 },  // 3% - Phonetic matching (PRIMARY)
+    { name: "searchData.doubleMetaphoneSecondary", weight: 0.03 },  // 3% - Phonetic matching (SECONDARY)
+    { name: "searchData.username", weight: 0.12 },   // 12% - Creator name
     { name: "searchData.city", weight: 0.02 },       // 2% - Location (minimal)
     { name: "searchData.area", weight: 0.015 },      // 1.5% - Location (minimal)
     { name: "searchData.landmark", weight: 0.01 },   // 1% - Location (minimal)
@@ -1279,8 +1338,8 @@ export function getServiceSearchKeys() {
 
 /**
  * Get default weighted keys for Ads search
- * ULTRA-FUZZY: Includes n-grams and prefixes for severe typo tolerance
- * Title & Tags = 62%, N-grams = 20%, Username = 13%, Location = 5%
+ * OPTIMIZED: Prioritizes exact matches in title/tags, reduces fuzzy matching weight
+ * Title & Tags = 62%, Prefixes = 8%, N-grams = 8%, Phonetics = 6%, Username = 11%, Location = 5%
  * NO DESCRIPTION SEARCH - Focus on title, tags, username only
  * @returns {Array} Weighted keys configuration
  */
@@ -1288,11 +1347,12 @@ export function getAdSearchKeys() {
   return [
     { name: "searchData.title", weight: 0.26 },      // 26% - Ad title (PRIMARY)
     { name: "searchData.tags", weight: 0.26 },       // 26% - Ad categories (PRIMARY)
-    { name: "searchData.ngrams", weight: 0.12 },     // 12% - Character-level matching (TYPOS)
-    { name: "searchData.prefixes", weight: 0.10 },   // 10% - Prefix matching (PARTIAL)
-    { name: "searchData.doubleMetaphonePrimary", weight: 0.05 },  // 5% - Phonetic matching (PRIMARY)
-    { name: "searchData.doubleMetaphoneSecondary", weight: 0.05 },  // 5% - Phonetic matching (SECONDARY)
-    { name: "searchData.username", weight: 0.11 },   // 11% - Creator name
+    { name: "searchData.expandedTerms", weight: 0.15 }, // 15% - Synonyms (NEW: Indexed synonyms)
+    { name: "searchData.prefixes", weight: 0.05 },   // 5% - Prefix matching (PARTIAL)
+    { name: "searchData.ngrams", weight: 0.05 },     // 5% - Character-level matching (TYPOS)
+    { name: "searchData.doubleMetaphonePrimary", weight: 0.03 },  // 3% - Phonetic matching (PRIMARY)
+    { name: "searchData.doubleMetaphoneSecondary", weight: 0.03 },  // 3% - Phonetic matching (SECONDARY)
+    { name: "searchData.username", weight: 0.10 },   // 10% - Creator name
     { name: "searchData.city", weight: 0.02 },       // 2% - Location (minimal)
     { name: "searchData.area", weight: 0.015 },      // 1.5% - Location (minimal)
     { name: "searchData.landmark", weight: 0.01 },   // 1% - Location (minimal)
@@ -1340,12 +1400,17 @@ export function prepareWorkerForSearch(worker, creatorProfile = {}) {
   const ngramsArray = generateNGrams(searchText, 3);
   const prefixesArray = generatePrefixes(searchText, 2);
 
+  // ENHANCED: Add Index-Time Synonyms Expansion
+  // This allows simple queries like "plumber" to match synonyms without query expansion bloat
+  const expandedTerms = expandQueryWithSynonyms(title + " " + tags.join(" ")).join(" ");
+
   return {
     ...worker,
     searchData: {
       username: normalizeText(username),
       title: normalizeText(title),
       tags: tags.map(t => normalizeText(t)).join(" ") + " " + tags.map(t => normalizeSpaceInsensitive(t)).join(" "),
+      expandedTerms: expandedTerms, // NEW: Index synonyms directly
       city: normalizeText(city),
       area: normalizeText(area),
       landmark: normalizeText(landmark),
@@ -1398,12 +1463,16 @@ export function prepareServiceForSearch(service, creatorProfile = {}) {
   const ngramsArray = generateNGrams(searchText, 3);
   const prefixesArray = generatePrefixes(searchText, 2);
 
+  // ENHANCED: Add Index-Time Synonyms Expansion
+  const expandedTerms = expandQueryWithSynonyms(title + " " + tags.join(" ")).join(" ");
+
   return {
     ...service,
     searchData: {
       username: normalizeText(username),
       title: normalizeText(title),
       tags: tags.map(t => normalizeText(t)).join(" ") + " " + tags.map(t => normalizeSpaceInsensitive(t)).join(" "),
+      expandedTerms: expandedTerms, // NEW: Index synonyms directly
       city: normalizeText(city),
       area: normalizeText(area),
       landmark: normalizeText(landmark),
@@ -1457,12 +1526,16 @@ export function prepareAdForSearch(ad, creatorProfile = {}) {
   const ngramsArray = generateNGrams(searchText, 3);
   const prefixesArray = generatePrefixes(searchText, 2);
 
+  // ENHANCED: Add Index-Time Synonyms Expansion
+  const expandedTerms = expandQueryWithSynonyms(title + " " + tags.join(" ")).join(" ");
+
   return {
     ...ad,
     searchData: {
       username: normalizeText(username),
       title: normalizeText(title),
       tags: tags.map(t => normalizeText(t)).join(" ") + " " + tags.map(t => normalizeSpaceInsensitive(t)).join(" "),
+      expandedTerms: expandedTerms, // NEW: Index synonyms directly
       city: normalizeText(city),
       area: normalizeText(area),
       landmark: normalizeText(landmark),
