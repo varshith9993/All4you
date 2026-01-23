@@ -3,18 +3,18 @@ import { auth, db } from "../firebase";
 import { collection, addDoc, serverTimestamp, doc, getDoc } from "firebase/firestore";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import { FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck, FiUser } from "react-icons/fi";
+import { FiMapPin, FiTag, FiFileText, FiUpload, FiX, FiCheck, FiArrowLeft, FiImage } from "react-icons/fi";
 import LocationPickerModal from "../components/LocationPickerModal";
-import { compressFile, compressProfileImage } from "../utils/compressor";
+import ActionMessageModal from "../components/ActionMessageModal";
+import { compressFile } from "../utils/compressor";
 
-const suggestedTags = ["mechanic", "engineer", "tutor", "electrician", "driver", "teacher", "plumber", "carpenter", "painter", "cleaner", "cook", "gardener"];
+const suggestedTags = ["mechanic", "security", "receptionist", "waiter", "tutor", "electrician", "driver", "teacher", "plumber", "carpenter", "painter", "cleaner", "cook", "gardener", "care taker", "marketing", "technician", "delivery boy", "developer", "labour", "driving tutor", "coding tutor"];
 const LOCATIONIQ_API_KEY = "pk.c46b235dc808aed78cb86bd70c83fab0";
 // const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/auto/upload"; // Deprecated global const
 
 export default function AddWorkers() {
   const [currentUser, setCurrentUser] = useState(null);
-  const [profilePhotoUrl, setProfilePhotoUrl] = useState(null);
-  const [profilePhotoPreview, setProfilePhotoPreview] = useState(null);
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [tags, setTags] = useState([]);
@@ -31,6 +31,7 @@ export default function AddWorkers() {
   const [error, setError] = useState("");
   const [locationLoading, setLocationLoading] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [actionModal, setActionModal] = useState({ isOpen: false, title: "", message: "", type: "success", onOk: null });
 
   const navigate = useNavigate();
 
@@ -45,8 +46,8 @@ export default function AddWorkers() {
     return () => unsubscribe();
   }, [navigate]);
 
-  const uploadFileToCloudinary = async (file, isProfile = false) => {
-    const compressedFile = isProfile ? await compressProfileImage(file) : await compressFile(file);
+  const uploadFileToCloudinary = async (file) => {
+    const compressedFile = await compressFile(file, {}, 'WORKER_POST');
     const formData = new FormData();
     formData.append("file", compressedFile);
     formData.append("upload_preset", "ml_default");
@@ -71,37 +72,16 @@ export default function AddWorkers() {
     return data.secure_url;
   };
 
-  const handleProfilePhotoChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setProfilePhotoPreview(reader.result);
-    };
-    reader.readAsDataURL(file);
-
-    try {
-      setUploading(true);
-      const url = await uploadFileToCloudinary(file, true);
-      setProfilePhotoUrl(url);
-      setError("");
-    } catch (err) {
-      setError("Failed to upload profile photo");
-      console.error(err);
-    } finally {
-      setUploading(false);
-    }
-  };
 
   const handleFilesChange = async (e) => {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
 
-    // Validate file size (Max 2.5MB)
+    // Validate file size (Max 2MB)
     for (const file of files) {
-      if (file.size > 2.5 * 1024 * 1024) {
-        setError(`File "${file.name}" exceeds the 2.5MB limit.`);
+      if (file.size > 2 * 1024 * 1024) {
+        setError(`File "${file.name}" exceeds the 2MB limit.`);
         return;
       }
     }
@@ -206,7 +186,10 @@ export default function AddWorkers() {
       const userProfileSnap = await getDoc(doc(db, "profiles", currentUser.uid));
       const userProfile = userProfileSnap.exists() ? userProfileSnap.data() : {};
 
-      const docRef = await addDoc(collection(db, "workers"), {
+      // Use user's profile image since we removed the custom upload
+      const profilePhotoUrl = userProfile.profileImage || "";
+
+      await addDoc(collection(db, "workers"), {
         title: title.trim(),
         description: description.trim(),
         tags,
@@ -237,14 +220,15 @@ export default function AddWorkers() {
         createdBy: currentUser.uid,
       });
 
-      console.group(`[Action: CREATE WORKER]`);
-      console.log(`%c✔ Firestore Write Successful`, "color: green; font-weight: bold");
-      console.log(`Document ID: ${docRef.id}`);
-      console.log(`- Reads: 1 (Profile Fetch)`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
+      setSubmitting(false);
 
-      navigate("/workers");
+      setActionModal({
+        isOpen: true,
+        title: "Success!",
+        message: "Worker post created successfully.",
+        type: "success",
+        onOk: () => navigate("/workers")
+      });
     } catch (err) {
       console.error("Submission error:", err);
       setError(`Failed to create worker post: ${err.message || err}`);
@@ -256,49 +240,19 @@ export default function AddWorkers() {
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-pink-50">
       <div className="max-w-2xl mx-auto px-3 py-4 sm:px-4 sm:py-6">
         {/* Header */}
-        <div className="mb-6">
+        <header className="flex items-center gap-3 mb-6">
           <button
             onClick={() => navigate(-1)}
-            className="mb-4 text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-2 transition-colors"
+            className="p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+            aria-label="Go Back"
           >
-            ← Back
+            <FiArrowLeft size={24} />
           </button>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Create Worker Post</h1>
-          <p className="text-gray-600">Share your skills or find talented workers</p>
-        </div>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Create Worker Post</h1>
+        </header>
 
         <form onSubmit={onSubmit} className="space-y-6">
-          {/* Profile Photo */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <FiUser className="text-indigo-600" />
-              Profile Photo <span className="text-sm font-normal text-gray-500">(Optional)</span>
-            </h2>
-            <div className="flex items-center gap-4">
-              {profilePhotoPreview && (
-                <img
-                  src={profilePhotoPreview}
-                  alt="Preview"
-                  className="w-20 h-20 rounded-full object-cover border-2 border-gray-200"
-                />
-              )}
-              <label className="flex-1 cursor-pointer">
-                <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-indigo-500 transition-colors text-center">
-                  <FiUpload className="mx-auto text-gray-400 mb-2" size={24} />
-                  <span className="text-sm text-gray-600">
-                    {uploading ? "Uploading..." : "Click to upload photo"}
-                  </span>
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleProfilePhotoChange}
-                  className="hidden"
-                  disabled={uploading}
-                />
-              </label>
-            </div>
-          </div>
+          {/* Profile Photo Section Removed as per request (Uses Main Profile Image) */}
 
           {/* Title & Description */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
@@ -424,7 +378,7 @@ export default function AddWorkers() {
                 ) : (
                   <>
                     <FiMapPin size={14} />
-                    Current Loc
+                    Get Location
                   </>
                 )}
               </button>
@@ -505,7 +459,7 @@ export default function AddWorkers() {
                 <span className="text-sm text-gray-600">
                   {uploading ? "Uploading..." : "Click to upload work samples"}
                 </span>
-                <p className="text-xs text-gray-500 mt-1">Images, PDFs, PPTs, Docs (Max 2.5MB)</p>
+                <p className="text-xs text-gray-500 mt-1">Images, PDFs, PPTs, Docs (Max 2MB)</p>
               </div>
               <input
                 type="file"
@@ -593,6 +547,14 @@ export default function AddWorkers() {
             setError("");
           }}
           onCancel={() => setShowLocationPicker(false)}
+        />
+        <ActionMessageModal
+          isOpen={actionModal.isOpen}
+          onClose={() => setActionModal(prev => ({ ...prev, isOpen: false }))}
+          title={actionModal.title}
+          message={actionModal.message}
+          type={actionModal.type}
+          onOk={actionModal.onOk}
         />
       </div>
     </div>

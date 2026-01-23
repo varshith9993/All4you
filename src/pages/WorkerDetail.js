@@ -24,6 +24,7 @@ import { useProfileCache } from "../contexts/ProfileCacheContext";
 import { usePostDetailCache, useGlobalDataCache } from "../contexts/GlobalDataCacheContext";
 import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiMoreVertical, FiTrash2, FiFileText, FiFile, FiEye, FiDownload, FiAlertCircle, FiExternalLink, FiLoader, FiChevronLeft, FiChevronRight } from "react-icons/fi";
 import MapComponent from "../components/MapComponent";
+import ProfileImageViewer from "../components/ProfileImageViewer";
 import defaultAvatar from "../assets/images/default_profile.svg";
 
 function ManualStars({ value, onChange, size = 46 }) {
@@ -206,13 +207,12 @@ async function getFileSizeFromUrl(url) {
       }
     }
   } catch (error) {
-    console.warn('Could not fetch file size:', error);
   }
   return null;
 }
 
 // Constants for review pagination - AGGRESSIVELY OPTIMIZED
-const REVIEWS_PAGE_SIZE = 7;
+const REVIEWS_PAGE_SIZE = 9;
 
 /**
  * WorkerDetail Page - Optimized with Post Detail Cache
@@ -250,6 +250,7 @@ export default function WorkerDetail() {
   const [replyingTo, setReplyingTo] = useState(null);
   const [replyText, setReplyText] = useState("");
   const [expandedReplies, setExpandedReplies] = useState({});
+  const [showProfileViewer, setShowProfileViewer] = useState(false);
 
   // Pagination state for reviews
   const [hasMoreReviews, setHasMoreReviews] = useState(true);
@@ -259,6 +260,7 @@ export default function WorkerDetail() {
 
   // Cache initialization ref to prevent double loading
   const cacheInitializedRef = useRef(false);
+  const dataFromCache = useRef(false);
 
   // Initialize from cache on mount (instant display)
   useEffect(() => {
@@ -267,7 +269,7 @@ export default function WorkerDetail() {
 
     const cached = getPostDetailCache('worker', id);
     if (cached && cached.data) {
-      console.log('[WorkerDetail] Loading from cache - instant display');
+      dataFromCache.current = true;
       const { workerData, reviewsData, profilesData } = cached.data;
 
       if (workerData) {
@@ -279,10 +281,15 @@ export default function WorkerDetail() {
         setReviews(reviewsData);
         const userRate = reviewsData.find(r => r.userId === currentUserId && typeof r.rating === "number" && r.rating > 0);
         setUserRatingDoc(userRate ?? null);
+        if (reviewsData.length < REVIEWS_PAGE_SIZE) {
+          setHasMoreReviews(false);
+        }
       }
       if (profilesData) {
         setProfiles(profilesData);
       }
+    } else {
+      dataFromCache.current = false;
     }
   }, [id, getPostDetailCache, currentUserId]);
 
@@ -325,18 +332,10 @@ export default function WorkerDetail() {
             rating: newAvg
           });
         } catch (e) {
-          console.warn("Failed to update creator profile rating (likely permission error):", e);
         }
       }
 
-      console.group(`[Action: RECALCULATE RATINGS]`);
-      console.log(`%c✔ Ratings synchronized across database`, "color: blue; font-weight: bold");
-      console.log(`Firestore Operations:`);
-      console.log(`- Reads: ${snap.docs.length || 1} (Fetched ${snap.docs.length} reviews)`);
-      console.log(`- Writes: 2 (1 Worker Doc + 1 Profile Doc)`);
-      console.groupEnd();
     } catch (error) {
-      console.error("Error calculating average rating:", error);
     }
   }, [id, worker]);
 
@@ -356,7 +355,6 @@ export default function WorkerDetail() {
         setCreatorProfile(profiles[creatorId]);
       }
     } catch (error) {
-      console.error("Error fetching creator profile:", error);
     }
   }, [fetchProfiles, getCachedProfile]);
 
@@ -367,7 +365,6 @@ export default function WorkerDetail() {
       const profilesData = await fetchProfiles(userIds);
       setProfiles(prev => ({ ...prev, ...profilesData }));
     } catch (error) {
-      console.error("Error batch fetching reviewer profiles:", error);
     }
   }, [fetchProfiles]);
 
@@ -378,12 +375,17 @@ export default function WorkerDetail() {
     setLoadingMoreReviews(true);
     try {
       let reviewQ;
-      if (lastReviewRef.current) {
+      let cursor = lastReviewRef.current;
+      if (!cursor && allReviewsRef.current.length > 0) {
+        cursor = allReviewsRef.current[allReviewsRef.current.length - 1].createdAt;
+      }
+
+      if (cursor) {
         reviewQ = query(
           collection(db, "workerReviews"),
           where("workerId", "==", id),
           orderBy("createdAt", "desc"),
-          startAfter(lastReviewRef.current),
+          startAfter(cursor),
           limit(REVIEWS_PAGE_SIZE)
         );
       } else {
@@ -428,6 +430,9 @@ export default function WorkerDetail() {
   useEffect(() => {
     if (!id) return;
 
+    // If data loaded from cache, skip network requests to optimize reads
+    if (dataFromCache.current) return;
+
     // OPTIMIZATION: Use one-time fetch instead of continuous listener for worker document
     const fetchWorkerData = async () => {
       try {
@@ -448,10 +453,9 @@ export default function WorkerDetail() {
             workerData,
           }, snap.data().updatedAt?.toMillis?.() || Date.now());
 
-          console.log('[WorkerDetail] Worker data fetched (1 read)');
+
         }
       } catch (error) {
-        console.error('Error fetching worker:', error);
       }
     };
 
@@ -527,7 +531,6 @@ export default function WorkerDetail() {
           // Remove loading state
           setLoadingFiles(prev => ({ ...prev, [url]: false }));
         } catch (error) {
-          console.warn(`Failed to get size for ${url}:`, error);
           setLoadingFiles(prev => ({ ...prev, [url]: false }));
         }
       }
@@ -574,22 +577,11 @@ export default function WorkerDetail() {
       if (userHasFavorited) {
         await deleteDoc(favDoc);
         setUserHasFavorited(false);
-        console.group(`[Action: UNFAVORITE]`);
-        console.log(`%c✔ Removed from Favorites`, "color: orange; font-weight: bold");
-        console.log(`- Reads: 0`);
-        console.log(`- Writes: 1`);
-        console.groupEnd();
       } else {
         await setDoc(favDoc, { workerId: id, userId: currentUserId, createdAt: serverTimestamp() });
         setUserHasFavorited(true);
-        console.group(`[Action: FAVORITE]`);
-        console.log(`%c✔ Added to Favorites`, "color: green; font-weight: bold");
-        console.log(`- Reads: 0`);
-        console.log(`- Writes: 1`);
-        console.groupEnd();
       }
     } catch (error) {
-      console.error("Error toggling favorite:", error);
       setToast("Failed to update favorites");
     }
   };
@@ -629,25 +621,14 @@ export default function WorkerDetail() {
             read: false,
             createdAt: serverTimestamp()
           }).then(() => {
-            console.group(`[Child Action: NOTIFICATION]`);
-            console.log(`%c✔ Notification sent to worker owner`, "color: blue; font-weight: bold");
-            console.log(`- Writes: 1`);
-            console.groupEnd();
-          }).catch(nErr => console.error("Notif error", nErr));
+          }).catch(nErr => { });
         }
 
-        console.group(`[Action: SUBMIT RATING]`);
-        console.log(`%c✔ Rating Published`, "color: green; font-weight: bold");
-        console.log(`Firestore Operations:`);
-        console.log(`- Reads: 0 (Rating calc done in updateWorkerRating)`);
-        console.log(`- Writes: 2 (1 Review Doc + 1 Worker Doc Update)`);
-        console.groupEnd();
 
         setNewRating(0);
         setRateModalOpen(false);
         setToast("Rating submitted!");
       } catch (error) {
-        console.error("Error submitting rating:", error);
         setToast("Failed to submit rating");
       }
     }
@@ -676,23 +657,14 @@ export default function WorkerDetail() {
             read: false,
             createdAt: serverTimestamp()
           }).then(() => {
-            console.group(`[Child Action: NOTIFICATION]`);
-            console.log(`%c✔ Notification sent to worker owner`, "color: blue; font-weight: bold");
-            console.log(`- Writes: 1`);
-            console.groupEnd();
-          }).catch(nErr => console.error("Notif error", nErr));
+          }).catch(nErr => { });
         }
 
-        console.group(`[Action: SUBMIT REVIEW]`);
-        console.log(`%c✔ Review Published`, "color: green; font-weight: bold");
-        console.log(`- Writes: 1`);
-        console.groupEnd();
 
         setNewReviewText("");
         setCommentModalOpen(false);
         setToast("Review submitted!");
       } catch (error) {
-        console.error("Error submitting review:", error);
         setToast("Failed to submit review");
       }
     }
@@ -713,7 +685,6 @@ export default function WorkerDetail() {
       setToast("Review deleted");
       setActiveMenuId(null);
     } catch (error) {
-      console.error("Error deleting review:", error);
       setToast("Failed to delete review");
     }
 
@@ -747,26 +718,15 @@ export default function WorkerDetail() {
             read: false,
             createdAt: serverTimestamp()
           }).then(() => {
-            console.group(`[Child Action: NOTIFICATION]`);
-            console.log(`%c✔ Notification sent to reviewer`, "color: blue; font-weight: bold");
-            console.log(`- Writes: 1`);
-            console.groupEnd();
           });
-        } catch (nErr) { console.error("Notif error", nErr); }
+        } catch (nErr) { }
       }
-
-      console.group(`[Action: SUBMIT REPLY]`);
-      console.log(`%c✔ Reply Published`, "color: green; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
 
       setReplyText("");
       setReplyingTo(null);
       setToast("Reply posted!");
       setTimeout(() => setToast(""), 2000);
     } catch (error) {
-      console.error("Error replying:", error);
       setToast("Failed to post reply");
     }
   };
@@ -788,7 +748,6 @@ export default function WorkerDetail() {
       } catch (error) {
         // Silently handle user cancellation or minor errors
         if (error.name !== 'AbortError' && error.name !== 'NotAllowedError') {
-          console.error("Error sharing:", error);
         }
       }
     } else {
@@ -961,11 +920,20 @@ export default function WorkerDetail() {
           <img
             src={displayProfileImage}
             alt={displayUsername}
-            className="w-28 h-28 rounded-full object-cover border-4 border-white shadow-lg"
+            className="w-28 h-28 rounded-full object-cover border-4 border-white shadow-lg cursor-pointer hover:opacity-90 transition-opacity"
+            onClick={() => setShowProfileViewer(true)}
             onError={(e) => { e.target.src = defaultAvatar; }}
             crossOrigin="anonymous"
           />
         </div>
+
+        {/* Profile Image Viewer Modal */}
+        <ProfileImageViewer
+          show={showProfileViewer}
+          onClose={() => setShowProfileViewer(false)}
+          imageUrl={displayProfileImage}
+          username={displayUsername}
+        />
 
         {/* 2. Title */}
         <div className="text-center mb-4">

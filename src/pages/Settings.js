@@ -44,11 +44,8 @@ export default function Settings() {
       if (userProfile && userProfile.username) {
         setUserName(userProfile.username);
 
-        console.group(`[Data Fetch: SETTINGS PROFILE]`);
-        console.log(`%c✔ Profile Loaded from Cache`, "color: blue; font-weight: bold");
-        console.log(`- Reads: 0 (Served from GlobalDataCache)`);
-        console.log(`- Writes: 0`);
-        console.groupEnd();
+
+
       } else {
         // Fallback to auth display name or email part
         setUserName(user.displayName || user.email?.split('@')[0] || "Anonymous");
@@ -61,7 +58,7 @@ export default function Settings() {
       await userStatusManager.signOut();
       navigate("/login");
     } catch (error) {
-      console.error("Error signing out:", error);
+
       alert("Failed to log out. Please try again.");
     }
   };
@@ -86,11 +83,9 @@ export default function Settings() {
         status: "pending"
       });
 
-      console.group(`[Action: SUBMIT FEEDBACK]`);
-      console.log(`%c✔ Feedback recorded`, "color: green; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
+
+
+
 
       setSubmitSuccess(true);
       setFeedbackText("");
@@ -102,7 +97,6 @@ export default function Settings() {
         setFeedbackType("feedback");
       }, 2000);
     } catch (error) {
-      console.error("Error submitting feedback:", error);
       alert("Failed to submit feedback. Please try again.");
     } finally {
       setSubmitting(false);
@@ -128,7 +122,6 @@ export default function Settings() {
     } catch (error) {
       // User cancelled share or error occurred
       if (error.name !== 'AbortError') {
-        console.error('Error sharing:', error);
         setShowReferModal(true); // Show modal as fallback
       }
     }
@@ -141,7 +134,6 @@ export default function Settings() {
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
     } catch (error) {
-      console.error('Failed to copy:', error);
       alert('Failed to copy link. Please try again.');
     }
   };

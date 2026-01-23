@@ -5,9 +5,11 @@ import imageCompression from 'browser-image-compression';
  * Skips SVG files as they shouldn't be rasterized/compressed this way.
  * 
  * @param {File} file - The file to compress
+ * @param {Object} customOptions - Overrides for compression
+ * @param {string} typeLabel - Label for logging (e.g., 'POST', 'CHAT')
  * @returns {Promise<File>} - The compressed file or original if compression skipped/failed
  */
-export async function compressImage(file, customOptions = {}) {
+export async function compressImage(file, customOptions = {}, typeLabel = 'IMAGE') {
     // 1. Skip if not an image
     if (!file.type || !file.type.startsWith('image/')) {
         return file;
@@ -18,16 +20,13 @@ export async function compressImage(file, customOptions = {}) {
         return file;
     }
 
+
     // 3. Compression Options
-    // - maxSizeMB: Target file size in MB. 0.8MB is good for web.
-    // - maxWidthOrHeight: Resize excessively large images (e.g. 4K uploads). 
-    //   1920px is standard HD and good for most UI needs.
-    // - useWebWorker: Run in background thread to avoid freezing UI.
     const defaultOptions = {
-        maxSizeMB: 0.8,
-        maxWidthOrHeight: 1920,
+        maxSizeMB: 0.23, // Targeted < 240KB (Strict optimization)
+        maxWidthOrHeight: 1200,
         useWebWorker: true,
-        fileType: file.type // Preserve original type (e.g. image/png)
+        fileType: file.type
     };
 
     const options = { ...defaultOptions, ...customOptions };
@@ -42,58 +41,49 @@ export async function compressImage(file, customOptions = {}) {
 
         return compressedFile;
     } catch (error) {
-        console.error("Image compression failed, using original file:", error);
         return file;
     }
 }
 
 /**
  * Aggressive compression for Profile Images.
- * Requirement: <99kb and small dimensions (e.g. 500x500).
- * Quality is secondary to size and speed.
+ * Requirement: <50kb and 500x500 dimensions.
  */
 export async function compressProfileImage(file) {
     if (!file || !file.type.startsWith('image/')) return file;
-
-    // SVGs usually don't need compression, but if they are huge we might want to checks. 
-    // For now assuming SVGs are fine or handled by general logic.
     if (file.type === 'image/svg+xml') return file;
 
     const options = {
-        maxSizeMB: 0.09, // ~90KB (User asked for <99kb)
-        maxWidthOrHeight: 500, // Small round icon, 500px is plenty (retina friendly)
+        maxSizeMB: 0.045, // Target ~46KB to stay safely under 50KB
+        maxWidthOrHeight: 500,
         useWebWorker: true,
         fileType: file.type
     };
 
     try {
         const compressed = await imageCompression(file, options);
-        // Safety check: if compression somehow made it larger (rare), return original
         return compressed.size > file.size ? file : compressed;
     } catch (err) {
-        console.warn("Profile compression failed, falling back to standard:", err);
-        return compressImage(file, { maxSizeMB: 0.2 });
+        return compressImage(file, { maxSizeMB: 0.1 }, 'PROFILE-FALLBACK');
     }
 }
 
 /**
  * General purpose compressor entry point.
- * Can be extended for Audio/Video compression if libraries are added.
- * Current implementation focuses on Image compression as it gives highest storage/bandwidth wins.
  * 
  * @param {File} file 
- * @param {Object} customOptions - Optional overrides for compression settings
+ * @param {Object} customOptions 
+ * @param {string} typeLabel
  * @returns {Promise<File>}
  */
-export async function compressFile(file, customOptions = {}) {
+export async function compressFile(file, customOptions = {}, typeLabel = 'GENERAL') {
     if (!file) return null;
 
     if (file.type.startsWith('image/')) {
-        return await compressImage(file, customOptions);
+        return await compressImage(file, customOptions, typeLabel);
     }
 
-    // Audio/PDF compression client-side is complex and requires heavy WASM libraries (ffmpeg.wasm).
-    // For now, we return these files as-is to ensure functionality.
-    // If we need to "compress" them, we might just enforce strict size limits in validation.
+    // Audio/PDF: Currently returned as-is. 
+    // Client-side compression for these is extremely resource intensive (ffmpeg.wasm).
     return file;
 }

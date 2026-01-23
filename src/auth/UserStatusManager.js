@@ -72,13 +72,7 @@ class UserStatusManager {
 
       this.statusCache = { online: true, lastUpdate: now };
 
-      console.group(`[Status: ONLINE]`);
-      console.log(`%c✔ User set ONLINE`, "color: green; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
     } catch (error) {
-      if (error.code !== 'permission-denied') console.error('Error setting user online:', error);
     }
   }
 
@@ -94,13 +88,7 @@ class UserStatusManager {
 
       this.statusCache = { online: false, lastUpdate: Date.now() };
 
-      console.group(`[Status: OFFLINE]`);
-      console.log(`%c✔ User set OFFLINE`, "color: gray; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
     } catch (error) {
-      if (error.code !== 'permission-denied') console.error('Error setting user offline:', error);
     }
   }
 

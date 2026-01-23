@@ -5,12 +5,13 @@ import { db } from "../firebase";
 import axios from "axios";
 import { FiArrowLeft, FiX, FiMapPin, FiUploadCloud, FiRotateCcw } from "react-icons/fi";
 import LocationPickerModal from "../components/LocationPickerModal";
+import ActionMessageModal from "../components/ActionMessageModal";
 import { compressFile } from "../utils/compressor";
 
 const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
 const CLOUDINARY_UPLOAD_PRESET = "ml_default";
 const LOCATIONIQ_API_KEY = "pk.a9310b368752337ce215643e50ac0172";
-const suggestedTags = ["discount", "offer", "sale", "new", "limited", "popular"];
+const suggestedTags = ["furniture", "mobile", "bike", "freelancing", "petrol pump", "farm house", "land", "car", "fridge", "T.V", "watch", "house", "apppartment", "gold shop", "loan", "restraunt", "hotel", "boutique", "cloth shop", "footwear shop", "A.C", "laptop", "iphone"];
 const MAX_PHOTOS = 4;
 
 export default function EditAd() {
@@ -46,6 +47,7 @@ export default function EditAd() {
   const [resetConfirm, setResetConfirm] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [actionModal, setActionModal] = useState({ isOpen: false, title: "", message: "", type: "success", onOk: null });
 
   // Fetch ad data on mount
   useEffect(() => {
@@ -89,7 +91,6 @@ export default function EditAd() {
           navigate(-1);
         }
       } catch (err) {
-        console.error("Error fetching ad:", err);
         alert("Failed to load ad");
         navigate(-1);
       }
@@ -104,6 +105,8 @@ export default function EditAd() {
       alert(`You can upload maximum ${MAX_PHOTOS} photos.`);
       return;
     }
+
+    // Removed file size validation as per request (Compressor handles optimization)
 
     setNewPhotoFiles([...newPhotoFiles, ...files]);
     const newPreviews = files.map((file) => URL.createObjectURL(file));
@@ -122,7 +125,8 @@ export default function EditAd() {
   };
 
   const uploadFileToCloudinary = async (file) => {
-    const compressedFile = await compressFile(file);
+    // Ads need better quality: <300KB max, 1600px
+    const compressedFile = await compressFile(file, { maxSizeMB: 0.29, maxWidthOrHeight: 1600 }, 'EDIT_AD');
     const formData = new FormData();
     formData.append("file", compressedFile);
     formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
@@ -264,17 +268,18 @@ export default function EditAd() {
         updatedAt: serverTimestamp(),
       });
 
-      console.group(`[Action: UPDATE AD]`);
-      console.log(`%c✔ Firestore Write Successful`, "color: green; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
-
       setNewPhotoFiles([]);
       setPhotos(finalPhotos);
       setPhotoPreviews(finalPhotos);
       setSaveConfirm(false);
-      navigate(-1);
+
+      setActionModal({
+        isOpen: true,
+        title: "Success!",
+        message: "Your changes have been updated successfully.",
+        type: "success",
+        onOk: () => navigate(-1)
+      });
     } catch (err) {
       setError(`Failed to save changes. Please try again. ${err.message ? `(${err.message})` : ""}`);
       setSaveConfirm(false);
@@ -293,17 +298,18 @@ export default function EditAd() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-pink-50">
       <div className="max-w-2xl mx-auto px-4 py-6 pb-24">
-        {/* Header with Back Button */}
-        <div className="mb-6">
+        {/* Header with Authentic Back Button */}
+        <header className="flex items-center gap-3 mb-6">
           <button
             onClick={() => navigate(-1)}
-            className="mb-4 text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-2 transition-colors"
+            className="p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+            aria-label="Go Back"
           >
-            <FiArrowLeft size={20} /> Back
+            <FiArrowLeft size={24} />
           </button>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Edit Ad</h1>
-          <p className="text-gray-600">Update your advertisement details</p>
-        </div>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Edit Ad</h1>
+          {/* <p className="text-gray-600">Update your advertisement details</p> removed to align with others */}
+        </header>
 
         <div className="space-y-6">
           {/* Photos */}
@@ -416,22 +422,37 @@ export default function EditAd() {
 
           {/* Location */}
           <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-            <div className="flex justify-between items-center mb-3">
-              <label className="text-sm font-bold text-gray-700 flex items-center gap-1">
-                <FiMapPin /> Location <span className="text-red-500">*</span>
-              </label>
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowLocationPicker(true)}
-                  className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1"
-                >
-                  <FiMapPin size={12} /> Pin on Map
-                </button>
-                <button type="button" className="text-xs font-bold text-indigo-600 hover:underline" onClick={autofillLocation} disabled={locationLoading}>
-                  {locationLoading ? "Getting..." : "Get Current Location"}
-                </button>
-              </div>
+            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <FiMapPin className="text-indigo-600" />
+              Location <span className="text-red-500">*</span>
+            </h2>
+            <div className="flex flex-row gap-2 mb-4">
+              <button
+                type="button"
+                onClick={autofillLocation}
+                disabled={locationLoading}
+                className="flex-1 px-3 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium text-xs sm:text-sm disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+              >
+                {locationLoading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
+                    Locating...
+                  </>
+                ) : (
+                  <>
+                    <FiMapPin size={14} />
+                    Get Location
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowLocationPicker(true)}
+                className="flex-1 px-3 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium text-xs sm:text-sm flex items-center justify-center gap-2"
+              >
+                <FiMapPin size={14} />
+                Pin on Map
+              </button>
             </div>
             <div className="space-y-3">
               <input type="text" value={locationArea} onChange={e => setLocationArea(e.target.value)} placeholder="Area" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" required />
@@ -537,6 +558,15 @@ export default function EditAd() {
           setError("");
         }}
         onCancel={() => setShowLocationPicker(false)}
+      />
+
+      <ActionMessageModal
+        isOpen={actionModal.isOpen}
+        onClose={() => setActionModal(prev => ({ ...prev, isOpen: false }))}
+        title={actionModal.title}
+        message={actionModal.message}
+        type={actionModal.type}
+        onOk={actionModal.onOk}
       />
     </div>
   );

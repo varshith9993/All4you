@@ -16,6 +16,7 @@ import {
   FiChevronLeft,
   FiChevronRight
 } from "react-icons/fi";
+import { formatExpiry } from "../utils/expiryUtils";
 import defaultAvatar from "../assets/images/default_profile.svg";
 
 // Helper functions
@@ -325,6 +326,17 @@ export default function Favorites() {
     const checked = selected.includes(key);
 
     const { title, location = {}, tags = [], latitude, longitude, createdBy, profilePhotoUrl, type, serviceType, expiry } = post;
+
+    // Real-time expiry state
+    const [expiryInfo, setExpiryInfo] = useState(() => formatExpiry(expiry));
+
+    useEffect(() => {
+      if (!expiry) return;
+      const timer = setInterval(() => {
+        setExpiryInfo(formatExpiry(expiry));
+      }, 60000);
+      return () => clearInterval(timer);
+    }, [expiry]);
     const creatorProfile = userProfiles[createdBy] || {};
     const displayUsername = creatorProfile.username || "Unknown User";
     const displayProfileImage = profilePhotoUrl || creatorProfile.photoURL || creatorProfile.profileImage || defaultAvatar;
@@ -379,45 +391,7 @@ export default function Favorites() {
 
     const untilText = getUntilText();
 
-    // Format expiry text based on post type
-    let expiryText = "";
-    let expiryColor = "text-green-600";
-
-    if (expiry) {
-      if (isUntilIChange()) {
-        // For "Until I change" posts
-        expiryText = "Expiry: NA";
-        expiryColor = "text-red-600";
-      } else {
-        // For normal posts with expiry date
-        try {
-          const expiryDate = expiry.toDate ? expiry.toDate() : new Date(expiry);
-          const now = new Date();
-          const diffMs = expiryDate - now;
-          const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-          const diffDays = Math.floor(diffHours / 24);
-
-          if (diffMs < 0) {
-            expiryText = "Expired";
-            expiryColor = "text-red-600";
-          } else if (diffHours < 24) {
-            expiryText = `Expires in ${diffHours}h`;
-            expiryColor = "text-orange-600";
-          } else if (diffDays < 7) {
-            expiryText = `Expires in ${diffDays}d`;
-            expiryColor = "text-orange-600";
-          } else {
-            const day = String(expiryDate.getDate()).padStart(2, '0');
-            const month = String(expiryDate.getMonth() + 1).padStart(2, '0');
-            const yearShort = expiryDate.getFullYear();
-            expiryText = `Expires: ${day}/${month}/${yearShort}`;
-            expiryColor = "text-blue-600";
-          }
-        } catch (error) {
-          expiryText = "";
-        }
-      }
-    }
+    const { text: expiryText, color: expiryColor, isExpiringNow } = expiryInfo;
 
     const isOnline = isUserOnline(createdBy, currentUserId, displayOnline, displayLastSeen);
     const statusText = isOnline ? "Online" : formatLastSeen(displayLastSeen);
@@ -495,7 +469,7 @@ export default function Favorites() {
               )}
               {/* Expiry text on the right */}
               {expiryText && (
-                <span className={`${expiryColor} whitespace-nowrap font-medium`}>
+                <span className={`${expiryColor} whitespace-nowrap font-medium ${isExpiringNow ? 'animate-pulse bg-red-100 px-1 rounded' : ''}`}>
                   {expiryText}
                 </span>
               )}

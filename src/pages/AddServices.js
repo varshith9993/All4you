@@ -4,11 +4,12 @@ import { onAuthStateChanged } from "firebase/auth";
 import { collection, addDoc, serverTimestamp, getDoc, doc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import { FiClock, FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck } from "react-icons/fi";
+import { FiClock, FiMapPin, FiTag, FiFileText, FiUpload, FiX, FiCheck, FiArrowLeft } from "react-icons/fi";
 import LocationPickerModal from "../components/LocationPickerModal";
-import { compressFile, compressProfileImage } from "../utils/compressor";
+import ActionMessageModal from "../components/ActionMessageModal";
+import { compressFile } from "../utils/compressor";
 
-const suggestedTags = ["note-taking", "delivery", "electrician", "repairs", "consulting", "cleaning", "plumbing", "tutoring", "moving", "gardening", "coding", "design", "writing"];
+const suggestedTags = ["delivery", "bike rental", "car rental", "bengaluru to hyderabad", "mumbai to bengaluru", "rental", "tutor", "driver", "lend money", "borrow money", "furniture rental", "shelter", "hotel", "group buying", "discount sharing", "personal delivery", "personal pickup", "code fixer", "repairs", "laptop renting"];
 const LOCATIONIQ_API_KEY = "pk.f85d97d836243abb9099ada5ebe13c73";
 // const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/auto/upload"; // Deprecated global const
 
@@ -24,9 +25,15 @@ export default function AddServices() {
   const [expiryMode, setExpiryMode] = useState("preset");
   const [expiryPreset, setExpiryPreset] = useState("");
   const [expiryCustom, setExpiryCustom] = useState("");
+
+  // Helper to get local ISO string for datetime-local input
+  const getLocalISOString = (date) => {
+    const offset = date.getTimezoneOffset();
+    const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+    return localDate.toISOString().slice(0, 16);
+  };
   const [uploadedFiles, setUploadedFiles] = useState([]);
-  const [profilePhotoUrl, setProfilePhotoUrl] = useState(null);
-  const [profilePhotoPreview, setProfilePhotoPreview] = useState(null);
+
   const [serviceType, setServiceType] = useState("provide");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -37,6 +44,7 @@ export default function AddServices() {
   const [locationLoading, setLocationLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [actionModal, setActionModal] = useState({ isOpen: false, title: "", message: "", type: "success", onOk: null });
 
   const navigate = useNavigate();
 
@@ -49,8 +57,8 @@ export default function AddServices() {
     return () => unsubscribe();
   }, []);
 
-  const uploadFileToCloudinary = async (file, isProfile = false) => {
-    const compressedFile = isProfile ? await compressProfileImage(file) : await compressFile(file);
+  const uploadFileToCloudinary = async (file) => {
+    const compressedFile = await compressFile(file, {}, 'SERVICE_POST');
     const formData = new FormData();
     formData.append("file", compressedFile);
     formData.append("upload_preset", "ml_default");
@@ -67,7 +75,6 @@ export default function AddServices() {
 
     if (!response.ok) {
       const errorData = await response.json();
-      console.error("Cloudinary upload error:", errorData);
       throw new Error(`Failed to upload file: ${errorData.error?.message || 'Unknown error'}`);
     }
 
@@ -137,10 +144,10 @@ export default function AddServices() {
 
     if (selectedFiles.length === 0) return;
 
-    // Validate file size (Max 2.5MB)
+    // Validate file size (Max 2MB)
     for (const file of selectedFiles) {
-      if (file.size > 2.5 * 1024 * 1024) {
-        setError(`File "${file.name}" exceeds the 2.5MB limit.`);
+      if (file.size > 2 * 1024 * 1024) {
+        setError(`File "${file.name}" exceeds the 2MB limit.`);
         return;
       }
     }
@@ -159,7 +166,6 @@ export default function AddServices() {
       e.target.value = ""; // Reset input
     } catch (err) {
       setError("Failed to upload files. Please try again.");
-      console.error(err);
     } finally {
       setUploading(false);
     }
@@ -169,28 +175,7 @@ export default function AddServices() {
     setUploadedFiles(uploadedFiles.filter((_, i) => i !== index));
   };
 
-  const handleProfilePhotoChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setProfilePhotoPreview(reader.result);
-    };
-    reader.readAsDataURL(file);
-
-    try {
-      setUploading(true);
-      setError("");
-      const url = await uploadFileToCloudinary(file, true);
-      setProfilePhotoUrl(url);
-    } catch (err) {
-      setError("Failed to upload profile photo");
-      console.error(err);
-    } finally {
-      setUploading(false);
-    }
-  };
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -260,8 +245,11 @@ export default function AddServices() {
       const userProfileSnap = await getDoc(doc(db, "profiles", currentUser.uid));
       const userProfile = userProfileSnap.exists() ? userProfileSnap.data() : {};
 
+      // Use user's profile image since we removed the custom upload
+      const profilePhotoUrl = userProfile.profileImage || "";
+
       // Create the service document
-      const docRef = await addDoc(collection(db, "services"), {
+      await addDoc(collection(db, "services"), {
         title: title.trim(),
         description: description.trim(),
         tags,
@@ -295,23 +283,21 @@ export default function AddServices() {
         createdBy: currentUser.uid,
       });
 
-      console.group(`[Action: CREATE SERVICE]`);
-      console.log(`%c✔ Firestore Write Successful`, "color: green; font-weight: bold");
-      console.log(`Document ID: ${docRef.id}`);
-      console.log(`- Reads: 1 (Profile Fetch for Denormalization)`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
+
 
       // Show success message immediately
       setSuccess("You've successfully created the post!");
+
+      setActionModal({
+        isOpen: true,
+        title: "Success!",
+        message: "Service post created successfully.",
+        type: "success",
+        onOk: () => navigate("/services")
+      });
       setSubmitting(false);
 
-      // Navigate after a short delay
-      setTimeout(() => {
-        navigate("/services");
-      }, 1500);
     } catch (err) {
-      console.error("Submission error:", err);
       setError(`Failed to create service: ${err.message || err}`);
       setSubmitting(false);
     }
@@ -321,16 +307,16 @@ export default function AddServices() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <div className="max-w-2xl mx-auto px-3 py-4 sm:px-4 sm:py-6">
         {/* Header */}
-        <div className="mb-6">
+        <header className="flex items-center gap-3 mb-6">
           <button
             onClick={() => navigate(-1)}
-            className="mb-4 text-blue-600 hover:text-blue-700 font-medium flex items-center gap-2 transition-colors"
+            className="p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+            aria-label="Go Back"
           >
-            ← Back
+            <FiArrowLeft size={24} />
           </button>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Create Service Post</h1>
-          <p className="text-gray-600">Share your service or request help from the community</p>
-        </div>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Create Service Post</h1>
+        </header>
 
         <form onSubmit={onSubmit} className="space-y-6">
           {/* Service Type Selection */}
@@ -371,33 +357,7 @@ export default function AddServices() {
             </div>
           </div>
 
-          {/* Profile Photo */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <FiImage className="text-blue-600" />
-              Profile Photo <span className="text-sm font-normal text-gray-500">(Optional)</span>
-            </h2>
-            <div className="flex items-center gap-4">
-              {profilePhotoPreview && (
-                <img src={profilePhotoPreview} alt="Preview" className="w-20 h-20 rounded-full object-cover border-2 border-gray-200" />
-              )}
-              <label className="flex-1 cursor-pointer">
-                <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-blue-500 transition-colors text-center">
-                  <FiUpload className="mx-auto text-gray-400 mb-2" size={24} />
-                  <span className="text-sm text-gray-600">
-                    {uploading ? "Uploading..." : "Click to upload photo"}
-                  </span>
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleProfilePhotoChange}
-                  className="hidden"
-                  disabled={uploading}
-                />
-              </label>
-            </div>
-          </div>
+          {/* Profile Photo Section Removed (Uses Main User Profile) */}
 
           {/* Title & Description */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
@@ -514,7 +474,7 @@ export default function AddServices() {
                 ) : (
                   <>
                     <FiMapPin size={14} />
-                    Current Loc
+                    Get Location
                   </>
                 )}
               </button>
@@ -602,7 +562,14 @@ export default function AddServices() {
               </button>
               <button
                 type="button"
-                onClick={() => setExpiryMode("custom")}
+                onClick={() => {
+                  setExpiryMode("custom");
+                  if (!expiryCustom) {
+                    const defaultDate = new Date();
+                    defaultDate.setDate(defaultDate.getDate() + 7); // Default to 7 days from now
+                    setExpiryCustom(getLocalISOString(defaultDate));
+                  }
+                }}
                 className={`p-4 rounded-xl border-2 transition-all ${expiryMode === "custom"
                   ? "border-blue-500 bg-blue-50 text-blue-700"
                   : "border-gray-200 hover:border-gray-300"
@@ -631,6 +598,7 @@ export default function AddServices() {
               <input
                 type="datetime-local"
                 value={expiryCustom}
+                min={getLocalISOString(new Date())}
                 onChange={e => { setExpiryCustom(e.target.value); setExpiryPreset(""); }}
                 className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
@@ -649,7 +617,7 @@ export default function AddServices() {
                 <span className="text-sm text-gray-600">
                   {uploading ? "Uploading..." : "Click to upload images or files"}
                 </span>
-                <p className="text-xs text-gray-500 mt-1">Images, PDFs, PPTs, Docs (Max 2.5MB)</p>
+                <p className="text-xs text-gray-500 mt-1">Images, PDFs, PPTs, Docs (Max 2MB)</p>
               </div>
               <input
                 type="file"
@@ -749,6 +717,14 @@ export default function AddServices() {
             setError("");
           }}
           onCancel={() => setShowLocationPicker(false)}
+        />
+        <ActionMessageModal
+          isOpen={actionModal.isOpen}
+          onClose={() => setActionModal(prev => ({ ...prev, isOpen: false }))}
+          title={actionModal.title}
+          message={actionModal.message}
+          type={actionModal.type}
+          onOk={actionModal.onOk}
         />
       </div>
     </div>

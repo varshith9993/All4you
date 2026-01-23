@@ -129,11 +129,6 @@ export default function AddNotes() {
 
             if (editingNote?.id) {
                 await updateDoc(doc(db, "notes", editingNote.id), noteData);
-                console.group(`[Action: UPDATE NOTE]`);
-                console.log(`%c✔ Note updated successfully`, "color: green; font-weight: bold");
-                console.log(`- Reads: 0`);
-                console.log(`- Writes: 1`);
-                console.groupEnd();
             } else {
                 // Check limit before creating new note
                 if (notes.length >= 5) {
@@ -144,17 +139,11 @@ export default function AddNotes() {
 
                 noteData.createdAt = serverTimestamp();
                 await addDoc(collection(db, "notes"), noteData);
-                console.group(`[Action: CREATE NOTE]`);
-                console.log(`%c✔ Note created successfully`, "color: green; font-weight: bold");
-                console.log(`- Reads: 0`);
-                console.log(`- Writes: 1`);
-                console.groupEnd();
             }
 
             setHasUnsavedChanges(false);
             navigate(-1);
         } catch (error) {
-            console.error("Error saving note:", error);
             alert("Failed to save note");
         } finally {
             setSaving(false);

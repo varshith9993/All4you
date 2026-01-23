@@ -13,6 +13,7 @@ import {
   getAdSearchKeys,
   prepareAdForSearch,
 } from "../utils/searchEngine";
+import { useSearchCache } from "../contexts/GlobalDataCacheContext";
 
 // --- Helper Functions ---
 
@@ -532,15 +533,15 @@ export default function Ads() {
     userProfile: profile
   } = usePaginatedAds();
 
-  const [searchValue, setSearchValue] = useState("");
-  // OPTIMIZATION: Debounce search value to reduce computation and potential Firestore calls
-  // The search only executes after the user stops typing for 300ms (optimized from 1200ms)
+  const { searchStates, updateSearchState } = useSearchCache();
+
+  const [searchValue, setSearchValue] = useState(searchStates.ads.query);
   const debouncedSearchValue = useDebounce(searchValue, 1000);
 
   const [userProfiles, setUserProfiles] = useState({});
   const [showFilters, setShowFilters] = useState(false);
   const [showSort, setShowSort] = useState(false);
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState(searchStates.ads.filters || {
     distance: { min: 0, max: null },
     distanceUnit: 'km',
     rating: { min: 0, max: 5 },
@@ -552,25 +553,35 @@ export default function Ads() {
     tags: ""
   });
 
+  /* OPTIMIZATION: Debounce filters to reduce computation and potential Firestore calls
+   * Filter updates only apply after the user stops interacting with filter inputs for 500ms (optimized from 1200ms)
+   */
+  const debouncedFilters = useDebounce(filters, 500);
+
+  const [sortBy, setSortBy] = useState("distance-low-high");
+
+  // Sync search state to global cache
+  useEffect(() => {
+    updateSearchState('ads', {
+      query: searchValue,
+      filters: filters,
+      sortBy: sortBy
+    });
+  }, [searchValue, filters, sortBy, updateSearchState]);
+
   // Pagination display state (for client-side pagination of already-loaded data)
-  // Normal browsing: 15 items per page
-  // Search results: 10 items per page
-  const [displayCount, setDisplayCount] = useState(15);
+  // Normal browsing: 9 items per page
+  // Search results: 9 items per page
+  const [displayCount, setDisplayCount] = useState(9);
   const listContainerRef = useRef(null);
 
   // Determine page size based on search state
-  const currentPageSize = debouncedSearchValue.trim() ? 10 : 15;
+  const currentPageSize = 9;
 
   // Reset displayCount when search query changes
   useEffect(() => {
     setDisplayCount(currentPageSize);
   }, [debouncedSearchValue, currentPageSize]);
-
-  // OPTIMIZATION: Debounce filters to reduce computation and potential Firestore calls
-  // Filter updates only apply after the user stops interacting with filter inputs for 500ms (optimized from 1200ms)
-  const debouncedFilters = useDebounce(filters, 500);
-
-  const [sortBy, setSortBy] = useState("distance-low-high");
   const navigate = useNavigate();
 
   // OPTIMIZATION: Use ProfileCache for batch profile fetching

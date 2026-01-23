@@ -108,12 +108,6 @@ export function ProfileCacheProvider({ children }) {
 
           const snapshot = await getDocs(q);
 
-          console.group(`[Data Sync: PROFILES BATCH]`);
-          console.log(`%c✔ Profiles fetched in batch`, "color: gray; font-weight: bold");
-          console.log(`- Reads: ${snapshot.docs.length || 1}`);
-          console.log(`- Writes: 0`);
-          console.groupEnd();
-
           snapshot.docs.forEach(docSnap => {
             fetchedProfiles[docSnap.id] = docSnap.data();
           });
@@ -125,7 +119,6 @@ export function ProfileCacheProvider({ children }) {
             }
           });
         } catch (error) {
-          console.error('Error batch fetching profiles:', error);
         }
       }));
 
@@ -236,17 +229,14 @@ export function ProfileCacheProvider({ children }) {
 
           const snapshot = await getDocs(q);
 
-          console.group(`[Data Sync: PROFILES BATCH]`);
-          console.log(`%c✔ Profiles fetched in batch`, "color: gray; font-weight: bold");
-          console.log(`- Reads: ${snapshot.docs.length || 1}`);
-          console.log(`- Writes: 0`);
-          console.groupEnd();
+
+
+
 
           snapshot.docs.forEach(docSnap => {
             result[docSnap.id] = docSnap.data();
           });
         } catch (error) {
-          console.error('Error batch fetching profiles:', error);
         }
       }));
 
@@ -276,21 +266,13 @@ export function ProfileCacheProvider({ children }) {
       if (snap.exists()) {
         const data = snap.data();
 
-        console.group(`[Data Sync: PROFILE UPDATE]`);
-        console.log(`%c✔ Profile updated via listener`, "color: blue; font-weight: bold");
-        console.log(`- Reads: 1 (Active listener)`);
-        console.log(`- Writes: 0`);
-        console.groupEnd();
-
-        updateCache(userId, data);
         if (callback) callback(data);
       }
     }, (error) => {
-      console.error(`Error in profile subscription for ${userId}:`, error);
     });
 
     return unsub;
-  }, [updateCache]);
+  }, []);
 
   /**
    * Subscribe to online status updates for multiple profiles
@@ -327,12 +309,6 @@ export function ProfileCacheProvider({ children }) {
           // (Actually Firestore snapshots fire on listener start)
           // To satisfy "zero reads on revisit", we just keep the listener alive.
 
-          console.group(`[Status: ONLINE SYNC - ${userId}]`);
-          console.log(`%c✔ Online status synchronized`, "color: blue; font-weight: bold");
-          console.log(`- Reads: 1 (Active listener initialization)`);
-          console.log(`- Writes: 0`);
-          console.groupEnd();
-
           updateCache(userId, data);
           if (callback) {
             const update = {};
@@ -340,7 +316,7 @@ export function ProfileCacheProvider({ children }) {
             callback(update);
           }
         }
-      }, (err) => console.error(`Online status error for ${userId}:`, err));
+      }, (err) => { });
 
       onlineStatusListeners.current[userId] = unsub;
     });

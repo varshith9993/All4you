@@ -59,7 +59,7 @@ function formatDateTime(dateObj) {
 }
 
 // Constants for review pagination - AGGRESSIVELY OPTIMIZED
-const REVIEWS_PAGE_SIZE = 7;
+const REVIEWS_PAGE_SIZE = 9;
 
 /**
  * AdDetail Page - Optimized with Post Detail Cache
@@ -102,6 +102,7 @@ export default function AdDetail() {
 
   // Cache initialization ref to prevent double loading
   const cacheInitializedRef = useRef(false);
+  const dataFromCache = useRef(false);
 
   // Initialize from cache on mount (instant display)
   useEffect(() => {
@@ -110,7 +111,7 @@ export default function AdDetail() {
 
     const cached = getPostDetailCache('ad', adId);
     if (cached && cached.data) {
-      console.log('[AdDetail] Loading from cache - instant display');
+      dataFromCache.current = true;
       const { adData, reviewsData, profilesData } = cached.data;
 
       if (adData) {
@@ -121,10 +122,15 @@ export default function AdDetail() {
         setReviews(reviewsData);
         const userRate = reviewsData.find(r => r.userId === currentUserId && typeof r.rating === "number" && r.rating > 0);
         setUserRatingDoc(userRate ?? null);
+        if (reviewsData.length < REVIEWS_PAGE_SIZE) {
+          setHasMoreReviews(false);
+        }
       }
       if (profilesData) {
         setProfiles(profilesData);
       }
+    } else {
+      dataFromCache.current = false;
     }
   }, [adId, getPostDetailCache, currentUserId]);
 
@@ -159,7 +165,6 @@ export default function AdDetail() {
         setCreator(profiles[creatorId]);
       }
     } catch (error) {
-      console.error("Error fetching creator profile:", error);
     }
   }, [fetchProfiles, getCachedProfile]);
 
@@ -170,7 +175,6 @@ export default function AdDetail() {
       const profilesData = await fetchProfiles(userIds);
       setProfiles(prev => ({ ...prev, ...profilesData }));
     } catch (error) {
-      console.error("Error batch fetching reviewer profiles:", error);
     }
   }, [fetchProfiles]);
 
@@ -181,12 +185,17 @@ export default function AdDetail() {
     setLoadingMoreReviews(true);
     try {
       let reviewQ;
-      if (lastReviewRef.current) {
+      let cursor = lastReviewRef.current;
+      if (!cursor && allReviewsRef.current.length > 0) {
+        cursor = allReviewsRef.current[allReviewsRef.current.length - 1].createdAt;
+      }
+
+      if (cursor) {
         reviewQ = query(
           collection(db, "adReviews"),
           where("adId", "==", adId),
           orderBy("createdAt", "desc"),
-          startAfter(lastReviewRef.current),
+          startAfter(cursor),
           limit(REVIEWS_PAGE_SIZE)
         );
       } else {
@@ -221,7 +230,6 @@ export default function AdDetail() {
         fetchReviewerProfiles(newUserIds);
       }
     } catch (error) {
-      console.error("Error loading more reviews:", error);
     } finally {
       setLoadingMoreReviews(false);
     }
@@ -249,22 +257,18 @@ export default function AdDetail() {
       try {
         await updateDoc(doc(db, "ads", adId), { rating: newAvg });
 
-        console.group(`[Action: RECALCULATE RATINGS]`);
-        console.log(`%c✔ Ratings synchronized`, "color: blue; font-weight: bold");
-        console.log(`- Reads: ${snap.docs.length || 1} (Fetched reviews)`);
-        console.log(`- Writes: 1 (Updated Ad Doc)`);
-        console.groupEnd();
       } catch (e) {
-        console.warn("Failed to update ad document rating (permission?):", e);
       }
     } catch (error) {
-      console.error("Error calculating average ad rating:", error);
     }
   }, [adId]);
 
   // Fetch ad, reviews, user profiles - OPTIMIZED: Use getDoc instead of onSnapshot
   useEffect(() => {
     if (!adId) return;
+
+    // If data loaded from cache, skip network requests to optimize reads
+    if (dataFromCache.current) return;
 
     // OPTIMIZATION: Use one-time fetch instead of continuous listener for ad document
     const fetchAdData = async () => {
@@ -286,10 +290,8 @@ export default function AdDetail() {
             adData,
           }, snap.data().updatedAt?.toMillis?.() || Date.now());
 
-          console.log('[AdDetail] Ad data fetched (1 read)');
         }
       } catch (error) {
-        console.error('Error fetching ad:', error);
       }
     };
 
@@ -332,11 +334,6 @@ export default function AdDetail() {
         reviewsData: data,
       }, Date.now());
 
-      console.group(`[Data Fetch: AD REVIEWS]`);
-      console.log(`%c✔ Reviews Synchronized`, "color: blue; font-weight: bold");
-      console.log(`- Reads: ${snap.docs.length || 1} (Live Listener Update)`);
-      console.log(`- Writes: 0`);
-      console.groupEnd();
     });
 
     return () => {
@@ -371,22 +368,11 @@ export default function AdDetail() {
       if (userHasFavorited) {
         await deleteDoc(favDoc);
         setUserHasFavorited(false);
-        console.group(`[Action: UNFAVORITE]`);
-        console.log(`%c✔ Ad removed from Favorites`, "color: orange; font-weight: bold");
-        console.log(`- Reads: 0`);
-        console.log(`- Writes: 1`);
-        console.groupEnd();
       } else {
         await setDoc(favDoc, { adId, userId: currentUserId, createdAt: serverTimestamp() });
         setUserHasFavorited(true);
-        console.group(`[Action: FAVORITE]`);
-        console.log(`%c✔ Ad added to Favorites`, "color: green; font-weight: bold");
-        console.log(`- Reads: 0`);
-        console.log(`- Writes: 1`);
-        console.groupEnd();
       }
     } catch (error) {
-      console.error("Error toggling favorite:", error);
       setToast("Failed to update favorites");
     }
   };
@@ -407,10 +393,6 @@ export default function AdDetail() {
         });
         await updateAdRating();
 
-        console.group(`[Action: SUBMIT RATING]`);
-        console.log(`%c✔ Rating Published`, "color: green; font-weight: bold");
-        console.log(`- Writes: 1 (Review Doc)`);
-        console.groupEnd();
 
         // Create notification (fire and forget for better UX)
         if (ad && ad.createdBy && ad.createdBy !== currentUserId) {
@@ -426,18 +408,13 @@ export default function AdDetail() {
             read: false,
             createdAt: serverTimestamp()
           }).then(() => {
-            console.group(`[Child Action: NOTIFICATION]`);
-            console.log(`%c✔ Notification sent to ad owner`, "color: blue; font-weight: bold");
-            console.log(`- Writes: 1`);
-            console.groupEnd();
-          }).catch(nErr => console.error("Notif error", nErr));
+          }).catch(nErr => { });
         }
 
         setNewRating(0);
         setRateModalOpen(false);
         setToast("Rating submitted!");
       } catch (error) {
-        console.error("Error submitting rating:", error);
         setToast("Failed to submit rating");
       }
     }
@@ -462,23 +439,14 @@ export default function AdDetail() {
             read: false,
             createdAt: serverTimestamp()
           }).then(() => {
-            console.group(`[Child Action: NOTIFICATION]`);
-            console.log(`%c✔ Notification sent to ad owner`, "color: blue; font-weight: bold");
-            console.log(`- Writes: 1`);
-            console.groupEnd();
-          }).catch(nErr => console.error("Notif error", nErr));
+          }).catch(nErr => { });
         }
 
-        console.group(`[Action: SUBMIT REVIEW]`);
-        console.log(`%c✔ Review Published`, "color: green; font-weight: bold");
-        console.log(`- Writes: 1`);
-        console.groupEnd();
 
         setNewReviewText("");
         setCommentModalOpen(false);
         setToast("Review submitted!");
       } catch (error) {
-        console.error("Error submitting review:", error);
         setToast("Failed to submit review");
       }
     }
@@ -493,7 +461,6 @@ export default function AdDetail() {
       setToast("Review deleted");
       setActiveMenuId(null);
     } catch (error) {
-      console.error("Error deleting review:", error);
       setToast("Failed to delete");
     }
     setTimeout(() => setToast(""), 1800);
@@ -525,26 +492,17 @@ export default function AdDetail() {
             read: false,
             createdAt: serverTimestamp()
           }).then(() => {
-            console.group(`[Child Action: NOTIFICATION]`);
-            console.log(`%c✔ Notification sent to reviewer`, "color: blue; font-weight: bold");
-            console.log(`- Writes: 1`);
-            console.groupEnd();
           });
-        } catch (nErr) { console.error("Notif error", nErr); }
+        } catch (nErr) { }
       }
 
-      console.group(`[Action: SUBMIT REPLY]`);
-      console.log(`%c✔ Reply Published`, "color: green; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
+
 
       setReplyText("");
       setReplyingTo(null);
       setToast("Reply posted!");
       setTimeout(() => setToast(""), 2000);
     } catch (error) {
-      console.error("Error replying:", error);
       setToast("Failed to post reply");
     }
   };
@@ -565,7 +523,6 @@ export default function AdDetail() {
       } catch (error) {
         // Silently handle user cancellation or minor errors
         if (error.name !== 'AbortError' && error.name !== 'NotAllowedError') {
-          console.error("Error sharing:", error);
         }
       }
     } else {
@@ -582,7 +539,6 @@ export default function AdDetail() {
           document.body.removeChild(textArea);
           setToast("Link copied to clipboard!");
         } catch (e) {
-          console.error("Fallback copy failed:", e);
         }
       }
       setTimeout(() => setToast(""), 2200);
@@ -642,7 +598,6 @@ export default function AdDetail() {
 
       navigate(`/chat/${chatId}`);
     } catch (error) {
-      console.error("Error starting chat:", error);
       setToast("Failed to start chat");
       setTimeout(() => setToast(""), 2000);
     }

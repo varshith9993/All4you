@@ -82,7 +82,6 @@ export default function Signup() {
             setMessage("Google sign-in successful! Please complete your profile.");
           }
         } catch (err) {
-          console.error("Error checking user profile:", err);
         }
       }
     });
@@ -103,7 +102,6 @@ export default function Signup() {
             }
           }
         } catch (error) {
-          console.log("Error reloading user:", error);
         }
       }, 3000);
     }
@@ -136,12 +134,6 @@ export default function Signup() {
   const isUsernameTaken = async (un) => {
     const q = query(collection(db, "profiles"), where("username", "==", un));
     const snap = await getDocs(q);
-
-    console.group(`[Action: USERNAME CHECK]`);
-    console.log(`%c✔ Checked availability for "${un}"`, "color: gray; font-weight: bold");
-    console.log(`- Reads: ${snap.empty ? '0 (Optimized Index)' : '1'}`);
-    console.log(`- Writes: 0`);
-    console.groupEnd();
 
     return !snap.empty;
   };
@@ -187,7 +179,6 @@ export default function Signup() {
               throw new Error("No location details");
             }
           } catch (e) {
-            console.error("OpenCage error:", e);
             setError("Failed to autofill address details. Please enter manually.");
             setMessage("");
           }
@@ -250,7 +241,6 @@ export default function Signup() {
         return;
       }
     } catch (err) {
-      console.log("Email existence check failed:", err);
     }
 
     setMessage("Checking username availability...");
@@ -293,12 +283,6 @@ export default function Signup() {
         uid: user.uid,
         email: cleanEmail
       });
-
-      console.group(`[Action: CREATE PROFILE]`);
-      console.log(`%c✔ User and Profile created`, "color: green; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
 
       // 3. Do NOT sign out. Wait for them to click the link.
       setWaitingForVerification(true);
@@ -345,7 +329,6 @@ export default function Signup() {
         setMessage("Google sign-in successful! Please complete your profile.");
       }
     } catch (err) {
-      console.error("Google Sign In Error:", err);
       // Handle specific error codes
       if (err.code === 'auth/popup-closed-by-user') {
         setError("Sign-in cancelled.");
@@ -435,17 +418,10 @@ export default function Signup() {
         email: googleUser.email
       });
 
-      console.group(`[Action: GOOGLE SIGNUP COMPLETE]`);
-      console.log(`%c✔ Google Profile initialized`, "color: blue; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
-
       // Navigate to workers
       navigate("/workers");
 
     } catch (err) {
-      console.error("Profile creation error:", err);
       setError("Failed to create profile. Please try again.");
     } finally {
       setSubmitting(false);

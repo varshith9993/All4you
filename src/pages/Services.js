@@ -13,6 +13,8 @@ import {
   getServiceSearchKeys,
   prepareServiceForSearch,
 } from "../utils/searchEngine";
+import { useSearchCache } from "../contexts/GlobalDataCacheContext";
+import { formatExpiry } from "../utils/expiryUtils";
 
 // Calculate Haversine distance in km
 function getDistanceKm(lat1, lon1, lat2, lon2) {
@@ -445,6 +447,19 @@ function FilterModal({ isOpen, onClose, filters, setFilters, applyFilters }) {
 function ServiceCard({ service, profile, userProfiles, currentUserId, navigate }) {
   const { title, location = {}, tags = [], latitude, longitude, createdBy, profilePhotoUrl, type, serviceType, expiry, rating = 0 } = service;
 
+  // Real-time expiry state
+  const [expiryInfo, setExpiryInfo] = useState(() => formatExpiry(expiry));
+
+  useEffect(() => {
+    if (!expiry) return;
+
+    const timer = setInterval(() => {
+      setExpiryInfo(formatExpiry(expiry));
+    }, 60000); // Update every minute
+
+    return () => clearInterval(timer);
+  }, [expiry]);
+
   // Get profile data with fallbacks - Now supports Denormalized 'author' object
   const getProfileData = () => {
     // 1. Use Denormalized Data (Best Case - 0 Reads)
@@ -549,60 +564,7 @@ function ServiceCard({ service, profile, userProfiles, currentUserId, navigate }
 
   const untilText = getUntilText();
 
-  // Format expiry text based on post type - OPTIMIZED
-  let expiryText = "";
-  let expiryColor = "text-green-600";
-  let isExpiringSoon = false; // For animation
-
-  if (expiry) {
-    if (isUntilIChange()) {
-      // For "Until I change" posts
-      expiryText = "Expiry: NA";
-      expiryColor = "text-red-600";
-    } else {
-      // For normal posts with expiry date
-      try {
-        const expiryDate = expiry.toDate ? expiry.toDate() : new Date(expiry);
-        const now = new Date();
-        const diffMs = expiryDate - now;
-        const diffMins = Math.floor(diffMs / (1000 * 60));
-        const diffHours = Math.floor(diffMins / 60);
-
-        // Check if same day
-        const isSameDay = expiryDate.getDate() === now.getDate() &&
-          expiryDate.getMonth() === now.getMonth() &&
-          expiryDate.getFullYear() === now.getFullYear();
-
-        if (diffMs < 0) {
-          // Post is expired - will be filtered out
-          expiryText = "Expired";
-          expiryColor = "text-red-600";
-        } else if (diffMins < 5) {
-          // <5 minutes: "Expiring now" with animation
-          expiryText = "Expiring now";
-          expiryColor = "text-red-600";
-          isExpiringSoon = true;
-        } else if (diffHours < 1) {
-          // <1 hour: "Expires in 1hr"
-          expiryText = "Expires in 1hr";
-          expiryColor = "text-red-600";
-        } else if (isSameDay) {
-          // Expires today: "Expires today"
-          expiryText = "Expires today";
-          expiryColor = "text-orange-600";
-        } else {
-          // Other: Show dd/mm/yyyy
-          const day = String(expiryDate.getDate()).padStart(2, '0');
-          const month = String(expiryDate.getMonth() + 1).padStart(2, '0');
-          const year = expiryDate.getFullYear();
-          expiryText = `Expires: ${day}/${month}/${year}`;
-          expiryColor = "text-blue-600";
-        }
-      } catch (error) {
-        expiryText = "";
-      }
-    }
-  }
+  const { text: expiryText, color: expiryColor, isExpiringNow } = expiryInfo;
 
   const effectiveCurrentUserId = currentUserId || "";
   const isOnline = isUserOnline(createdBy, effectiveCurrentUserId, displayOnline, displayLastSeen);
@@ -679,7 +641,7 @@ function ServiceCard({ service, profile, userProfiles, currentUserId, navigate }
             )}
             {/* Expiry text on the right with animation for expiring soon */}
             {expiryText && (
-              <span className={`${expiryColor} whitespace-nowrap font-medium ${isExpiringSoon ? 'animate-pulse' : ''}`}>
+              <span className={`${expiryColor} whitespace-nowrap font-medium ${isExpiringNow ? 'animate-pulse bg-red-100 px-1 rounded' : ''}`}>
                 {expiryText}
               </span>
             )}
@@ -766,17 +728,17 @@ export default function Services() {
     userProfile
   } = usePaginatedServices();
 
-  const [searchValue, setSearchValue] = useState("");
-  // OPTIMIZATION: Debounce search value to reduce computation and potential Firestore calls
-  // The search only executes after the user stops typing for 300ms (optimized from 1200ms)
+  const { searchStates, updateSearchState } = useSearchCache();
+
+  const [searchValue, setSearchValue] = useState(searchStates.services.query);
   const debouncedSearchValue = useDebounce(searchValue, 1000);
 
   const [phase, setPhase] = useState("all");
   const [userProfiles, setUserProfiles] = useState({});
   const [showFilters, setShowFilters] = useState(false);
   const [showSort, setShowSort] = useState(false);
-  const [sortBy, setSortBy] = useState("distance-low-high");
-  const [filters, setFilters] = useState({
+  const [sortBy, setSortBy] = useState(searchStates.services.sortBy);
+  const [filters, setFilters] = useState(searchStates.services.filters || {
     distance: { min: 0, max: null },
     distanceUnit: 'km',
     rating: { min: 0, max: 5 },
@@ -791,14 +753,23 @@ export default function Services() {
     expiryDirection: "above"
   });
 
+  // Sync search state to global cache
+  useEffect(() => {
+    updateSearchState('services', {
+      query: searchValue,
+      filters: filters,
+      sortBy: sortBy
+    });
+  }, [searchValue, filters, sortBy, updateSearchState]);
+
   // Pagination display state (for client-side pagination of already-loaded data)
-  // Normal browsing: 15 items per page
-  // Search results: 10 items per page
-  const [displayCount, setDisplayCount] = useState(15);
+  // Normal browsing: 9 items per page
+  // Search results: 9 items per page
+  const [displayCount, setDisplayCount] = useState(9);
   const listContainerRef = useRef(null);
 
   // Determine page size based on search state
-  const currentPageSize = debouncedSearchValue.trim() ? 10 : 15;
+  const currentPageSize = 9;
 
   // Reset displayCount when search query changes
   useEffect(() => {

@@ -8,18 +8,19 @@ import {
   FiTool,
   FiTag,
   FiList,
-  FiStar,
   FiMapPin,
   FiWifi,
   FiChevronLeft,
   FiChevronRight,
+  FiStar,
   FiTrash2,
   FiEye,
   FiEyeOff,
   FiClock,
   FiEdit,
   FiInfo,
-  FiX,
+  FiX
+
 } from "react-icons/fi";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -39,9 +40,12 @@ import { useLocationWithAddress } from "../hooks/useLocationWithAddress";
 import Layout from "../components/Layout";
 import defaultAvatar from "../assets/images/default_profile.svg";
 import LocationPickerModal from "../components/LocationPickerModal";
+import ImageCropperModal from "../components/ImageCropperModal";
 import { useProfileCache } from "../contexts/ProfileCacheContext";
 import { useGlobalDataCache } from "../contexts/GlobalDataCacheContext";
+import ActionMessageModal from "../components/ActionMessageModal";
 import { compressProfileImage } from "../utils/compressor";
+import { formatExpiry } from "../utils/expiryUtils";
 
 const OPENCAGE_API_KEY = "988148bc222049e2831059ea74476abb";
 const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
@@ -107,7 +111,6 @@ function isUserOnline(userId, currentUserId, online, lastSeen) {
       if (minutesSinceLastSeen > 5) return false;
       if (minutesSinceLastSeen < 2) return true;
     } catch (error) {
-      console.error('Error checking lastSeen:', error);
     }
   }
 
@@ -124,7 +127,7 @@ function isValidCoordinate(value) {
 }
 
 // PostMenu Component - Compact modal style
-function PostMenu({ post, closeMenu, updatePosts, currentTab, setShowConfirm, setConfirmProps, setShowAbout, navigate, user, profile }) {
+function PostMenu({ post, closeMenu, updatePosts, currentTab, setShowConfirm, setConfirmProps, setShowAbout, navigate, user, profile, setActionModal }) {
   const modalRef = useRef(null);
 
   useEffect(() => {
@@ -229,16 +232,9 @@ function PostMenu({ post, closeMenu, updatePosts, currentTab, setShowConfirm, se
         return Promise.resolve();
       });
 
-      const notificationResults = await Promise.all(promises);
-      const writeCount = notificationResults.filter(r => r !== undefined).length;
+      await Promise.all(promises);
 
-      console.group(`[Action: NOTIFY FAVORITORS]`);
-      console.log(`%c✔ Notification Batch Processed`, "color: blue; font-weight: bold");
-      console.log(`- Reads: ${snap.docs.length || 1} (Query favoritors)`);
-      console.log(`- Writes: ${writeCount} (Notification docs added)`);
-      console.groupEnd();
     } catch (err) {
-      console.error("Error notifying favoritors", err);
     }
   };
 
@@ -280,17 +276,14 @@ function PostMenu({ post, closeMenu, updatePosts, currentTab, setShowConfirm, se
 
             if (action === "enable" || action === "disable") {
               await updateDoc(ref, { status: action === "enable" ? "active" : "disabled" });
+              setActionModal({ isOpen: true, title: "Success", message: `Post ${action}d successfully!`, type: "success" });
             } else if (action === "expire") {
               await updateDoc(ref, { status: "expired" });
+              setActionModal({ isOpen: true, title: "Success", message: "Post expired successfully!", type: "success" });
             } else if (action === "delete") {
               await deleteDoc(ref);
+              setActionModal({ isOpen: true, title: "Success", message: "Post deleted successfully!", type: "success" });
             }
-
-            console.group(`[Action: POST STATUS UPDATE]`);
-            console.log(`%c✔ post status changed to: ${action}`, "color: purple; font-weight: bold");
-            console.log(`- Reads: 0`);
-            console.log(`- Writes: 1`);
-            console.groupEnd();
 
             updatePosts((prev) => ({
               ...prev,
@@ -312,6 +305,7 @@ function PostMenu({ post, closeMenu, updatePosts, currentTab, setShowConfirm, se
             }));
           } catch (error) {
             console.error("Error updating post:", error);
+            setActionModal({ isOpen: true, title: "Error", message: "Failed to update post. Please try again.", type: "error" });
           }
           setShowConfirm(false);
         },
@@ -449,6 +443,7 @@ export default function Profile() {
   const [confirmProps, setConfirmProps] = useState({});
   const [showAbout, setShowAbout] = useState(false);
   const [userProfiles, setUserProfiles] = useState({});
+  const [actionModal, setActionModal] = useState({ isOpen: false, title: "", message: "", type: "success" });
 
   const { location, address, error: locationErr, loading: locationLoading, addressLoading, requestLocation } = useLocationWithAddress(OPENCAGE_API_KEY, 'opencage');
 
@@ -456,14 +451,6 @@ export default function Profile() {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
     });
-
-    // Log cache hit on mount
-    console.group(`[Page: PROFILE]`);
-    console.log(`%c✔ Serving profile data from global cache`, "color: blue; font-weight: bold");
-    console.log(`- Source: GlobalDataCacheContext`);
-    console.log(`- Reads: 0 (Persisted listener)`);
-    console.log(`- Writes: 0`);
-    console.groupEnd();
 
     return () => unsub();
   }, []);
@@ -525,15 +512,39 @@ export default function Profile() {
     setStatusMsg("");
   }
 
-  async function handleImageChange(e) {
+  // Image Cropper State
+  const [showCropper, setShowCropper] = useState(false);
+  const [cropImageSrc, setCropImageSrc] = useState(null);
+
+  function handleImageChange(e) {
     const file = e.target.files[0];
     if (file) {
-      setStatusMsg("Compressing & Uploading image...");
+      const url = URL.createObjectURL(file);
+      setCropImageSrc(url);
+      setShowCropper(true);
+      e.target.value = null; // Reset input so same file can be selected again
+    }
+  }
+
+  async function handleCropComplete(croppedBlob) {
+    setShowCropper(false);
+    setStatusMsg("Compressing & Uploading image...");
+
+    try {
+      // Convert Blob to File
+      const file = new File([croppedBlob], "profile_pic.jpg", { type: "image/jpeg" });
       const compressedFile = await compressProfileImage(file);
       const url = await uploadToCloudinary(compressedFile);
+
       setEditingProfile((prev) => ({ ...prev, profileImage: url }));
       setImagePreview(url);
       setStatusMsg("Upload successful!");
+    } catch (err) {
+      setStatusMsg("Upload failed. Please try again.");
+    } finally {
+      // Cleanup
+      if (cropImageSrc) URL.revokeObjectURL(cropImageSrc);
+      setCropImageSrc(null);
     }
   }
 
@@ -600,15 +611,10 @@ export default function Profile() {
 
       await updateDoc(doc(db, "profiles", user.uid), updatedData);
 
-      console.group(`[Action: UPDATE PROFILE]`);
-      console.log(`%c✔ Firestore Write Successful`, "color: green; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
 
       // OPTIMIZATION: Propagate profile changes to all user's posts (Denormalization Sync)
       // Only necessary if profile image changed (as that's the only visible author field editable here)
       if (updatedData.profileImage !== currentProfile.profileImage) {
-        console.log(`Syncing new profile image to posts...`);
         const batch = writeBatch(db);
         let opCount = 0;
         const BATCH_LIMIT = 450; // Safety margin below 500
@@ -630,11 +636,8 @@ export default function Profile() {
 
         if (opCount > 0) {
           await batch.commit();
-          console.log(`- Writes (Sync): ${opCount} (Batch update)`);
         }
       }
-
-      console.groupEnd();
 
       // UI update is handled automatically by global listener
       setEditMode(false);
@@ -644,7 +647,6 @@ export default function Profile() {
       // The onSnapshot listener will update with fresh data
       invalidateCache(user.uid);
     } catch (error) {
-      console.error("Error saving profile:", error);
       setStatusMsg("Error saving profile");
     } finally {
       setProfileSaving(false);
@@ -882,6 +884,17 @@ export default function Profile() {
     const finalType = type || serviceType || "provide";
     const isProviding = finalType === "provide";
 
+    // Real-time expiry state
+    const [expiryInfo, setExpiryInfo] = useState(() => formatExpiry(expiry));
+
+    useEffect(() => {
+      if (!expiry) return;
+      const timer = setInterval(() => {
+        setExpiryInfo(formatExpiry(expiry));
+      }, 60000);
+      return () => clearInterval(timer);
+    }, [expiry]);
+
     let distanceText = "Distance away: --";
     if (currentProfile && currentProfile.latitude && currentProfile.longitude && latitude && longitude) {
       const distance = getDistanceKm(currentProfile.latitude, currentProfile.longitude, latitude, longitude);
@@ -891,79 +904,7 @@ export default function Profile() {
       }
     }
 
-    // Check if it's "Until I change" option
-    const isUntilIChange = () => {
-      if (!expiry) return false;
-      try {
-        const expiryDate = expiry.toDate ? expiry.toDate() : new Date(expiry);
-        const year = expiryDate.getFullYear();
-        return year === 9999 || year > 9000;
-      } catch (error) {
-        return false;
-      }
-    };
-
-    // Get until text for all posts
-    const getUntilText = () => {
-      if (!expiry) return "";
-      try {
-        const expiryDate = expiry.toDate ? expiry.toDate() : new Date(expiry);
-        if (isUntilIChange()) {
-          return "Until: Not Available";
-        } else {
-          return "Until: " + expiryDate.toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true
-          });
-        }
-      } catch (error) {
-        return "Until: Unknown";
-      }
-    };
-
-    const untilText = getUntilText();
-
-    // Format expiry text based on post type
-    let expiryText = "";
-    let expiryColor = "text-green-600";
-
-    if (expiry) {
-      if (isUntilIChange()) {
-        expiryText = "Expiry: NA";
-        expiryColor = "text-red-600";
-      } else {
-        try {
-          const expiryDate = expiry.toDate ? expiry.toDate() : new Date(expiry);
-          const now = new Date();
-          const diffMs = expiryDate - now;
-          const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-          const diffDays = Math.floor(diffHours / 24);
-
-          if (diffMs < 0) {
-            expiryText = "Expired";
-            expiryColor = "text-red-600";
-          } else if (diffHours < 24) {
-            expiryText = "Expires in " + diffHours + "h";
-            expiryColor = "text-orange-600";
-          } else if (diffDays < 7) {
-            expiryText = "Expires in " + diffDays + "d";
-            expiryColor = "text-orange-600";
-          } else {
-            const day = String(expiryDate.getDate()).padStart(2, '0');
-            const month = String(expiryDate.getMonth() + 1).padStart(2, '0');
-            const yearShort = expiryDate.getFullYear();
-            expiryText = "Expires: " + day + "/" + month + "/" + yearShort;
-            expiryColor = "text-blue-600";
-          }
-        } catch (error) {
-          expiryText = "";
-        }
-      }
-    }
+    const { text: expiryText, color: expiryColor, isExpiringNow } = expiryInfo;
 
     // Determine status indicator
     const status = post.status || "active";
@@ -1096,11 +1037,18 @@ export default function Profile() {
           React.createElement("div", {
             className: "flex items-center justify-between text-[10px]"
           },
-            untilText && React.createElement("span", {
+            expiry.toDate && React.createElement("span", {
               className: "text-gray-500 whitespace-nowrap"
-            }, untilText),
+            }, "Until: " + expiry.toDate().toLocaleString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+              hour12: true
+            })),
             expiryText && React.createElement("span", {
-              className: expiryColor + " whitespace-nowrap font-medium"
+              className: expiryColor + " whitespace-nowrap font-medium " + (isExpiringNow ? "animate-pulse bg-red-100 px-1 rounded" : "")
             }, expiryText)
           )
         ),
@@ -1637,7 +1585,8 @@ export default function Profile() {
       setShowAbout: setShowAbout,
       navigate: navigate,
       user: user,
-      profile: currentProfile
+      profile: currentProfile,
+      setActionModal: setActionModal
     }),
 
     // Confirmation Modal
@@ -1896,6 +1845,24 @@ export default function Profile() {
         setShowLocationPicker(false);
       },
       onCancel: () => setShowLocationPicker(false)
+    }),
+
+    // Image Cropper Modal
+    showCropper && React.createElement(ImageCropperModal, {
+      isOpen: showCropper,
+      imageSrc: cropImageSrc,
+      onCancel: () => setShowCropper(false),
+      onCropComplete: handleCropComplete,
+      isRound: true // Instagram-style round crop
+    }),
+
+    // Action Message Modal
+    React.createElement(ActionMessageModal, {
+      isOpen: actionModal.isOpen,
+      onClose: () => setActionModal(prev => ({ ...prev, isOpen: false })),
+      title: actionModal.title,
+      message: actionModal.message,
+      type: actionModal.type
     }),
 
     // Add CSS animations

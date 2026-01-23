@@ -77,14 +77,8 @@ export default function Notes() {
         if (window.confirm("Are you sure you want to delete this note?")) {
             try {
                 await deleteDoc(doc(db, "notes", noteId));
-                console.group(`[Action: DELETE NOTE]`);
-                console.log(`%c✔ Note removed from database`, "color: red; font-weight: bold");
-                console.log(`- Reads: 0`);
-                console.log(`- Writes: 1`);
-                console.groupEnd();
                 setMenuOpenId(null);
             } catch (error) {
-                console.error("Error deleting note:", error);
             }
         }
     };

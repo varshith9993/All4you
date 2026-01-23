@@ -13,6 +13,7 @@ import {
   getWorkerSearchKeys,
   prepareWorkerForSearch,
 } from "../utils/searchEngine";
+import { useSearchCache } from "../contexts/GlobalDataCacheContext";
 
 // --- Helper Functions ---
 
@@ -76,7 +77,6 @@ function isUserOnline(userId, currentUserId, online, lastSeen) {
         return true;
       }
     } catch (error) {
-      console.error('Error checking lastSeen:', error);
     }
   }
 
@@ -409,7 +409,6 @@ function SortDropdown({ sortBy, setSortBy, showSort, setShowSort }) {
   ];
 
   const handleSortSelect = (value) => {
-    console.log("Sort selected:", value);
     setSortBy(value);
     setShowSort(false);
   };
@@ -451,7 +450,6 @@ function SortDropdown({ sortBy, setSortBy, showSort, setShowSort }) {
         <div
           className="fixed inset-0 z-40"
           onClick={() => {
-            console.log("Closing dropdown via overlay");
             setShowSort(false);
           }}
         />
@@ -478,16 +476,16 @@ export default function Workers() {
     userProfile
   } = usePaginatedWorkers();
 
-  const [searchValue, setSearchValue] = useState("");
-  // OPTIMIZATION: Debounce search value to reduce computation and potential Firestore calls
-  // The search only executes after the user stops typing for 300ms (optimized from 1200ms)
+  const { searchStates, updateSearchState } = useSearchCache();
+
+  const [searchValue, setSearchValue] = useState(searchStates.workers.query);
   const debouncedSearchValue = useDebounce(searchValue, 1000);
 
   const [userProfiles, setUserProfiles] = useState({});
   const [showFilters, setShowFilters] = useState(false);
   const [showSort, setShowSort] = useState(false);
-  const [sortBy, setSortBy] = useState("distance-low-high");
-  const [filters, setFilters] = useState({
+  const [sortBy, setSortBy] = useState(searchStates.workers.sortBy);
+  const [filters, setFilters] = useState(searchStates.workers.filters || {
     distance: { min: 0, max: null },
     distanceUnit: 'km',
     rating: { min: 0, max: 5 },
@@ -499,14 +497,23 @@ export default function Workers() {
     tags: ""
   });
 
+  // Sync search state to global cache
+  useEffect(() => {
+    updateSearchState('workers', {
+      query: searchValue,
+      filters: filters,
+      sortBy: sortBy
+    });
+  }, [searchValue, filters, sortBy, updateSearchState]);
+
   // Pagination display state (for client-side pagination of already-loaded data)
-  // Normal browsing: 15 items per page
-  // Search results: 10 items per page
-  const [displayCount, setDisplayCount] = useState(15);
+  // Normal browsing: 9 items per page
+  // Search results: 9 items per page
+  const [displayCount, setDisplayCount] = useState(9);
   const listContainerRef = useRef(null);
 
   // Determine page size based on search state
-  const currentPageSize = debouncedSearchValue.trim() ? 10 : 15;
+  const currentPageSize = 9;
 
   // Reset displayCount when search query changes
   useEffect(() => {
@@ -559,7 +566,6 @@ export default function Workers() {
       const profiles = await fetchProfiles(creatorIds);
       setUserProfiles(prev => ({ ...prev, ...profiles }));
     } catch (error) {
-      console.error("Error batch fetching creator profiles:", error);
     }
   }, [fetchProfiles]);
 
@@ -622,7 +628,7 @@ export default function Workers() {
 
   // Process and display workers with filtering and sorting - ENHANCED WITH FUSE.JS
   const displayedWorkers = useMemo(() => {
-    console.log("Processing workers with sort:", sortBy);
+
 
     // Calculate distances
     const workersWithDistance = searchableWorkers.map(worker => {
@@ -735,8 +741,6 @@ export default function Workers() {
       const ratingA = a.rating || 0;
       const ratingB = b.rating || 0;
 
-      console.log(`Sorting: ${sortBy}, A: ${distA}, B: ${distB}`);
-
       switch (sortBy) {
         case "distance-low-high":
           return distA - distB;
@@ -753,7 +757,6 @@ export default function Workers() {
       }
     });
 
-    console.log(`Sorted ${sortedWorkers.length} workers with sort: ${sortBy}`);
     return sortedWorkers;
   }, [searchableWorkers, workerFuseIndex, debouncedSearchValue, debouncedFilters, sortBy, userProfile, userProfiles, currentUserId]);
 

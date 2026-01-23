@@ -89,13 +89,32 @@ function isUserOnline(online, lastSeen) {
       if (minutesSinceLastSeen > 5) return false;
       if (minutesSinceLastSeen < 2) return true;
     } catch (error) {
-      console.error('Error checking lastSeen:', error);
     }
   }
 
   if (online === true) return true;
   if (online === false) return false;
   return false;
+}
+
+// --- Download Utility ---
+async function downloadFile(url, filename) {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename || 'download';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    // Fallback
+    window.open(url, '_blank');
+  }
 }
 
 // --- Components ---
@@ -386,20 +405,12 @@ export default function ChatDetail() {
       const chatData = { id: chatSnap.id, ...chatSnap.data() };
       setChat(chatData);
 
-      console.group(`[Chat: SYNC]`);
-      console.log(`%c✔ Chat metadata synchronized`, "color: blue; font-weight: bold");
-      console.log(`- Reads: 1 (Active listener)`);
-      console.log(`- Writes: 0`);
-      console.groupEnd();
-
-      const meBlocked = chatData.blockedBy?.includes(uid) || false;
       const otherId = chatData.participants?.find(x => x !== uid);
       const themBlocked = otherId ? (chatData.blockedBy?.includes(otherId) || false) : false;
 
-      setIsBlockedByMe(meBlocked);
       setIsBlockedByThem(themBlocked);
       setIsMuted(chatData.mutedBy?.includes(uid) || false);
-    }, (err) => console.error(err));
+    }, (err) => { });
 
     return () => unsubChat();
   }, [chatId, uid, navigate]);
@@ -416,7 +427,7 @@ export default function ChatDetail() {
       console.log("Fixing phantom unread count...");
       updateDoc(doc(db, "chats", chatId), {
         [`unseenCounts.${uid}`]: 0
-      }).catch(err => console.error("Error clearing badge:", err));
+      }).catch(err => { });
     }
   }, [chat, uid, chatId]);
 
@@ -431,14 +442,8 @@ export default function ChatDetail() {
         setProfile(data);
         const isOnline = isUserOnline(data.online, data.lastSeen);
         setUserStatus({ online: isOnline, lastSeen: data.lastSeen });
-
-        console.group(`[Chat: PROFILE SYNC]`);
-        console.log(`%c✔ Other user profile synchronized`, "color: blue; font-weight: bold");
-        console.log(`- Reads: 1 (Active listener)`);
-        console.log(`- Writes: 0`);
-        console.groupEnd();
       }
-    }, (err) => console.error("Profile listener error:", err));
+    }, (err) => { });
 
     return () => unsubProfile();
   }, [otherUserId]);
@@ -457,10 +462,7 @@ export default function ChatDetail() {
     if (cachedData && cachedData.lastUpdate === lastChatUpdate && lastChatUpdate !== 0 && !isLoadingMore && cachedData.messages?.length >= limitCount) {
       setMessages(cachedData.messages);
 
-      console.group(`[Chat: CACHE RESTORE]`);
-      console.log(`%c✔ Messages restored from local cache (0 reads)`, "color: green; font-weight: bold");
-      console.log(`- Last Update: ${new Date(lastChatUpdate).toLocaleTimeString()}`);
-      console.groupEnd();
+      setMessages(cachedData.messages);
       return;
     }
 
@@ -489,12 +491,6 @@ export default function ChatDetail() {
       if (!isFromCache && lastChatUpdate !== 0) {
         setMessageCache(chatId, filteredMsgs, lastChatUpdate);
       }
-
-      console.group(`[Chat: MESSAGES SYNC]`);
-      console.log(`%c✔ Messages synchronized`, "color: blue; font-weight: bold");
-      console.log(`- Source: ${isFromCache ? 'Local Cache (0 reads)' : 'Server (reads consumed)'}`);
-      console.log(`- Messages: ${snap.docs.length}`);
-      console.groupEnd();
 
       if (isLoadingMore && scrollRef.current.scrollHeight > 0) {
         const container = chatContainerRef.current;
@@ -533,12 +529,6 @@ export default function ChatDetail() {
             batch.update(msgRef, { deliveredTo: arrayUnion(uid) });
           });
           await batch.commit();
-
-          console.group(`[Chat: STATUS UPDATE]`);
-          console.log(`%c✔ Messages marked as delivered`, "color: purple; font-weight: bold");
-          console.log(`- Reads: 0`);
-          console.log(`- Writes: ${undeliveredMessages.length}`);
-          console.groupEnd();
         }
 
         // Mark as seen after a short delay (simulating WhatsApp behavior)
@@ -560,17 +550,10 @@ export default function ChatDetail() {
             seenBatch.update(chatRef, { [`unseenCounts.${uid}`]: 0 });
 
             await seenBatch.commit();
-
-            console.group(`[Chat: STATUS UPDATE]`);
-            console.log(`%c✔ Messages marked as seen`, "color: purple; font-weight: bold");
-            console.log(`- Reads: 0`);
-            console.log(`- Writes: ${unseenMessages.length + 1}`);
-            console.groupEnd();
           }
         }, 500); // Reduced delay for better UX
 
       } catch (error) {
-        console.error("Error marking messages as delivered and seen:", error);
       }
     };
 
@@ -600,15 +583,9 @@ export default function ChatDetail() {
             batch.update(msgRef, { deliveredTo: arrayUnion(otherUserId) });
           });
           await batch.commit();
-
-          console.group(`[Chat: STATUS UPDATE]`);
-          console.log(`%c✔ Own messages marked as delivered`, "color: purple; font-weight: bold");
-          console.log(`- Reads: 0`);
-          console.log(`- Writes: ${ownUndeliveredMessages.length}`);
-          console.groupEnd();
         }
       } catch (error) {
-        console.error("Error marking own messages as delivered:", error);
+
       }
     };
 
@@ -658,12 +635,7 @@ export default function ChatDetail() {
       await updateDoc(doc(db, "chats", chatId), { blockedBy: arrayUnion(uid) });
       setIsBlockedByMe(true);
       setToastMessage("User blocked");
-      console.group(`[Action: BLOCK USER]`);
-      console.log(`%c✔ User blocked`, "color: red; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
-    } catch (e) { console.error(e); setToastMessage("Error blocking user"); }
+    } catch (e) { setToastMessage("Error blocking user"); }
     setShowBlockModal(false);
   };
 
@@ -672,17 +644,7 @@ export default function ChatDetail() {
       await updateDoc(doc(db, "chats", chatId), { blockedBy: arrayRemove(uid) });
       setIsBlockedByMe(false);
       setToastMessage("User unblocked");
-      console.group(`[Action: UNBLOCK USER]`);
-      console.log(`%c✔ User unblocked`, "color: green; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
-      console.group(`[Action: UNBLOCK USER]`);
-      console.log(`%c✔ User unblocked`, "color: green; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
-    } catch (e) { console.error(e); setToastMessage("Error unblocking user"); }
+    } catch (e) { setToastMessage("Error unblocking user"); }
   };
 
   const handleMute = async () => {
@@ -690,12 +652,7 @@ export default function ChatDetail() {
       await updateDoc(doc(db, "chats", chatId), { mutedBy: arrayUnion(uid) });
       setIsMuted(true);
       setToastMessage("Notifications muted");
-      console.group(`[Action: MUTE CHAT]`);
-      console.log(`%c✔ Chat muted`, "color: gray; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
-    } catch (e) { console.error(e); setToastMessage("Error muting chat"); }
+    } catch (e) { setToastMessage("Error muting chat"); }
     setShowMuteModal(false);
   };
 
@@ -704,12 +661,7 @@ export default function ChatDetail() {
       await updateDoc(doc(db, "chats", chatId), { mutedBy: arrayRemove(uid) });
       setIsMuted(false);
       setToastMessage("Notifications unmuted");
-      console.group(`[Action: UNMUTE CHAT]`);
-      console.log(`%c✔ Chat unmuted`, "color: blue; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
-    } catch (e) { console.error(e); setToastMessage("Error unmuting chat"); }
+    } catch (e) { setToastMessage("Error unmuting chat"); }
   };
 
   const handleDeleteChat = async () => {
@@ -720,14 +672,8 @@ export default function ChatDetail() {
       await updateDoc(doc(db, "chats", chatId), {
         deletedBy: arrayUnion(uid)
       });
-
-      console.group(`[Action: HIDE CHAT]`);
-      console.log(`%c✔ Chat hidden for current user`, "color: red; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
       navigate("/chats");
-    } catch (e) { console.error(e); setToastMessage("Error hiding chat"); }
+    } catch (e) { setToastMessage("Error hiding chat"); }
     setShowDeleteModal(false);
   };
 
@@ -756,13 +702,7 @@ export default function ChatDetail() {
         type: "text"
       });
       setToastMessage("Message deleted successfully");
-      console.group(`[Action: DELETE MESSAGE]`);
-      console.log(`%c✔ Message deleted`, "color: red; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
     } catch (e) {
-      console.error(e);
       setToastMessage("Error deleting message");
     }
     setShowDeleteMessageModal(false);
@@ -847,27 +787,56 @@ export default function ChatDetail() {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Only allow images in chat
-    if (!file.type.startsWith("image/")) {
-      setToastMessage("Only images are allowed in chat");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
+    // Define allowed types (Images + Docs)
+    const allowedTypes = [
+      "image/",
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-powerpoint",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "text/plain",
+      "text/csv"
+    ];
+
+    const isAllowed = allowedTypes.some(type => file.type.startsWith(type) || file.type === type);
+
+    if (!isAllowed && !file.type.startsWith('image/')) {
+      // Fallback check for extensions if mime type is missing/weird
+      const ext = file.name.split('.').pop().toLowerCase();
+      const allowedExts = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'csv'];
+      if (!allowedExts.includes(ext)) {
+        setToastMessage("File type not supported");
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
     }
 
-    // Check file size (max 2.5MB for images)
-    if (file.size > 2.5 * 1024 * 1024) {
-      setToastMessage("Image size must be less than 2.5MB");
+    // Check file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      setToastMessage("File size must be less than 2MB");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
 
     setUploading(true);
     try {
-      const compressedFile = await compressFile(file);
-      const url = await uploadToCloudinary(compressedFile, "image");
-      await sendMessageInternal({ type: "image", fileUrl: url, text: "Image" });
+      // Determine if it is an image for compression and message type
+      const isImage = file.type.startsWith("image/");
+      const compressType = isImage ? 'CHAT_IMAGE' : 'CHAT_FILE';
+
+      const compressedFile = await compressFile(file, {}, compressType);
+
+      // Use 'auto' to let Cloudinary detect PDF/Docs vs Images
+      const url = await uploadToCloudinary(compressedFile, "auto");
+
+      const msgType = isImage ? "image" : "file";
+      const msgText = isImage ? "Image" : file.name;
+
+      await sendMessageInternal({ type: msgType, fileUrl: url, text: msgText });
     } catch (err) {
-      console.error("Image upload failed", err);
       setToastMessage("Upload failed");
     } finally {
       setUploading(false);
@@ -889,14 +858,7 @@ export default function ChatDetail() {
         setEditingId(null);
         setText("");
         setToastMessage("Message edited successfully");
-
-        console.group(`[Action: EDIT MESSAGE]`);
-        console.log(`%c✔ Message updated`, "color: blue; font-weight: bold");
-        console.log(`- Reads: 0`);
-        console.log(`- Writes: 1`);
-        console.groupEnd();
       } catch (err) {
-        console.error(err);
         setToastMessage("Failed to update message");
       }
       return;
@@ -944,11 +906,6 @@ export default function ChatDetail() {
 
       setReplyTo(null);
 
-      console.group(`[Action: SEND MESSAGE]`);
-      console.log(`%c✔ Message Sent`, "color: green; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: ${(!isBlockedByThem && otherUserId) ? '2' : '1'} (Message Doc + Chat Meta Update)`);
-      console.groupEnd();
       if (userStatus.online && otherUserId) {
         setTimeout(async () => {
           try {
@@ -956,13 +913,11 @@ export default function ChatDetail() {
               deliveredTo: arrayUnion(otherUserId)
             });
           } catch (error) {
-            console.error("Error updating delivery status:", error);
           }
         }, 1000);
       }
 
     } catch (err) {
-      console.error("Send error", err);
       setToastMessage("Failed to send");
     }
   };
@@ -1056,12 +1011,10 @@ export default function ChatDetail() {
                 { fileUrl: msg.fileUrl, isOwnMessage: isOwn }
               ),
               msg.type === 'file' && React.createElement(
-                "a",
+                "button",
                 {
-                  href: msg.fileUrl,
-                  target: "_blank",
-                  rel: "noreferrer",
-                  className: "flex items-center gap-2 text-sm underline opacity-90 hover:opacity-100"
+                  onClick: () => downloadFile(msg.fileUrl, msg.text),
+                  className: "flex items-center gap-2 text-sm underline opacity-90 hover:opacity-100 bg-transparent border-0 p-0 text-left"
                 },
                 React.createElement(FiFile, { size: 16 }),
                 " ",
@@ -1401,7 +1354,7 @@ export default function ChatDetail() {
           { onSubmit: handleTextSend, className: "flex items-center gap-2" },
           React.createElement("input", {
             type: "file",
-            accept: "image/*",
+            accept: "image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,text/csv",
             ref: fileInputRef,
             onChange: handleFileSelect,
             className: "hidden",

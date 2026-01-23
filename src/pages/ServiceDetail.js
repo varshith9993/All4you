@@ -24,6 +24,7 @@ import { useProfileCache } from "../contexts/ProfileCacheContext";
 import { usePostDetailCache, useGlobalDataCache } from "../contexts/GlobalDataCacheContext";
 import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiCalendar, FiMoreVertical, FiTrash2, FiFile, FiFileText, FiDownload, FiAlertCircle, FiExternalLink, FiEye, FiLoader, FiChevronLeft, FiChevronRight } from "react-icons/fi";
 import MapComponent from "../components/MapComponent";
+import ProfileImageViewer from "../components/ProfileImageViewer";
 import defaultAvatar from "../assets/images/default_profile.svg";
 
 
@@ -196,7 +197,7 @@ async function getFileSizeFromUrl(url) {
             }
         }
     } catch (error) {
-        console.warn('Could not fetch file size:', error);
+
     }
     return null;
 }
@@ -215,7 +216,7 @@ function Modal({ children, onClose }) {
 }
 
 // Constants for review pagination - AGGRESSIVELY OPTIMIZED
-const REVIEWS_PAGE_SIZE = 7;
+const REVIEWS_PAGE_SIZE = 9;
 
 /**
  * ServiceDetail Page - Optimized with Post Detail Cache
@@ -253,6 +254,7 @@ function ServiceDetail() {
     const [replyingTo, setReplyingTo] = useState(null);
     const [replyText, setReplyText] = useState("");
     const [expandedReplies, setExpandedReplies] = useState({});
+    const [showProfileViewer, setShowProfileViewer] = useState(false);
 
     // Pagination state for reviews
     const [hasMoreReviews, setHasMoreReviews] = useState(true);
@@ -262,6 +264,7 @@ function ServiceDetail() {
 
     // Cache initialization ref to prevent double loading
     const cacheInitializedRef = useRef(false);
+    const dataFromCache = useRef(false);
 
     // Initialize from cache on mount (instant display)
     useEffect(() => {
@@ -270,7 +273,7 @@ function ServiceDetail() {
 
         const cached = getPostDetailCache('service', id);
         if (cached && cached.data) {
-            console.log('[ServiceDetail] Loading from cache - instant display');
+            dataFromCache.current = true;
             const { serviceData, reviewsData, profilesData } = cached.data;
 
             if (serviceData) {
@@ -281,10 +284,15 @@ function ServiceDetail() {
                 setReviews(reviewsData);
                 const userRate = reviewsData.find(r => r.userId === currentUserId && typeof r.rating === "number" && r.rating > 0);
                 setUserRatingDoc(userRate ?? null);
+                if (reviewsData.length < REVIEWS_PAGE_SIZE) {
+                    setHasMoreReviews(false);
+                }
             }
             if (profilesData) {
                 setProfiles(profilesData);
             }
+        } else {
+            dataFromCache.current = false;
         }
     }, [id, getPostDetailCache, currentUserId]);
 
@@ -306,7 +314,6 @@ function ServiceDetail() {
                 setCreator(profiles[creatorId]);
             }
         } catch (error) {
-            console.error("Error fetching creator profile:", error);
         }
     }, [fetchProfiles, getCachedProfile]);
 
@@ -317,7 +324,6 @@ function ServiceDetail() {
             const profilesData = await fetchProfiles(userIds);
             setProfiles(prev => ({ ...prev, ...profilesData }));
         } catch (error) {
-            console.error("Error batch fetching reviewer profiles:", error);
         }
     }, [fetchProfiles]);
 
@@ -328,12 +334,17 @@ function ServiceDetail() {
         setLoadingMoreReviews(true);
         try {
             let reviewQ;
-            if (lastReviewRef.current) {
+            let cursor = lastReviewRef.current;
+            if (!cursor && allReviewsRef.current.length > 0) {
+                cursor = allReviewsRef.current[allReviewsRef.current.length - 1].createdAt;
+            }
+
+            if (cursor) {
                 reviewQ = query(
                     collection(db, "serviceReviews"),
                     where("serviceId", "==", id),
                     orderBy("createdAt", "desc"),
-                    startAfter(lastReviewRef.current),
+                    startAfter(cursor),
                     limit(REVIEWS_PAGE_SIZE)
                 );
             } else {
@@ -368,7 +379,6 @@ function ServiceDetail() {
                 fetchReviewerProfiles(newUserIds);
             }
         } catch (error) {
-            console.error("Error loading more reviews:", error);
         } finally {
             setLoadingMoreReviews(false);
         }
@@ -377,6 +387,9 @@ function ServiceDetail() {
     // Fetch service and creator profile - OPTIMIZED: Use getDoc instead of onSnapshot
     useEffect(() => {
         if (!id) return;
+
+        // If data loaded from cache, skip network requests to optimize reads
+        if (dataFromCache.current) return;
 
         // OPTIMIZATION: Use one-time fetch instead of continuous listener for service document
         const fetchServiceData = async () => {
@@ -398,10 +411,8 @@ function ServiceDetail() {
                         serviceData,
                     }, snap.data().updatedAt?.toMillis?.() || Date.now());
 
-                    console.log('[ServiceDetail] Service data fetched (1 read)');
                 }
             } catch (error) {
-                console.error('Error fetching service:', error);
             }
         };
 
@@ -479,7 +490,6 @@ function ServiceDetail() {
                     // Remove loading state
                     setLoadingFiles(prev => ({ ...prev, [file.url]: false }));
                 } catch (error) {
-                    console.warn(`Failed to get size for ${file.url}:`, error);
                     setLoadingFiles(prev => ({ ...prev, [file.url]: false }));
                 }
             }
@@ -529,10 +539,8 @@ function ServiceDetail() {
                     rating: newAvg
                 });
             } catch (e) {
-                console.warn("Failed to update service rating document (permission?):", e);
             }
         } catch (error) {
-            console.error("Error calculating average rating:", error);
         }
     }, [id]);
 
@@ -558,22 +566,11 @@ function ServiceDetail() {
             if (userHasFavorited) {
                 await deleteDoc(favDoc);
                 setUserHasFavorited(false);
-                console.group(`[Action: UNFAVORITE]`);
-                console.log(`%c✔ Service removed from Favorites`, "color: orange; font-weight: bold");
-                console.log(`- Reads: 0`);
-                console.log(`- Writes: 1`);
-                console.groupEnd();
             } else {
                 await setDoc(favDoc, { serviceId: id, userId: currentUserId, createdAt: serverTimestamp() });
                 setUserHasFavorited(true);
-                console.group(`[Action: FAVORITE]`);
-                console.log(`%c✔ Service added to Favorites`, "color: green; font-weight: bold");
-                console.log(`- Reads: 0`);
-                console.log(`- Writes: 1`);
-                console.groupEnd();
             }
         } catch (error) {
-            console.error("Error toggling favorite:", error);
             setToast("Failed to update favorites");
         }
     };
@@ -609,14 +606,13 @@ function ServiceDetail() {
                         rating: newRating,
                         read: false,
                         createdAt: serverTimestamp()
-                    }).catch(nErr => console.error("Notif error", nErr));
+                    }).catch(nErr => { });
                 }
 
                 setNewRating(0);
                 setRateModalOpen(false);
                 setToast("Rating submitted!");
             } catch (error) {
-                console.error("Error submitting rating:", error);
                 setToast("Failed to submit rating");
             }
         }
@@ -643,23 +639,14 @@ function ServiceDetail() {
                         read: false,
                         createdAt: serverTimestamp()
                     }).then(() => {
-                        console.group(`[Child Action: NOTIFICATION]`);
-                        console.log(`%c✔ Notification sent to service owner`, "color: blue; font-weight: bold");
-                        console.log(`- Writes: 1`);
-                        console.groupEnd();
-                    }).catch(nErr => console.error("Notif error", nErr));
+                    }).catch(nErr => { });
                 }
 
-                console.group(`[Action: SUBMIT REVIEW]`);
-                console.log(`%c✔ Review Published`, "color: green; font-weight: bold");
-                console.log(`- Writes: 1`);
-                console.groupEnd();
 
                 setNewReviewText("");
                 setCommentModalOpen(false);
                 setToast("Review submitted!");
             } catch (error) {
-                console.error("Error submitting review:", error);
                 setToast("Failed to submit review");
             }
         }
@@ -680,7 +667,6 @@ function ServiceDetail() {
             setToast("Review deleted");
             setActiveMenuId(null);
         } catch (error) {
-            console.error("Error deleting review:", error);
             setToast("Failed to delete review");
         }
 
@@ -713,26 +699,15 @@ function ServiceDetail() {
                         read: false,
                         createdAt: serverTimestamp()
                     }).then(() => {
-                        console.group(`[Child Action: NOTIFICATION]`);
-                        console.log(`%c✔ Notification sent to reviewer`, "color: blue; font-weight: bold");
-                        console.log(`- Writes: 1`);
-                        console.groupEnd();
                     });
-                } catch (nErr) { console.error("Notif error", nErr); }
+                } catch (nErr) { }
             }
-
-            console.group(`[Action: SUBMIT REPLY]`);
-            console.log(`%c✔ Reply Published`, "color: green; font-weight: bold");
-            console.log(`- Reads: 0`);
-            console.log(`- Writes: 1`);
-            console.groupEnd();
 
             setReplyText("");
             setReplyingTo(null);
             setToast("Reply posted!");
             setTimeout(() => setToast(""), 2000);
         } catch (error) {
-            console.error("Error replying:", error);
             setToast("Failed to post reply");
         }
     };
@@ -755,7 +730,6 @@ function ServiceDetail() {
             } catch (error) {
                 // Silently handle user cancellation or minor errors
                 if (error.name !== 'AbortError' && error.name !== 'NotAllowedError') {
-                    console.error("Error sharing:", error);
                 }
             }
         } else {
@@ -774,7 +748,6 @@ function ServiceDetail() {
                     document.body.removeChild(textArea);
                     setToast("Link copied to clipboard!");
                 } catch (e) {
-                    console.error("Fallback copy failed:", e);
                 }
             }
             setTimeout(() => setToast(""), 2200);
@@ -783,7 +756,6 @@ function ServiceDetail() {
 
     const startChat = async () => {
         if (!currentUserId || !service) {
-            console.log("Missing user or service data");
             return;
         }
         const recipientId = service.createdBy;
@@ -914,11 +886,20 @@ function ServiceDetail() {
                     <img
                         src={displayProfileImage}
                         alt={displayUsername}
-                        className="w-20 h-20 rounded-full object-cover border-2 border-white shadow-md"
+                        className="w-20 h-20 rounded-full object-cover border-2 border-white shadow-md cursor-pointer hover:opacity-90 transition-opacity"
+                        onClick={() => setShowProfileViewer(true)}
                         onError={(e) => { e.target.src = defaultAvatar; }}
                         crossOrigin="anonymous"
                     />
                 </div>
+
+                {/* Profile Image Viewer Modal */}
+                <ProfileImageViewer
+                    show={showProfileViewer}
+                    onClose={() => setShowProfileViewer(false)}
+                    imageUrl={displayProfileImage}
+                    username={displayUsername}
+                />
 
                 {/* Service Type Badge & Title */}
                 <div className="text-center mb-3">

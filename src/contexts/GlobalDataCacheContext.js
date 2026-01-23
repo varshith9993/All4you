@@ -110,6 +110,20 @@ export function GlobalDataCacheProvider({ children }) {
     notes: null
   });
 
+  // Persistent Search State (Survives navigation)
+  const [searchStates, setSearchStates] = useState({
+    workers: { query: "", filters: null, sortBy: "distance-low-high", scrollPos: 0 },
+    services: { query: "", filters: null, sortBy: "distance-low-high", scrollPos: 0 },
+    ads: { query: "", filters: null, sortBy: "distance-low-high", scrollPos: 0 }
+  });
+
+  const updateSearchState = useCallback((type, newState) => {
+    setSearchStates(prev => ({
+      ...prev,
+      [type]: { ...prev[type], ...newState }
+    }));
+  }, []);
+
   const profileNamePromiseCacheRef = useRef(new Map()); // High optimization: prevents redundant Firestore reads for names
 
   const messageCacheRef = useRef({}); // Store messages for ChatDetail { chatId: { messages, lastUpdate } }
@@ -119,7 +133,7 @@ export function GlobalDataCacheProvider({ children }) {
     try {
       const cached = localStorage.getItem('global_message_cache');
       if (cached) messageCacheRef.current = JSON.parse(cached);
-    } catch (e) { console.error("Error loading message cache:", e); }
+    } catch (e) { }
   }, []);
 
   // Notes cache state
@@ -216,16 +230,9 @@ export function GlobalDataCacheProvider({ children }) {
 
     listenerStateRef.current.userProfile.unsubscribe = onSnapshot(profileRef, (docSnap) => {
       if (docSnap.exists()) {
-        console.group(`[GlobalCache: PROFILE]`);
-        console.log(`%c✔ User profile synchronized`, "color: blue; font-weight: bold");
-        console.log(`- Reads: 1 (Active listener)`);
-        console.log(`- Writes: 0`);
-        console.groupEnd();
-        setUserProfile(docSnap.data());
         localStorage.setItem('global_user_profile', JSON.stringify(docSnap.data()));
       }
     }, (error) => {
-      console.error("Error listening to user profile:", error);
     });
 
     return () => {
@@ -254,8 +261,6 @@ export function GlobalDataCacheProvider({ children }) {
     listenerStateRef.current.chatBadge.unsubscribe = onSnapshot(badgeQuery, (snap) => {
       // Check if any chat has unread messages for the current user
       let unread = false;
-      let unreadCount = 0;
-
       snap.docs.forEach(d => {
         const chat = d.data();
         const isBlocked = chat.blockedBy && chat.blockedBy.includes(currentUserId);
@@ -265,24 +270,16 @@ export function GlobalDataCacheProvider({ children }) {
         // CRITICAL: Only count as unread if unseenCount is strictly > 0
         if (!isBlocked && !isDeleted && unseenCount > 0) {
           unread = true;
-          unreadCount++;
         }
       });
 
       // Only update if state actually changed to prevent unnecessary re-renders
       setHasUnreadChats(prev => {
         if (prev !== unread) {
-          console.group(`[GlobalCache: CHAT BADGE]`);
-          console.log(`%c${unread ? '🔴 UNREAD MESSAGES' : '✔ NO UNREAD MESSAGES'}`, `color: ${unread ? 'red' : 'green'}; font-weight: bold`);
-          console.log(`- Unread chats: ${unreadCount}`);
-          console.log(`- Total chats checked: ${snap.docs.length}`);
-          console.log(`- Reads: ${snap.docs.length || 1}`);
-          console.log(`- Writes: 0`);
-          console.groupEnd();
         }
         return unread;
       });
-    }, (err) => console.error("Chat badge error:", err));
+    }, (err) => { });
 
     return () => { };
   }, [currentUserId]);
@@ -340,12 +337,7 @@ export function GlobalDataCacheProvider({ children }) {
       localStorage.setItem('global_chats_full_list', JSON.stringify(chats));
       hasLoadedRef.current.chats = true;
 
-      console.group(`[GlobalCache: CHATS LIST]`);
-      console.log(`%c✔ Full chat list synchronized`, "color: blue; font-weight: bold");
-      console.log(`- Reads: ${snap.docs.length || 1}`);
-      console.log(`- Writes: 0`);
-      console.groupEnd();
-    }, (err) => console.error("Chats list error:", err));
+    }, (err) => { });
 
     return () => { };
   }, [currentUserId]);
@@ -581,6 +573,16 @@ export function GlobalDataCacheProvider({ children }) {
                 const name = postData?.name || postData?.title || "Post";
                 const status = postData?.status || (change.type === 'removed' ? 'deleted' : 'unknown');
 
+                // Check old status to prevent spamming notifications when other fields change
+                const typeMap = favPostsRealtimeRef.current[`${config.stateKey}_map`];
+                const oldPost = typeMap ? typeMap.get(postId) : null;
+                const oldStatus = oldPost ? oldPost.status : 'unknown';
+
+                // Skip if status hasn't changed (unless it's a removal)
+                if (change.type === 'modified' && oldStatus === status) {
+                  continue;
+                }
+
                 let msg = "";
                 if (change.type === 'removed') {
                   msg = `a ${displayType} post is deleted by the post owner and the post is vanished from favorites`;
@@ -653,9 +655,118 @@ export function GlobalDataCacheProvider({ children }) {
     unsubFavCollection.forEach(u => listenerStateRef.current.notificationsData.unsubscribes.push(u));
 
     return () => {
-      // Cleanup is handled by Global cleanup effect
+      // Cleanup handled in main cleanup effect
     };
   }, [currentUserId, updateNotificationsUI, notificationsCache]);
+
+  // SEPARATE EFFECT: Background Expiry Check for Favorites (0 Reads)
+  // Moved to separate effect to prevent being killed when notificationsCache updates
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    // Immediate check on mount
+    const checkExpiry = () => {
+      const allFavs = [
+        ...favPostsRealtimeRef.current.workers,
+        ...favPostsRealtimeRef.current.services,
+        ...favPostsRealtimeRef.current.ads
+      ];
+
+      const now = Date.now();
+      // Changed key to reset/handle new structure allowing multiple notifications per post
+      const notifiedKey = 'expired_notified_posts_v2';
+      let notified = JSON.parse(localStorage.getItem(notifiedKey) || '[]');
+      let hasChanges = false;
+
+      for (const post of allFavs) {
+        if (!post.expiry) continue;
+        const expiryDate = post.expiry.toDate ? post.expiry.toDate() : new Date(post.expiry);
+        const diffMs = expiryDate.getTime() - now;
+        const diffMins = diffMs / (1000 * 60);
+
+        // 1. Check for < 5 mins (Expiring Now) - Red Alarm
+        if (diffMs > 0 && diffMins <= 5) {
+          const key = `${post.id}_5min`;
+          if (!notified.includes(key)) {
+            const name = post.title || post.name || "Post";
+            notificationsMapRef.current.set(`expiry_5min_${post.id}`, {
+              id: `expiry_5min_${post.id}`,
+              type: "post_status",
+              title: "Hurry up!!!",
+              message: `⌛️Your favorites post "${name}" is expiring now - Take a Look!`,
+              date: new Date(),
+              timestamp: Date.now(),
+              status: "expiring_5min", // Special status for icon
+              postId: post.id,
+              postType: post.type || (post.serviceType ? 'service' : post.photos ? 'ad' : 'worker')
+            });
+            notified.push(key);
+            hasChanges = true;
+            setHasUnreadNotifs(true);
+          }
+        }
+        // 2. Check for < 1 hour (Expiring Soon) - Blue Stop Watch
+        else if (diffMs > 0 && diffMins <= 60 && diffMins > 5) {
+          const key = `${post.id}_1hr`;
+          if (!notified.includes(key)) {
+            const name = post.title || post.name || "Post";
+            notificationsMapRef.current.set(`expiry_1hr_${post.id}`, {
+              id: `expiry_1hr_${post.id}`,
+              type: "post_status",
+              title: "Last chance!",
+              message: `Your favorites post "${name}" is expiring; Let's go!!!`,
+              date: new Date(),
+              timestamp: Date.now(),
+              status: "expiring_1hr", // Special status for icon
+              postId: post.id,
+              postType: post.type || (post.serviceType ? 'service' : post.photos ? 'ad' : 'worker')
+            });
+            notified.push(key);
+            hasChanges = true;
+            setHasUnreadNotifs(true);
+          }
+        }
+        // 3. Check for Expired (Fallback)
+        else if (diffMs <= 0 && diffMs > -60 * 60 * 1000) { // Just expired (within last hour)
+          const key = `${post.id}_expired`;
+          if (!notified.includes(key)) {
+            notificationsMapRef.current.set(`expiry_expired_${post.id}`, {
+              id: `expiry_expired_${post.id}`,
+              type: "post_status",
+              title: "Favorite Expired",
+              message: `Your favorited post "${post.title || post.name}" has expired.`,
+              date: new Date(),
+              timestamp: Date.now(),
+              status: "expired",
+              postId: post.id,
+              postType: post.type || (post.serviceType ? 'service' : post.photos ? 'ad' : 'worker')
+            });
+            notified.push(key);
+            hasChanges = true;
+            setHasUnreadNotifs(true);
+          }
+        }
+      }
+
+      if (notified.length > 150) notified = notified.slice(-150); // Keep last 150 (allow room for multiple keys per post)
+      localStorage.setItem(notifiedKey, JSON.stringify(notified));
+
+      if (hasChanges) {
+        updateNotificationsUI();
+      }
+    };
+
+    // Run check immediately after a small delay to allow favorites to load
+    const initialTimeout = setTimeout(checkExpiry, 2000);
+
+    // Runs every minute to check if any favorite post is about to expire
+    const expiryInterval = setInterval(checkExpiry, 60000); // Check every minute
+
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(expiryInterval);
+    };
+  }, [currentUserId, updateNotificationsUI]); // Reduced dependencies to ensure stability
 
   // Function to mark notifications as viewed
   const markNotificationsViewed = useCallback(() => {
@@ -705,11 +816,7 @@ export function GlobalDataCacheProvider({ children }) {
       setNotesLoading(false);
       lastUpdateRef.current.notes = new Date();
 
-      console.group(`[GlobalCache: NOTES]`);
-      console.log(`%c✔ Notes synchronized`, "color: blue; font-weight: bold");
-      console.log(`- Reads: ${snapshot.docs.length || 1} (Active listener)`);
-      console.log(`- Writes: 0`);
-      console.groupEnd();
+
     }, (error) => {
       console.error('Error loading notes:', error);
       setNotesLoading(false);
@@ -804,9 +911,6 @@ export function GlobalDataCacheProvider({ children }) {
       }
 
       keysToRemove.forEach(key => localStorage.removeItem(key));
-      if (keysToRemove.length > 0) {
-        console.log(`[GlobalCache] Cleaned up ${keysToRemove.length} expired post detail caches`);
-      }
     } catch (e) {
       console.error('Error cleaning up post detail cache:', e);
     }
@@ -836,11 +940,7 @@ export function GlobalDataCacheProvider({ children }) {
       return onSnapshot(q, (snap) => {
         const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-        console.group(`[GlobalCache: MY POSTS - ${type.key}]`);
-        console.log(`%c✔ My ${type.key} synchronized`, "color: blue; font-weight: bold");
-        console.log(`- Reads: ${snap.docs.length || 1} (Active listener)`);
-        console.log(`- Writes: 0`);
-        console.groupEnd();
+
 
         myPostsMapRef.current[type.key] = docs;
         setMyPostsCache({ ...myPostsMapRef.current });
@@ -865,7 +965,7 @@ export function GlobalDataCacheProvider({ children }) {
   useEffect(() => {
     const state = listenerStateRef.current;
     return () => {
-      console.log('[GlobalCache] Cleaning up all listeners on unmount');
+
       if (state.userProfile.unsubscribe) state.userProfile.unsubscribe();
       if (state.chats.unsubscribe) state.chats.unsubscribe();
       if (state.chatBadge.unsubscribe) state.chatBadge.unsubscribe();
@@ -937,6 +1037,10 @@ export function GlobalDataCacheProvider({ children }) {
     hasMoreChats,
     loadMoreChats: () => setChatLimit(prev => prev + 15),
 
+    // Search Persistence
+    searchStates,
+    updateSearchState,
+
     // Post Detail cache functions (2-day TTL)
     getPostDetailCache,
     setPostDetailCache,
@@ -976,7 +1080,9 @@ export function GlobalDataCacheProvider({ children }) {
     invalidatePostDetailCache,
     getCacheStats,
     hasMoreChats,
-    lastNotificationView
+    lastNotificationView,
+    searchStates,
+    updateSearchState
   ]);
 
   return (
@@ -1091,6 +1197,14 @@ export function useFavoritesCache() {
     loading: favoritesLoading,
     currentUserId
   };
+}
+
+/**
+ * Hook for Workers/Services/Ads pages to persist search results
+ */
+export function useSearchCache() {
+  const { searchStates, updateSearchState } = useGlobalDataCache();
+  return { searchStates, updateSearchState };
 }
 
 export default GlobalDataCacheContext;

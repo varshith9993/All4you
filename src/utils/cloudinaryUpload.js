@@ -30,7 +30,6 @@ export async function uploadToCloudinary(file, resourceType = "auto") {
 
     return data.secure_url;
   } catch (error) {
-    console.error("Cloudinary upload error:", error.message);
     throw error;
   }
 }

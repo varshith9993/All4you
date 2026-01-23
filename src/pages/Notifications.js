@@ -10,8 +10,10 @@ import {
     FiArrowLeft,
     FiMessageSquare,
     FiCheckCircle,
-    FiMessageCircle
+    FiMessageCircle,
+    FiClock
 } from "react-icons/fi";
+import ActionMessageModal from "../components/ActionMessageModal";
 
 /* ---------------- ICON ---------------- */
 
@@ -32,12 +34,15 @@ const getIcon = (notif) => {
     if (type === "alert_good") return <FiCheckCircle className="text-green-500" size={20} />;
     if (type === "system") return <FiInfo className="text-purple-500" size={20} />;
 
+    if (notif.status === 'expiring_5min') return <FiClock className="text-red-600" size={20} />;
+    if (notif.status === 'expiring_1hr') return <FiClock className="text-blue-600" size={20} />;
+
     return <FiBell className="text-gray-500" size={20} />;
 };
 
 /* ---------------- ITEM ---------------- */
 
-const NotificationItem = ({ notif, viewTime }) => {
+const NotificationItem = ({ notif, viewTime, setActionModal }) => {
     const [expanded, setExpanded] = useState(false);
     const [isTruncated, setIsTruncated] = useState(false);
     const [formattedMessage, setFormattedMessage] = useState(notif.message);
@@ -46,7 +51,7 @@ const NotificationItem = ({ notif, viewTime }) => {
     const navigate = useNavigate();
 
 
-    const { getPostDetailCache, setPostDetailCache } = useNotificationsCache();
+    const { setPostDetailCache } = useNotificationsCache();
     const isNew = notif.timestamp > viewTime;
 
     // Data is pre-formatted in GlobalDataCacheContext for better performance and reliability
@@ -63,32 +68,40 @@ const NotificationItem = ({ notif, viewTime }) => {
     }, [formattedMessage]);
 
     const handleClick = async () => {
-        const isActionable = ["rating", "review", "reply"].includes(notif.type);
+        // Special Actionable Types
+        const isStandardActionable = ["rating", "review", "reply"].includes(notif.type);
+        const isExpiryActionable = notif.type === "post_status" && (notif.status === 'expiring_5min' || notif.status === 'expiring_1hr');
 
-        if (!isActionable) {
+        if (!isStandardActionable && !isExpiryActionable) {
             if (notif.type === "system" && notif.actionUrl) window.open(notif.actionUrl, '_blank');
+            return;
+        }
+
+        // Feature: Specific expiring notifications go to Favorites page
+        if (isExpiryActionable) {
+            navigate('/favorites');
             return;
         }
 
         if (notif.postId && notif.postType) {
             try {
-                // Check if post exists and is enabled
+                // REQUIREMENT: Always check fresh status to prevent navigating to disabled/expired posts
                 let postData = null;
-                const cachedResult = getPostDetailCache(notif.postType, notif.postId);
-                if (cachedResult) {
-                    postData = cachedResult.data;
-                } else {
-                    const colName = { worker: "workers", service: "services", ad: "ads" }[notif.postType];
+                const colName = { worker: "workers", service: "services", ad: "ads" }[notif.postType];
+
+                if (colName) {
                     const snap = await getDoc(doc(db, colName, notif.postId));
                     if (snap.exists()) {
                         postData = snap.data();
+                        // Update cache with fresh data for other parts of the app
                         setPostDetailCache(notif.postType, notif.postId, postData);
                     }
                 }
 
                 if (postData) {
-                    const isForbidden = postData.status === "disabled" || postData.status === "expired" || postData.status === "deleted";
-                    if (!isForbidden) {
+                    // Only allow navigation if the post is strictly active
+                    const status = postData.status || 'active';
+                    if (status === 'active') {
                         const route = { worker: "/worker-detail/", service: "/service-detail/", ad: "/ad-detail/" }[notif.postType];
                         if (route) {
                             navigate(route + notif.postId);
@@ -96,14 +109,23 @@ const NotificationItem = ({ notif, viewTime }) => {
                         }
                     }
                 }
-                alert("the post is unavailable");
+
+                // If code reaches here, post is unavailable (deleted, disabled, or expired)
+                setActionModal({
+                    isOpen: true,
+                    title: "Post Unavailable",
+                    message: "This post is unavailable as it has been disabled, expired, or deleted by the owner.",
+                    type: "error"
+                });
             } catch (e) {
-                console.error("Navigation error:", e);
+                console.error("Error checking post availability:", e);
             }
         }
     };
 
-    const isNavigable = ["rating", "review", "reply"].includes(notif.type);
+    const isNavigable =
+        ["rating", "review", "reply"].includes(notif.type) ||
+        (notif.type === "post_status" && (notif.status === 'expiring_5min' || notif.status === 'expiring_1hr'));
 
     return (
         <div
@@ -166,6 +188,8 @@ export default function Notifications() {
     const { notifications, loading, lastNotificationView, markNotificationsViewed, getPostDetailCache, setPostDetailCache } = useNotificationsCache();
     const navigate = useNavigate();
 
+    const [actionModal, setActionModal] = useState({ isOpen: false, title: "", message: "", type: "success" });
+
     // Capture exactly what the persistent view time was when the user entered this session.
     // Use sessionStorage to keep it stable until the tab is closed, ensuring "New" items stay "New".
     const [viewTime] = useState(() => {
@@ -213,18 +237,11 @@ export default function Notifications() {
                     const q = query(collection(db, col), where("__name__", "in", chunk));
                     const snap = await getDocs(q);
 
-                    console.group(`[Data Sync: NOTIFICATIONS BATCH - ${col.toUpperCase()}]`);
-                    console.log(`%c✔ Details fetched for ${snap.docs.length} posts`, "color: blue; font-weight: bold");
-                    console.log(`- Reads: ${snap.docs.length || 1}`);
-                    console.log(`- Writes: 0`);
-                    console.groupEnd();
-
                     snap.docs.forEach(d => {
                         const type = col === 'workers' ? 'worker' : col === 'services' ? 'service' : 'ad';
                         setPostDetailCache(type, d.id, d.data());
                     });
                 } catch (e) {
-                    console.error(`Batch fetch error for ${col}:`, e);
                 }
             }
         };
@@ -277,10 +294,19 @@ export default function Notifications() {
                             key={n.id}
                             notif={n}
                             viewTime={viewTime}
+                            setActionModal={setActionModal}
                         />
                     ))
                 )}
             </div>
+
+            <ActionMessageModal
+                isOpen={actionModal.isOpen}
+                onClose={() => setActionModal(prev => ({ ...prev, isOpen: false }))}
+                title={actionModal.title}
+                message={actionModal.message}
+                type={actionModal.type}
+            />
         </div>
     );
 }

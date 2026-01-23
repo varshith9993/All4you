@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 
 
 
@@ -84,10 +84,10 @@ export function useLocationWithAddress(apiKey, apiProvider) {
     );
   }, [fetchAddress]);
 
-  useEffect(() => {
-    requestLocation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Removed auto-fetch useEffect to prevent unwanted permission prompts
+  // useEffect(() => {
+  //   requestLocation();
+  // }, []);
 
   return {
     location,

@@ -3,13 +3,14 @@ import { db } from "../firebase";
 import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
-import { FiCamera, FiMapPin, FiX, FiImage, FiFileText, FiUpload, FiArrowLeft, FiRotateCcw } from "react-icons/fi";
+import { FiMapPin, FiX, FiImage, FiFileText, FiUpload, FiArrowLeft, FiRotateCcw } from "react-icons/fi";
 
-import defaultAvatar from "../assets/images/default_profile.svg";
+
 import LocationPickerModal from "../components/LocationPickerModal";
+import ActionMessageModal from "../components/ActionMessageModal";
 import { compressFile } from "../utils/compressor";
 
-const suggestedTags = ["mechanic", "engineer", "tutor", "electrician", "driver", "teacher", "plumber", "carpenter", "painter", "cleaner", "cook", "gardener"];
+const suggestedTags = ["mechanic", "security", "receptionist", "waiter", "tutor", "electrician", "driver", "teacher", "plumber", "carpenter", "painter", "cleaner", "cook", "gardener", "care taker", "marketing", "technician", "delivery boy", "developer", "labour", "driving tutor", "coding tutor"];
 const LOCATIONIQ_API_KEY = "pk.c46b235dc808aed78cb86bd70c83fab0";
 
 export default function EditWorker() {
@@ -39,6 +40,8 @@ export default function EditWorker() {
   const [saveConfirm, setSaveConfirm] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [actionModal, setActionModal] = useState({ isOpen: false, title: "", message: "", type: "success", onOk: null });
+  const [locationLoading, setLocationLoading] = useState(false);
 
   // Load worker data
   useEffect(() => {
@@ -100,7 +103,7 @@ export default function EditWorker() {
   }, [id]);
 
   const uploadFileToCloudinary = async (file) => {
-    const compressedFile = await compressFile(file);
+    const compressedFile = await compressFile(file, {}, 'EDIT_WORKER');
     const formData = new FormData();
     formData.append("file", compressedFile);
     formData.append("upload_preset", "ml_default");
@@ -138,13 +141,14 @@ export default function EditWorker() {
 
   const autofillLocation = () => {
     if (!navigator.geolocation) {
-      alert("Geolocation not supported.");
+      setError("Geolocation not supported.");
       return;
     }
+    setLocationLoading(true);
     navigator.geolocation.getCurrentPosition(async (pos) => {
       const { latitude, longitude } = pos.coords;
-      setLatitude(latitude);
-      setLongitude(longitude);
+      setLatitude(latitude.toString());
+      setLongitude(longitude.toString());
       try {
         const geoRes = await axios.get(`https://us1.locationiq.com/v1/reverse.php`, {
           params: {
@@ -159,10 +163,13 @@ export default function EditWorker() {
         setLocationCity(addr.city || addr.town || addr.county || "");
         setPincode(addr.postcode || "");
       } catch {
-        alert("Failed to get location details.");
+        setError("Failed to get location details.");
+      } finally {
+        setLocationLoading(false);
       }
     }, (err) => {
-      alert("Failed to get location. Please enable GPS and allow location access.");
+      setError("Failed to get location. Please enable GPS and allow location access.");
+      setLocationLoading(false);
     }, {
       enableHighAccuracy: true,
       timeout: 30000,
@@ -174,10 +181,10 @@ export default function EditWorker() {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
 
-    // Validate file size (Max 2.5MB)
+    // Validate file size (Max 2MB)
     for (const file of files) {
-      if (file.size > 2.5 * 1024 * 1024) {
-        alert(`File "${file.name}" exceeds the 2.5MB limit.`);
+      if (file.size > 2 * 1024 * 1024) {
+        alert(`File "${file.name}" exceeds the 2MB limit.`);
         return;
       }
     }
@@ -195,9 +202,7 @@ export default function EditWorker() {
     setUploadedFiles((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const handleProfilePhotoChange = (e) => {
-    setProfilePhoto(e.target.files[0] || null);
-  };
+
 
   const handleReset = () => {
     if (!originalData) return;
@@ -278,13 +283,16 @@ export default function EditWorker() {
 
       await updateDoc(doc(db, "workers", id), updateData);
 
-      console.group(`[Action: UPDATE WORKER]`);
-      console.log(`%c✔ Firestore Write Successful`, "color: green; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
+      setSubmitting(false);
       setSaveConfirm(false);
-      navigate(-1);
+
+      setActionModal({
+        isOpen: true,
+        title: "Success!",
+        message: "Your changes have been updated successfully.",
+        type: "success",
+        onOk: () => navigate(-1)
+      });
     } catch (err) {
       console.error("Update worker error:", err);
       setError(`Failed to update worker. Try again. Error: ${err.message || err}`);
@@ -300,39 +308,22 @@ export default function EditWorker() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-pink-50">
+    <div className="min-h-screen bg-gray-50">
       <div className="max-w-2xl mx-auto px-4 py-6 pb-24">
-        {/* Header with Back Button */}
-        <div className="mb-6">
+        {/* Header with Authentic Back Button */}
+        <header className="flex items-center gap-3 mb-6">
           <button
             onClick={() => navigate(-1)}
-            className="mb-4 text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-2 transition-colors"
+            className="p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+            aria-label="Go Back"
           >
-            <FiArrowLeft size={20} /> Back
+            <FiArrowLeft size={24} />
           </button>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Edit Worker Profile</h1>
-          <p className="text-gray-600">Update worker details</p>
-        </div>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Edit Worker Profile</h1>
+        </header>
 
         <div className="space-y-6">
-          {/* Profile Photo */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-            <div className="flex flex-col items-center">
-              <div className="relative">
-                <img
-                  src={profilePhoto ? URL.createObjectURL(profilePhoto) : existingProfilePhotoUrl || defaultAvatar}
-                  alt="Profile"
-                  className="w-24 h-24 rounded-full object-cover border-4 border-white shadow-lg"
-                  crossOrigin="anonymous"
-                />
-                <label className="absolute bottom-0 right-0 bg-indigo-600 text-white p-2 rounded-full cursor-pointer shadow-md hover:bg-indigo-700 transition-colors">
-                  <FiCamera size={16} />
-                  <input type="file" accept="image/*" className="hidden" onChange={handleProfilePhotoChange} />
-                </label>
-              </div>
-              <p className="text-xs text-gray-500 mt-2">Tap camera to change photo</p>
-            </div>
-          </div>
+          {/* Profile Photo Section Removed (Uses User Profile Image) */}
 
           {/* Title */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
@@ -414,22 +405,37 @@ export default function EditWorker() {
 
           {/* Location */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-            <div className="flex justify-between items-center mb-3">
-              <label className="text-sm font-bold text-gray-700 flex items-center gap-1">
-                <FiMapPin /> Location <span className="text-red-500">*</span>
-              </label>
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowLocationPicker(true)}
-                  className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1"
-                >
-                  <FiMapPin size={12} /> Pin on Map
-                </button>
-                <button type="button" className="text-xs font-bold text-indigo-600 hover:underline" onClick={autofillLocation}>
-                  Get Current Location
-                </button>
-              </div>
+            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <FiMapPin className="text-indigo-600" />
+              Location
+            </h2>
+            <div className="flex flex-row gap-2 mb-4">
+              <button
+                type="button"
+                onClick={autofillLocation}
+                disabled={locationLoading}
+                className="flex-1 px-3 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium text-xs sm:text-sm disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+              >
+                {locationLoading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
+                    Locating...
+                  </>
+                ) : (
+                  <>
+                    <FiMapPin size={14} />
+                    Get Location
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowLocationPicker(true)}
+                className="flex-1 px-3 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium text-xs sm:text-sm flex items-center justify-center gap-2"
+              >
+                <FiMapPin size={14} />
+                Pin on Map
+              </button>
             </div>
             <div className="space-y-3">
               <input type="text" placeholder="Area" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={locationArea} onChange={(e) => setLocationArea(e.target.value)} required />
@@ -457,7 +463,7 @@ export default function EditWorker() {
                 <span className="text-sm text-gray-600">
                   Click to upload files
                 </span>
-                <p className="text-xs text-gray-500 mt-1">Images, PDFs, Docs (Max 2.5MB)</p>
+                <p className="text-xs text-gray-500 mt-1">Images, PDFs, Docs (Max 2MB)</p>
               </div>
               <input
                 type="file"
@@ -525,26 +531,29 @@ export default function EditWorker() {
           </div>
 
           {error && <div className="p-3 bg-red-50 text-red-600 text-sm rounded-xl border border-red-100 text-center">{error}</div>}
+
+          {/* Action Buttons (Inline) */}
+          <div className="flex gap-3 pt-4">
+            <button
+              className="flex-1 bg-gray-100 text-gray-700 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-gray-200 transition-colors"
+              onClick={() => setResetConfirm(true)}
+              disabled={submitting}
+            >
+              <FiRotateCcw /> Reset
+            </button>
+            <button
+              className="flex-[2] bg-gradient-to-r from-indigo-600 to-pink-600 text-white py-3.5 rounded-xl font-bold shadow-lg shadow-indigo-500/30 hover:opacity-90 transition-all flex items-center justify-center gap-2"
+              onClick={() => setSaveConfirm(true)}
+              disabled={submitting}
+            >
+              {submitting ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Bottom Actions */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 flex gap-3 max-w-2xl mx-auto z-40 shadow-lg">
-        <button
-          className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-gray-200 transition-colors"
-          onClick={() => setResetConfirm(true)}
-          disabled={submitting}
-        >
-          <FiRotateCcw /> Reset Changes
-        </button>
-        <button
-          className="flex-[2] bg-gradient-to-r from-indigo-600 to-pink-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-indigo-500/30 hover:opacity-90 transition-all flex items-center justify-center gap-2"
-          onClick={() => setSaveConfirm(true)}
-          disabled={submitting}
-        >
-          {submitting ? "Saving..." : "Save Changes"}
-        </button>
-      </div>
+
 
       {/* Save Confirmation Modal */}
       {saveConfirm && (
@@ -612,6 +621,15 @@ export default function EditWorker() {
           setError("");
         }}
         onCancel={() => setShowLocationPicker(false)}
+      />
+
+      <ActionMessageModal
+        isOpen={actionModal.isOpen}
+        onClose={() => setActionModal(prev => ({ ...prev, isOpen: false }))}
+        title={actionModal.title}
+        message={actionModal.message}
+        type={actionModal.type}
+        onOk={actionModal.onOk}
       />
     </div>
   );

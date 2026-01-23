@@ -116,11 +116,7 @@ export default function Login() {
       const docRef = doc(db, "profiles", user.uid);
       const docSnap = await getDoc(docRef);
 
-      console.group(`[Auth Check: GOOGLE PROFILE]`);
-      console.log(`%c✔ Profile check completed`, "color: gray; font-weight: bold");
-      console.log(`- Reads: 1`);
-      console.log(`- Writes: 0`);
-      console.groupEnd();
+
 
       if (docSnap.exists()) {
         // User has an account, proceed to login
@@ -139,7 +135,6 @@ export default function Login() {
         });
       }
     } catch (err) {
-      console.error("Google Sign-In Error:", err);
       // Handle specific error codes
       if (err.code === "auth/popup-closed-by-user") {
         setError("Sign-in popup was closed. Please try again.");
@@ -161,7 +156,6 @@ export default function Login() {
         try {
           await signOut(auth);
         } catch (signOutErr) {
-          console.error("Sign out error:", signOutErr);
         }
         navigate("/signup", {
           state: {

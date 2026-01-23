@@ -57,7 +57,6 @@ function isUserOnline(online, lastSeen) {
       if (minutesSinceLastSeen > 5) return false;
       if (minutesSinceLastSeen < 2) return true;
     } catch (error) {
-      console.error('Error checking lastSeen:', error);
     }
   }
 
@@ -83,13 +82,7 @@ function ChatCard({ chat, uid, profiles, navigate }) {
         updateDoc(doc(db, "chats", chat.id), {
           [`unseenCounts.${uid}`]: 0
         });
-        console.group(`[Action: RESET UNSEEN COUNT]`);
-        console.log(`%c✔ Messages marked as seen`, "color: gray; font-weight: bold");
-        console.log(`- Reads: 0`);
-        console.log(`- Writes: 1`);
-        console.groupEnd();
       } catch (error) {
-        console.error("Error resetting unseen count:", error);
       }
     }
     navigate(`/chat/${chat.id}`);
@@ -101,13 +94,7 @@ function ChatCard({ chat, uid, profiles, navigate }) {
       await updateDoc(doc(db, "chats", chat.id), {
         isFavorite: !chat.isFavorite
       });
-      console.group(`[Action: TOGGLE CHAT FAVORITE]`);
-      console.log(`%c✔ Favorite status updated`, "color: blue; font-weight: bold");
-      console.log(`- Reads: 0`);
-      console.log(`- Writes: 1`);
-      console.groupEnd();
     } catch (error) {
-      console.error("Error toggling favorite:", error);
     }
   };
 
@@ -204,7 +191,6 @@ export default function Chats() {
       const fetchedProfiles = await fetchProfiles(participantIds);
       setProfiles(prev => ({ ...prev, ...fetchedProfiles }));
     } catch (error) {
-      console.error("Error batch fetching participant profiles:", error);
     }
   }, [fetchProfiles]);
 

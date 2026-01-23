@@ -9,11 +9,12 @@ import {
 } from "firebase/firestore";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import { FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck } from "react-icons/fi";
+import { FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck, FiArrowLeft } from "react-icons/fi";
 import LocationPickerModal from "../components/LocationPickerModal";
+import ActionMessageModal from "../components/ActionMessageModal";
 import { compressFile } from "../utils/compressor";
 
-const suggestedTags = ["discount", "offer", "sale", "new", "limited", "popular", "urgent", "exchange"];
+const suggestedTags = ["furniture", "mobile", "bike", "freelancing", "petrol pump", "farm house", "land", "car", "fridge", "T.V", "watch", "house", "apppartment", "gold shop", "loan", "restraunt", "hotel", "boutique", "cloth shop", "footwear shop", "A.C", "laptop", "iphone"];
 const LOCATIONIQ_API_KEY = "pk.a9310b368752337ce215643e50ac0172";
 const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
 const CLOUDINARY_UPLOAD_PRESET = "ml_default";
@@ -38,6 +39,7 @@ export default function AddAds() {
   const [error, setError] = useState("");
   const [locationLoading, setLocationLoading] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [actionModal, setActionModal] = useState({ isOpen: false, title: "", message: "", type: "success", onOk: null });
 
   const navigate = useNavigate();
 
@@ -54,7 +56,8 @@ export default function AddAds() {
 
   const uploadFileToCloudinary = async (file) => {
     // Compress file before upload (images only, SVGs skipped)
-    const compressedFile = await compressFile(file);
+    // Ads need better quality: <300KB max, 1600px
+    const compressedFile = await compressFile(file, { maxSizeMB: 0.29, maxWidthOrHeight: 1600 }, 'AD_POST');
 
     const formData = new FormData();
     formData.append("file", compressedFile);
@@ -75,13 +78,7 @@ export default function AddAds() {
       return;
     }
 
-    // Validate file size (Max 2.5MB)
-    for (const file of files) {
-      if (file.size > 2.5 * 1024 * 1024) {
-        setError(`Photo "${file.name}" exceeds the 2.5MB limit.`);
-        return;
-      }
-    }
+    // Removed file size validation as per request (Compressor handles optimization)
 
     // Create previews immediately
     const newPreviews = files.map(file => URL.createObjectURL(file));
@@ -188,7 +185,7 @@ export default function AddAds() {
         uploadedUrls.push(url);
       }
 
-      const docRef = await addDoc(collection(db, "ads"), {
+      await addDoc(collection(db, "ads"), {
         // Flat fields kept for compatibility (can be removed if migration script runs)
         username: userProfile.username || "",
         profileImage: userProfile.profileImage || "",
@@ -225,14 +222,15 @@ export default function AddAds() {
         createdBy: currentUser.uid,
       });
 
-      console.group(`[Action: CREATE AD]`);
-      console.log(`%c✔ Firestore Operations Successful`, "color: green; font-weight: bold");
-      console.log(`- Reads: 1 (Fetch profile snap)`);
-      console.log(`- Writes: 1 (Add ad document)`);
-      console.log(`Document ID: ${docRef.id}`);
-      console.groupEnd();
 
-      navigate("/ads");
+
+      setActionModal({
+        isOpen: true,
+        title: "Success!",
+        message: "Ad posted successfully.",
+        type: "success",
+        onOk: () => navigate("/ads")
+      });
     } catch (err) {
       console.error("Submission error:", err);
       setError(`Failed to post ad: ${err.message || err}`);
@@ -246,16 +244,16 @@ export default function AddAds() {
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-pink-50">
       <div className="max-w-2xl mx-auto px-3 py-4 sm:px-4 sm:py-6">
         {/* Header */}
-        <div className="mb-6">
+        <header className="flex items-center gap-3 mb-6">
           <button
             onClick={() => navigate(-1)}
-            className="mb-4 text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-2 transition-colors"
+            className="p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+            aria-label="Go Back"
           >
-            ← Back
+            <FiArrowLeft size={24} />
           </button>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Create New Ad</h1>
-          <p className="text-gray-600">Post an ad to sell, buy, or announce something.</p>
-        </div>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Create New Ad</h1>
+        </header>
 
         <form onSubmit={onSubmit} className="space-y-6">
 
@@ -309,7 +307,7 @@ export default function AddAds() {
                 <span className="text-sm text-gray-600">
                   Click to upload photos
                 </span>
-                <p className="text-xs text-gray-500 mt-1">Supports JPG, PNG, SVG (Max 2.5MB)</p>
+                <p className="text-xs text-gray-500 mt-1">Supports JPG, PNG, SVG (Max 4 photos)</p>
               </div>
               <input
                 type="file"
@@ -431,7 +429,7 @@ export default function AddAds() {
                 ) : (
                   <>
                     <FiMapPin size={14} />
-                    Current Loc
+                    Get Location
                   </>
                 )}
               </button>
@@ -543,6 +541,14 @@ export default function AddAds() {
             setError("");
           }}
           onCancel={() => setShowLocationPicker(false)}
+        />
+        <ActionMessageModal
+          isOpen={actionModal.isOpen}
+          onClose={() => setActionModal(prev => ({ ...prev, isOpen: false }))}
+          title={actionModal.title}
+          message={actionModal.message}
+          type={actionModal.type}
+          onOk={actionModal.onOk}
         />
       </div>
     </div>

@@ -129,7 +129,7 @@ export function PaginatedDataCacheProvider({ children }) {
         timestamp: Date.now() // OPTIMIZATION: 45-min cache TTL
       };
       localStorage.setItem('paginated_workers_cache', JSON.stringify(dataToStore));
-    } catch (e) { console.error("Error saving worker cache", e); }
+    } catch (e) { }
   }, [workersData.items, workersData.hasMore]);
 
   useEffect(() => {
@@ -141,7 +141,7 @@ export function PaginatedDataCacheProvider({ children }) {
         timestamp: Date.now() // OPTIMIZATION: 45-min cache TTL
       };
       localStorage.setItem('paginated_services_cache', JSON.stringify(dataToStore));
-    } catch (e) { console.error("Error saving service cache", e); }
+    } catch (e) { }
   }, [servicesData.items, servicesData.hasMore]);
 
   useEffect(() => {
@@ -153,7 +153,7 @@ export function PaginatedDataCacheProvider({ children }) {
         timestamp: Date.now() // OPTIMIZATION: 45-min cache TTL
       };
       localStorage.setItem('paginated_ads_cache', JSON.stringify(dataToStore));
-    } catch (e) { console.error("Error saving ad cache", e); }
+    } catch (e) { }
   }, [adsData.items, adsData.hasMore]);
 
 
@@ -182,12 +182,8 @@ export function PaginatedDataCacheProvider({ children }) {
       const snapshot = await getCountFromServer(q);
       const count = snapshot.data().count;
 
-      // LOG ACTUAL READ (Count costs 1 read)
-      console.log(`[Firestore Read] getCollectionCount: 1 read (counted ${count} docs)`);
-
       return count;
     } catch (error) {
-      console.error(`Error getting count for ${collectionName}:`, error);
       return -1;
     }
   }, []);
@@ -221,11 +217,8 @@ export function PaginatedDataCacheProvider({ children }) {
       const data = snapshot.docs[0].data();
       const timestamp = data.updatedAt?.toMillis?.() || data.updatedAt || data.createdAt?.toMillis?.() || data.createdAt || 0;
 
-      // LOG ACTUAL READ (limit(1) costs 1 read)
-      console.log(`[Firestore Read] getLatestTimestamp: 1 read (returned 1 doc)`);
       return timestamp;
     } catch (error) {
-      console.error(`Error getting latest timestamp for ${collectionName}:`, error);
       return 0;
     }
   }, []);
@@ -243,40 +236,16 @@ export function PaginatedDataCacheProvider({ children }) {
     // OPTIMIZATION: Skip metadata check if checked within last 10 minutes
     const timeSinceLastCheck = now - (cached.lastCheck || 0);
     if (timeSinceLastCheck < METADATA_CHECK_INTERVAL) {
-      console.group(`[Tab Entry: ${collectionName.toUpperCase()}]`);
-      console.log(`%c✔ Using Recent Cache`, "color: green; font-weight: bold");
-      console.log(`Firestore Operations:`);
-      console.log(`- Reads: 0 (Skipped - checked ${Math.floor(timeSinceLastCheck / 1000)}s ago)`);
-      console.log(`- Writes: 0`);
-      console.groupEnd();
       return false; // Assume no changes
     }
 
     // Check for changes (metadata check: timestamp only)
-    console.log(`[PaginatedCache] Checking for changes in ${collectionName}...`);
 
     // OPTIMIZATION: Only check timestamp (removed count check - saves 1 read)
     const currentTimestamp = await getLatestTimestamp(collectionName);
 
     const timeChanged = cached.latestTimestamp < currentTimestamp;
     const hasChanges = timeChanged;
-
-    if (hasChanges) {
-      console.group(`[Tab Entry: ${collectionName.toUpperCase()}]`);
-      console.log(`%c⚠ Change Detected`, "color: orange; font-weight: bold");
-      console.log(`Firestore Operations (Verification):`);
-      console.log(`- Reads: 1 (1 Timestamp API - count check removed)`);
-      console.log(`- Writes: 0`);
-      console.log(`Summary: Latest Post Updated`);
-      console.groupEnd();
-    } else {
-      console.group(`[Tab Entry: ${collectionName.toUpperCase()}]`);
-      console.log(`%c✔ Data Up to Date`, "color: green; font-weight: bold");
-      console.log(`Firestore Operations (Verification):`);
-      console.log(`- Reads: 1 (1 Timestamp API - count check removed)`);
-      console.log(`- Writes: 0`);
-      console.groupEnd();
-    }
 
     // Update metadata cache regardless of change
     metadataCacheRef.current[collectionName] = {
@@ -286,7 +255,7 @@ export function PaginatedDataCacheProvider({ children }) {
     };
     try {
       localStorage.setItem('paginated_metadata_cache', JSON.stringify(metadataCacheRef.current));
-    } catch (e) { console.error("Error saving metadata cache", e); }
+    } catch (e) { }
 
     return hasChanges;
   }, [getLatestTimestamp]);
@@ -359,24 +328,12 @@ export function PaginatedDataCacheProvider({ children }) {
 
             if (cacheAge < CACHE_TTL) {
               // Cache is fresh - use it with ZERO reads!
-              const cacheAgeMinutes = Math.floor(cacheAge / 60000);
-              const cacheAgeSeconds = Math.floor((cacheAge % 60000) / 1000);
-
-              console.group(`[Tab Entry: ${collectionName.toUpperCase()}]`);
-              console.log(`%c✔ Using Fresh Cache (${cacheAgeMinutes}m ${cacheAgeSeconds}s old)`, "color: green; font-weight: bold");
-              console.log(`Firestore Operations:`);
-              console.log(`- Reads: 0 (Cache TTL: 7 min)`);
-              console.log(`- Writes: 0`);
-              console.log(`Cache Status: FRESH ✅`);
-              console.groupEnd();
-
               initialLoadRef.current[collectionName] = true;
 
               // Background validation (non-blocking)
               setTimeout(() => {
                 hasCollectionChanges(collectionName).then(hasChanges => {
                   if (hasChanges) {
-                    console.log(`[Background] Changes detected in ${collectionName}, will refresh on next visit`);
                   }
                 });
               }, 1000);
@@ -384,18 +341,10 @@ export function PaginatedDataCacheProvider({ children }) {
               return currentData.items;
             } else {
               // Cache expired - fetch fresh data
-              const expiredMinutes = Math.floor(cacheAge / 60000);
-              console.group(`[Tab Entry: ${collectionName.toUpperCase()}]`);
-              console.log(`%c⚠ Cache Expired (${expiredMinutes} min old)`, "color: orange; font-weight: bold");
-              console.log(`Cache TTL: 7 minutes`);
-              console.log(`Fetching fresh data...`);
-              console.groupEnd();
-
               initialLoadRef.current[collectionName] = true;
               // Continue to fetch below
             }
           } catch (e) {
-            console.error('Error checking cache age:', e);
           }
         }
       }
@@ -491,14 +440,6 @@ export function PaginatedDataCacheProvider({ children }) {
         };
         setDataState(updatedData);
 
-        const totalNewReads = snapshot.docs.length || 1; // Minimum 1 read for the query
-        console.group(`[Fetch: ${collectionName.toUpperCase()}]`);
-        console.log(`%c✔ Load More Successful`, "color: blue; font-weight: bold");
-        console.log(`Firestore Operations:`);
-        console.log(`- Reads: ${totalNewReads} (${snapshot.docs.length} docs)`);
-        console.log(`- Writes: 0`);
-        console.groupEnd();
-
         return updatedData.items;
       } else {
         // Replace items (initial load, filter change, or change detected)
@@ -513,18 +454,9 @@ export function PaginatedDataCacheProvider({ children }) {
           lastCheck: Date.now()
         };
 
-        const totalInitialReads = snapshot.docs.length || 1;
-        console.group(`[Fetch: ${collectionName.toUpperCase()}]`);
-        console.log(`%c✔ Initial/Refresh Load Successful`, "color: blue; font-weight: bold");
-        console.log(`Firestore Operations:`);
-        console.log(`- Reads: ${totalInitialReads} (${snapshot.docs.length} docs retrieved - 1 Bulk Query)`);
-        console.log(`  (Note: Standard Firestore Billing is 1 Read per document)`);
-        console.log(`- Writes: 0`);
-        console.groupEnd();
         return newItems;
       }
     } catch (error) {
-      console.error(`Error fetching ${collectionName}:`, error);
       return currentData.items;
     } finally {
       if (isLoadMore) {
@@ -550,7 +482,7 @@ export function PaginatedDataCacheProvider({ children }) {
     // For real search, we fetch data and filter client-side
     // This is a placeholder - in production, use Algolia, Typesense, or Firestore extensions
 
-    console.log(`[PaginatedCache] Search "${searchQuery}" in ${collectionName} (pageSize: ${pageSize})`);
+    // This is a placeholder - in production, use Algolia, Typesense, or Firestore extensions
 
     // For now, fall back to normal pagination and let the page filter
     return fetchPaginatedData(collectionName, {
