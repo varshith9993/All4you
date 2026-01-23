@@ -804,7 +804,7 @@ export default function Workers() {
 
   if (loading) {
     return (
-      <Layout title="ServePure Workers" activeTab="workers">
+      <Layout title="AeroSigil Workers" activeTab="workers">
         <div className="flex justify-center items-center h-screen">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
         </div>
@@ -815,7 +815,7 @@ export default function Workers() {
 
   return (
     <Layout
-      title="Servepure Workers"
+      title="AeroSigil Workers"
       activeTab="workers"
       headerExtra={
         <>

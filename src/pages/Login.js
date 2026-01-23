@@ -175,7 +175,7 @@ export default function Login() {
       <div className="w-full max-w-md bg-white/90 backdrop-blur-lg rounded-3xl shadow-2xl p-8 animate-fade-in">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold bg-gradient-to-r from-indigo-600 to-pink-600 bg-clip-text text-transparent mb-2">
-            ServePure
+            AeroSigil
           </h1>
           <p className="text-gray-500">Welcome back! Please login to continue.</p>
         </div>

@@ -1136,7 +1136,7 @@ export default function Services() {
 
   return (
     <Layout
-      title="Servepure Services"
+      title="AeroSigil Services"
       activeTab="services"
       headerExtra={
         <>

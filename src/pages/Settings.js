@@ -106,8 +106,8 @@ export default function Settings() {
   const handleShare = async () => {
     const appUrl = window.location.origin; // Gets the base URL of the app
     const shareData = {
-      title: 'ServePure - Connect with Local Services',
-      text: 'Check out ServePure! Find workers, services, and local ads all in one place.',
+      title: 'AeroSigil - Connect with Local Services',
+      text: 'Check out AeroSigil! Find workers, services, and local ads all in one place.',
       url: appUrl
     };
 
@@ -306,7 +306,7 @@ export default function Settings() {
                       onChange={(e) => setFeedbackText(e.target.value)}
                       placeholder={
                         feedbackType === "feedback"
-                          ? "Tell us what you think about ServePure..."
+                          ? "Tell us what you think about AeroSigil..."
                           : "Describe the bug you encountered..."
                       }
                       className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
@@ -320,7 +320,7 @@ export default function Settings() {
 
                   <p className="text-xs text-gray-500 mb-4">
                     {feedbackType === "feedback"
-                      ? "We appreciate your feedback! It helps us improve ServePure."
+                      ? "We appreciate your feedback! It helps us improve AeroSigil."
                       : "Please provide as much detail as possible to help us fix the issue."}
                   </p>
                 </div>
@@ -406,7 +406,7 @@ export default function Settings() {
                 <FiShare2 size={40} className="text-teal-600" />
               </div>
 
-              <h3 className="font-bold text-xl mb-2 text-gray-900">Share ServePure</h3>
+              <h3 className="font-bold text-xl mb-2 text-gray-900">Share AeroSigil</h3>
               <p className="text-gray-600 text-sm mb-6">
                 Help your friends discover local workers, services, and ads. Share the app link with them!
               </p>

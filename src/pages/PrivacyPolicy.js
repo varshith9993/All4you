@@ -57,7 +57,7 @@ export default function PrivacyPolicy() {
                 {/* Introduction */}
                 <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-5 shadow-sm">
                     <p className="text-indigo-900 text-sm leading-relaxed">
-                        Welcome to <strong>ServePure</strong>. We respect your privacy and are committed to protecting your personal data.
+                        Welcome to <strong>AeroSigil</strong>. We respect your privacy and are committed to protecting your personal data.
                         This privacy policy explains how we look after your personal data when you visit our application (Android, iOS, and Web)
                         and tells you about your privacy rights and how the law protects you.
                     </p>
@@ -88,9 +88,15 @@ export default function PrivacyPolicy() {
                 </Section>
 
                 {/* 3. Advertising */}
-                <Section title="3. Advertising" icon={Eye}>
+                <Section title="3. Advertising & Payments" icon={Eye}>
                     <p>
-                        We may use third-party advertising companies to serve ads when you visit our app. These companies may use information regarding your use of this and other apps in order to provide advertisements about goods and services of interest to you.
+                        <strong>Advertising:</strong> We may use third-party advertising companies to serve ads when you visit our app. These companies may use information regarding your use of this and other apps in order to provide advertisements about goods and services of interest to you.
+                    </p>
+                    <p className="mt-2">
+                        <strong>Payments:</strong> For in-app subscriptions or purchases, we use third-party services (e.g. Google Play, App Store). We do not store or collect your payment card details. That information is provided directly to our third-party payment processors whose use of your personal information is governed by their Privacy Policy.
+                    </p>
+                    <p className="mt-2 text-xs text-gray-500">
+                        * Note: User-to-user payments (for services) are offline/direct and are not processed by AeroSigil. We are not responsible for these transactions.
                     </p>
                 </Section>
 
@@ -133,14 +139,14 @@ export default function PrivacyPolicy() {
                     <p>If you have any questions about this Privacy Policy, please contact us:</p>
                     <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 flex items-center gap-3 mt-2">
                         <Mail size={18} className="text-gray-400" />
-                        <span className="font-medium text-gray-700">support@servepure.com</span>
+                        <span className="font-medium text-gray-700">support@aerosigil.com</span>
                     </div>
                 </Section>
 
                 {/* Footer */}
                 <div className="pt-6 pb-10 text-center">
                     <p className="text-xs text-gray-400 mb-4">
-                        By using the ServePure app, you agree to the collection and use of information in accordance with this policy.
+                        By using the AeroSigil app, you agree to the collection and use of information in accordance with this policy.
                     </p>
                 </div>
             </div>

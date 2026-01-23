@@ -846,7 +846,7 @@ export default function Ads() {
 
   return (
     <Layout
-      title="Servepure Ads"
+      title="AeroSigil Ads"
       activeTab="ads"
       headerExtra={
         <>

@@ -53,7 +53,7 @@ export default function TermsAndConditions() {
                 {/* Introduction / Acceptance */}
                 <div className="text-center mb-8 px-2">
                     <p className="text-gray-500 text-sm">
-                        Please read these terms carefully before using the ServePure application.
+                        Please read these terms carefully before using the AeroSigil application.
                     </p>
                 </div>
 
@@ -64,7 +64,7 @@ export default function TermsAndConditions() {
                         <div className="space-y-2">
                             <h3 className="font-bold text-amber-900 text-base">Key Disclaimer</h3>
                             <div className="text-sm text-amber-800/90 leading-relaxed">
-                                ServePure is purely a <strong>connection platform</strong>. We do not provide the services listed, employing no service providers directly. We are <strong>not responsible</strong> for:
+                                AeroSigil is purely a <strong>connection platform</strong>. We do not provide the services listed, employing no service providers directly. We are <strong>not responsible</strong> for:
                                 <ul className="list-disc pl-4 mt-2 space-y-1 text-amber-900/80">
                                     <li>Quality or safety of services provided.</li>
                                     <li>Financial disputes or payment failures.</li>
@@ -78,11 +78,11 @@ export default function TermsAndConditions() {
                 {/* 1. Platform Purpose */}
                 <Section title="1. Platform Nature" icon={Shield}>
                     <p>
-                        ServePure operates as a marketplace to connect users ("Clients") with independent service providers ("Workers").
-                        ServePure is not a party to any service contract between Clients and Workers.
+                        AeroSigil operates as a marketplace to connect users ("Clients") with independent service providers ("Workers").
+                        AeroSigil is not a party to any service contract between Clients and Workers.
                     </p>
                     <p className="bg-gray-50 p-3 rounded-xl border border-gray-100 text-xs text-gray-500 uppercase tracking-wide font-semibold">
-                        ServePure does not guarantee the truthfulness of user profiles or the quality of service.
+                        AeroSigil does not guarantee the truthfulness of user profiles or the quality of service.
                     </p>
                 </Section>
 
@@ -102,13 +102,20 @@ export default function TermsAndConditions() {
                 {/* 3. Payments */}
                 <Section title="3. Financial Terms" icon={CreditCard}>
                     <p>
-                        <strong>Direct Payments:</strong> ServePure is a connection-only platform. All payments, fees, and pricing are negotiated and transacted solely between the Client and the Worker.
+                        <strong>Direct Payments:</strong> AeroSigil is a connection-only platform. All payments, fees, and pricing are negotiated and transacted solely between the Client and the Worker.
                     </p>
-                    <div className="bg-red-50 border border-red-100 rounded-lg p-3">
+                    <div className="bg-red-50 border border-red-100 rounded-lg p-3 my-2">
                         <p className="text-red-700 text-xs font-semibold">
-                            WE DO NOT PROCESS PAYMENTS AND ARE NOT LIABLE FOR REFUNDS OR FRAUD.
+                            IF IN APP TWO USERS MAKE THEIR PAYMENTS, AEROSIGIL IS NOT RESPONSIBLE.
+                            WE DO NOT PROCESS USER-TO-USER PAYMENTS AND ARE NOT LIABLE FOR REFUNDS OR FRAUD.
                         </p>
                     </div>
+                </Section>
+
+                {/* 3.1 Ads and Subscriptions */}
+                <Section title="Ads & Subscriptions" icon={CreditCard}>
+                    <p><strong>Ads:</strong> AeroSigil may display advertisements. These are provided by third parties and we are not responsible for their content.</p>
+                    <p className="mt-2"><strong>In-App Purchases:</strong> We may offer subscriptions or paid features. Payments for these are processed by secure third-party providers (e.g., Google Play, App Store). We do not store your financial details.</p>
                 </Section>
 
                 {/* 4. Prohibited Activities */}
@@ -126,14 +133,14 @@ export default function TermsAndConditions() {
                 <Section title="5. Limitation of Liability" icon={Scale}>
                     <p className="uppercase text-xs font-bold text-gray-400 mb-1">Strict Liability Limit</p>
                     <p>
-                        To the fullest extent permitted by law, ServePure shall not be liable for any indirect, incidental, special, consequential, or punitive damages, or any loss of profits or revenues, whether incurred directly or indirectly.
+                        To the fullest extent permitted by law, AeroSigil shall not be liable for any indirect, incidental, special, consequential, or punitive damages, or any loss of profits or revenues, whether incurred directly or indirectly.
                     </p>
                 </Section>
 
                 {/* Footer / Contact */}
                 <div className="pt-6 pb-10 text-center">
                     <p className="text-xs text-gray-400 mb-4">
-                        By continuing to use ServePure, you acknowledge that you have read and understood these terms.
+                        By continuing to use AeroSigil, you acknowledge that you have read and understood these terms.
                     </p>
                 </div>
             </div>

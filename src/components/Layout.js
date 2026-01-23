@@ -2,7 +2,7 @@ import React, { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useLayoutCache } from "../contexts/GlobalDataCacheContext";
 import {
-    FiStar,
+    FiHeart,
     FiBell,
     FiSettings,
     FiUser,
@@ -14,7 +14,7 @@ import {
 } from "react-icons/fi";
 
 /**
- * Unified Layout component for ServePure.
+ * Unified Layout component for AeroSigil.
  * Replicates the exact navigation structure used in Workers, Services, Ads, Chats, and Profile pages.
  * 
  * @param {ReactNode} children - The main content of the page.
@@ -91,7 +91,7 @@ export default function Layout({
                             </button>
                         )}
                         <h1 className="font-bold text-xl text-blue-600 truncate tracking-tight">
-                            {title || "ServePure"}
+                            {title || "AeroSigil"}
                         </h1>
                     </div>
 
@@ -101,7 +101,7 @@ export default function Layout({
                             className="hover:text-blue-600 transition-colors"
                             aria-label="Favorites"
                         >
-                            <FiStar size={22.5} />
+                            <FiHeart size={22.5} />
                         </button>
                         <button
                             onClick={() => navigate('/notifications')}

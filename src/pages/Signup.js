@@ -442,7 +442,7 @@ export default function Signup() {
           <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-pink-600 bg-clip-text text-transparent">
             Create Account
           </h1>
-          <p className="text-gray-500 text-sm mt-1">Join ServePure today!</p>
+          <p className="text-gray-500 text-sm mt-1">Join AeroSigil today!</p>
         </div>
 
         {/* Signup Method Tabs */}

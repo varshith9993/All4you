@@ -1,4 +1,4 @@
-# ServePure - Service Marketplace Application
+# AeroSigil - Service Marketplace Application
 
 This is a full-stack service marketplace web application built with React, Firebase, and Tailwind CSS.
 
