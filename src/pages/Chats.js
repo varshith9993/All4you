@@ -7,6 +7,7 @@ import defaultAvatar from "../assets/images/default_profile.svg";
 import Layout from "../components/Layout";
 import { useProfileCache } from "../contexts/ProfileCacheContext";
 import { useChatsCache } from "../contexts/GlobalDataCacheContext";
+import { formatLastSeen } from "../utils/timeUtils";
 
 const TABS = [
   { key: "all", label: "All" },
@@ -23,29 +24,6 @@ const FILTERS = [
 ];
 
 // Format last seen time - OPTIMIZED for consistency with Workers/Services/Ads pages
-function formatLastSeen(lastSeen) {
-  if (!lastSeen) return "Never online";
-  try {
-    let date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffSecs = Math.floor(diffMs / 1000);
-    const diffMins = Math.floor(diffSecs / 60);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffSecs < 60) return " just now";
-    if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
-    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    if (diffDays === 1) return "yesterday";
-    if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
-  } catch (error) {
-    return "Offline";
-  }
-}
 
 // Check if user is online
 function isUserOnline(online, lastSeen) {
@@ -73,8 +51,23 @@ function ChatCard({ chat, uid, profiles, navigate }) {
   const isMuted = (chat.mutedBy && chat.mutedBy.includes(uid));
 
   const isOnline = isUserOnline(prof.online, prof.lastSeen);
-  const statusText = isOnline ? "Online" : `Last seen: ${formatLastSeen(prof.lastSeen)}`;
+  const statusText = isOnline ? "Online" : formatLastSeen(prof.lastSeen);
   const statusColor = isOnline ? "text-green-600" : "text-gray-400";
+
+  // Check if chat is cleared
+  let isCleared = false;
+  try {
+    const clearedTime = chat.clearedAt && chat.clearedAt[uid];
+    if (clearedTime && chat.updatedAt) {
+      const cTime = clearedTime.toDate ? clearedTime.toDate().getTime() : new Date(clearedTime).getTime();
+      const uTime = chat.updatedAt.toDate ? chat.updatedAt.toDate().getTime() : new Date(chat.updatedAt).getTime();
+      if (uTime <= cTime) {
+        isCleared = true;
+      }
+    }
+  } catch (e) {
+    console.error("Date parsing error in ChatCard", e);
+  }
 
   const handleChatClick = () => {
     if (unseen > 0) {
@@ -119,7 +112,7 @@ function ChatCard({ chat, uid, profiles, navigate }) {
       <div className="flex-1 min-w-0">
         <div className="flex justify-between items-center mb-1">
           <h3 className="font-semibold text-gray-900 text-sm truncate tracking-tight">
-            {prof.username || "Unknown User"}
+            {prof.username || prof.name || "User"}
           </h3>
           <div className="flex items-center gap-2">
             <span className={`text-xs ${statusColor} flex items-center gap-1 whitespace-nowrap`}>
@@ -140,9 +133,9 @@ function ChatCard({ chat, uid, profiles, navigate }) {
 
         <div className="flex justify-between items-center">
           <p className="text-sm text-gray-600 truncate flex-1 mr-2 tracking-normal leading-normal">
-            {chat.lastMessage || "No messages yet"}
+            {isCleared ? "No messages yet" : (chat.lastMessage || "No messages yet")}
           </p>
-          {unseen > 0 && (
+          {unseen > 0 && !isCleared && (
             <span className="bg-blue-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center flex-shrink-0">
               {unseen}
             </span>

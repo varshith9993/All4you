@@ -26,6 +26,7 @@ import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin,
 import MapComponent from "../components/MapComponent";
 import ProfileImageViewer from "../components/ProfileImageViewer";
 import defaultAvatar from "../assets/images/default_profile.svg";
+import { formatDateTime } from "../utils/timeUtils";
 
 
 
@@ -49,17 +50,6 @@ function ManualStars({ value, onChange, size = 46 }) {
     );
 }
 
-function formatDateTime(dateObj) {
-    if (!dateObj) return "";
-    return dateObj.toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: 'numeric',
-        hour12: true
-    });
-}
 
 // Function to get download URL with forced download for Cloudinary
 function getDownloadUrl(url) {
@@ -255,6 +245,7 @@ function ServiceDetail() {
     const [replyText, setReplyText] = useState("");
     const [expandedReplies, setExpandedReplies] = useState({});
     const [showProfileViewer, setShowProfileViewer] = useState(false);
+    const [notFound, setNotFound] = useState(false);
 
     // Pagination state for reviews
     const [hasMoreReviews, setHasMoreReviews] = useState(true);
@@ -262,41 +253,14 @@ function ServiceDetail() {
     const lastReviewRef = useRef(null);
     const allReviewsRef = useRef([]);
 
+    // Confirmation state for deleting reviews
+    const [reviewToDelete, setReviewToDelete] = useState(null);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [deletingReview, setDeletingReview] = useState(false);
+
     // Cache initialization ref to prevent double loading
     const cacheInitializedRef = useRef(false);
     const dataFromCache = useRef(false);
-
-    // Initialize from cache on mount (instant display)
-    useEffect(() => {
-        if (!id || cacheInitializedRef.current) return;
-        cacheInitializedRef.current = true;
-
-        const cached = getPostDetailCache('service', id);
-        if (cached && cached.data) {
-            dataFromCache.current = true;
-            const { serviceData, reviewsData, profilesData } = cached.data;
-
-            if (serviceData) {
-                setService(serviceData);
-            }
-            if (reviewsData && Array.isArray(reviewsData)) {
-                allReviewsRef.current = reviewsData;
-                setReviews(reviewsData);
-                const userRate = reviewsData.find(r => r.userId === currentUserId && typeof r.rating === "number" && r.rating > 0);
-                setUserRatingDoc(userRate ?? null);
-                if (reviewsData.length < REVIEWS_PAGE_SIZE) {
-                    setHasMoreReviews(false);
-                }
-            }
-            if (profilesData) {
-                setProfiles(profilesData);
-            }
-        } else {
-            dataFromCache.current = false;
-        }
-    }, [id, getPostDetailCache, currentUserId]);
-
-
 
     // Fetch creator profile using ProfileCache
     const fetchCreatorProfile = useCallback(async (creatorId) => {
@@ -326,6 +290,53 @@ function ServiceDetail() {
         } catch (error) {
         }
     }, [fetchProfiles]);
+
+    // Initialize from cache on mount (instant display)
+    useEffect(() => {
+        if (!id || cacheInitializedRef.current) return;
+        cacheInitializedRef.current = true;
+
+        const cached = getPostDetailCache('service', id);
+        if (cached && cached.data) {
+            dataFromCache.current = true;
+            const { serviceData, reviewsData, profilesData } = cached.data;
+
+            if (serviceData) {
+                setService(serviceData);
+                // Ensure we have the latest creator profile even if service is cached
+                if (serviceData.createdBy) {
+                    fetchCreatorProfile(serviceData.createdBy);
+                }
+            }
+            if (reviewsData && Array.isArray(reviewsData)) {
+                allReviewsRef.current = reviewsData;
+                setReviews(reviewsData);
+                const userRate = reviewsData.find(r => r.userId === currentUserId && typeof r.rating === "number" && r.rating > 0);
+                setUserRatingDoc(userRate ?? null);
+                if (reviewsData.length < REVIEWS_PAGE_SIZE) {
+                    setHasMoreReviews(false);
+                }
+            }
+            if (profilesData) {
+                setProfiles(profilesData);
+            }
+
+            // Check for missing reviewer profiles in cache and fetch them
+            if (reviewsData && Array.isArray(reviewsData)) {
+                const availableProfileIds = new Set(Object.keys(profilesData || {}));
+                const missingIds = [...new Set(reviewsData.map(r => r.userId).filter(uid => uid && !availableProfileIds.has(uid)))];
+                if (missingIds.length > 0) {
+                    fetchReviewerProfiles(missingIds);
+                }
+            }
+        } else {
+            dataFromCache.current = false;
+        }
+    }, [id, getPostDetailCache, currentUserId, fetchCreatorProfile, fetchReviewerProfiles]);
+
+
+
+
 
     // Load more reviews (pagination)
     const loadMoreReviews = useCallback(async () => {
@@ -388,9 +399,6 @@ function ServiceDetail() {
     useEffect(() => {
         if (!id) return;
 
-        // If data loaded from cache, skip network requests to optimize reads
-        if (dataFromCache.current) return;
-
         // OPTIMIZATION: Use one-time fetch instead of continuous listener for service document
         const fetchServiceData = async () => {
             try {
@@ -411,12 +419,19 @@ function ServiceDetail() {
                         serviceData,
                     }, snap.data().updatedAt?.toMillis?.() || Date.now());
 
+                } else {
+                    setNotFound(true);
                 }
             } catch (error) {
+                console.error("Error fetching service:", error);
+                setNotFound(true);
             }
         };
 
-        fetchServiceData();
+        // Only fetch service document if NOT loaded from cache
+        if (!dataFromCache.current) {
+            fetchServiceData();
+        }
 
         // Fetch initial reviews with pagination (first 7) - Keep listener for live updates
         const reviewQ = query(
@@ -544,20 +559,7 @@ function ServiceDetail() {
         }
     }, [id]);
 
-    // Self-healing: Update DB if calculated rating differs from stored rating
-    // DISABLED: This was causing permission errors because non-owners can't update service documents
-    // Rating is now only updated when reviews are submitted
-    // useEffect(() => {
-    //     if (service && typeof avgRating !== 'undefined') {
-    //         const storedRating = service.rating || 0;
-    //         const calculatedRating = parseFloat(avgRating);
-    //         // Allow small float difference
-    //         if (Math.abs(storedRating - calculatedRating) > 0.1) {
-    //             console.log("Syncing rating...", storedRating, calculatedRating);
-    //             updateServiceRating();
-    //         }
-    //     }
-    // }, [service, avgRating, updateServiceRating]);
+
 
     const toggleFavorite = async () => {
         if (!currentUserId) { setToast("Please login to favorite!"); return; }
@@ -654,24 +656,36 @@ function ServiceDetail() {
         setTimeout(() => setToast(""), 1800);
     };
 
-    const deleteReview = async (reviewId, hasRating) => {
-        if (!window.confirm("Are you sure you want to delete this review? This action cannot be undone.")) return;
+    const confirmDeleteReview = async () => {
+        if (!reviewToDelete) return;
 
         try {
-            await deleteDoc(doc(db, "serviceReviews", reviewId));
+            setDeletingReview(true);
+            await deleteDoc(doc(db, "serviceReviews", reviewToDelete.id));
 
-            if (hasRating) {
+            if (reviewToDelete.rating) {
                 await updateServiceRating();
             }
 
             setToast("Review deleted");
             setActiveMenuId(null);
+            setShowDeleteConfirm(false);
+            setReviewToDelete(null);
         } catch (error) {
             setToast("Failed to delete review");
+        } finally {
+            setDeletingReview(false);
+            setTimeout(() => setToast(""), 2000);
         }
-
-        setTimeout(() => setToast(""), 2000);
     };
+
+    const handleDeleteClick = (review) => {
+        setReviewToDelete(review);
+        setShowDeleteConfirm(true);
+        setActiveMenuId(null);
+    };
+
+
 
     const submitReply = async (reviewId, reviewerId) => {
         if (!replyText.trim()) return;
@@ -832,14 +846,28 @@ function ServiceDetail() {
         setFileLoadErrors(prev => ({ ...prev, [url]: true }));
     };
 
+    if (notFound) return (
+        <div className="flex justify-center items-center h-screen flex-col gap-4">
+            <FiAlertCircle size={48} className="text-gray-300" />
+            <p className="text-gray-500 font-medium">Service not found or has been deleted.</p>
+            <button
+                onClick={() => navigate('/services')}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors"
+            >
+                Back to Services
+            </button>
+        </div>
+    );
+
     if (!service) return (
         <div className="flex justify-center items-center h-screen">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
         </div>
     );
 
-    const displayProfileImage = service.profilePhotoUrl || creator?.photoURL || creator?.profileImage || defaultAvatar;
-    const displayUsername = creator?.username || "Unknown User";
+    // Prioritize creator profile (latest) -> service author metadata (stale) -> service root fields -> fallback
+    const displayProfileImage = creator?.photoURL || creator?.profileImage || service.profilePhotoUrl || service.author?.photoURL || defaultAvatar;
+    const displayUsername = creator?.username || creator?.displayName || creator?.name || service.author?.username || service.author?.name || service.username || (creator?.email ? creator.email.split('@')[0] : "User");
     const isOwner = service.createdBy === currentUserId;
 
     // Separate images from documents
@@ -955,8 +983,23 @@ function ServiceDetail() {
                     </div>
                 )}
 
-                {/* Expiry Date */}
+                {/* Expiry Date - Robust Handling */}
                 {(() => {
+                    // Check explicitly for "Until I change" or equivalent strings first
+                    if (typeof service.expiry === 'string' &&
+                        (service.expiry.toLowerCase().includes('until i change') ||
+                            service.expiry.toLowerCase() === 'not available')) {
+                        return (
+                            <div className="mb-4">
+                                <h3 className="font-semibold text-sm text-gray-900 mb-2 tracking-tight">Valid Until</h3>
+                                <div className="flex items-center text-gray-700 bg-green-50 p-2 rounded-lg border border-green-200">
+                                    <FiCalendar className="mr-1.5 text-green-600" size={14} />
+                                    <span className="text-xs tracking-normal font-medium text-green-700">Not Available</span>
+                                </div>
+                            </div>
+                        );
+                    }
+
                     if (!service.expiry) {
                         return (
                             <div className="mb-4">
@@ -969,7 +1012,20 @@ function ServiceDetail() {
                         );
                     }
 
-                    const expiryDate = service.expiry.toDate ? service.expiry.toDate() : new Date(service.expiry);
+                    const expiryDate = service.expiry.toDate ? service.expiry.toDate() : (service.expiry.seconds ? new Date(service.expiry.seconds * 1000) : new Date(service.expiry));
+
+                    if (isNaN(expiryDate.getTime())) {
+                        return (
+                            <div className="mb-4">
+                                <h3 className="font-semibold text-sm text-gray-900 mb-2 tracking-tight">Valid Until</h3>
+                                <div className="flex items-center text-gray-700 bg-green-50 p-2 rounded-lg border border-green-200">
+                                    <FiCalendar className="mr-1.5 text-green-600" size={14} />
+                                    <span className="text-xs tracking-normal font-medium text-green-700">Not Available</span>
+                                </div>
+                            </div>
+                        );
+                    }
+
                     const year = expiryDate.getFullYear();
 
                     // Check if it's the "never" option (year 9999 or greater than 9000 due to timezone conversion)
@@ -985,7 +1041,7 @@ function ServiceDetail() {
                         );
                     }
 
-                    const formattedDateTime = expiryDate.toLocaleString('en-US', {
+                    const formattedDateTime = expiryDate.toLocaleString(undefined, {
                         year: 'numeric',
                         month: 'short',
                         day: 'numeric',
@@ -993,6 +1049,7 @@ function ServiceDetail() {
                         minute: '2-digit',
                         hour12: true
                     });
+
 
                     return (
                         <div className="mb-4">
@@ -1191,7 +1248,11 @@ function ServiceDetail() {
                         <>
                             <div className="space-y-4">
                                 {reviews.filter(r => r.text && r.text.trim()).map(r => {
-                                    const user = profiles[r.userId] || { username: "Unknown", profileImage: "" };
+                                    const userProfile = profiles[r.userId] || {};
+                                    const user = {
+                                        username: userProfile.username || userProfile.name || userProfile.displayName || r.username || r.authorName || (userProfile.email ? userProfile.email.split('@')[0] : "User"),
+                                        profileImage: userProfile.profileImage || ""
+                                    };
                                     const dt = r.createdAt && r.createdAt.seconds ? new Date(r.createdAt.seconds * 1000) : null;
                                     return (
                                         <div key={r.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm relative">
@@ -1206,7 +1267,7 @@ function ServiceDetail() {
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex justify-between items-start">
                                                         <h4 className="font-semibold text-gray-900 truncate pr-2">
-                                                            {user.username || "Unknown User"}
+                                                            {user.username}
                                                         </h4>
 
                                                         {(isOwner || r.userId === currentUserId) && (
@@ -1239,7 +1300,7 @@ function ServiceDetail() {
                                                                             <button
                                                                                 onClick={(e) => {
                                                                                     e.stopPropagation();
-                                                                                    deleteReview(r.id, r.rating > 0);
+                                                                                    handleDeleteClick(r);
                                                                                 }}
                                                                                 className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
                                                                             >
@@ -1439,6 +1500,37 @@ function ServiceDetail() {
                     </Modal>
                 )
             }
+
+            {/* Custom Delete Confirmation Modal */}
+            {showDeleteConfirm && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in">
+                    <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-xs w-full text-center">
+                        <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <FiTrash2 size={28} className="text-red-600" />
+                        </div>
+                        <h3 className="font-bold mb-2 text-lg text-gray-900">Delete Review?</h3>
+                        <p className="text-gray-600 mb-6 text-sm">
+                            Are you sure you want to delete? This action cannot be undone.
+                        </p>
+                        <div className="flex gap-3">
+                            <button
+                                className="flex-1 bg-gray-100 text-gray-700 px-4 py-2.5 rounded-xl font-bold hover:bg-gray-200 transition-colors text-sm"
+                                onClick={() => setShowDeleteConfirm(false)}
+                                disabled={deletingReview}
+                            >
+                                No
+                            </button>
+                            <button
+                                className="flex-1 bg-red-600 text-white px-4 py-2.5 rounded-xl font-bold hover:bg-red-700 transition-colors shadow-lg shadow-red-500/30 text-sm flex justify-center items-center gap-2"
+                                onClick={confirmDeleteReview}
+                                disabled={deletingReview}
+                            >
+                                {deletingReview ? "Deleting..." : "Yes"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* File Viewer Modal */}
             {

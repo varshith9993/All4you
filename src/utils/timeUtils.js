@@ -1,5 +1,3 @@
-
-
 export function formatLastSeen(lastSeen) {
     if (!lastSeen) return "Never online";
     try {
@@ -26,10 +24,12 @@ export function formatLastSeen(lastSeen) {
         if (diffDays === 1) return `Last Seen: yesterday`;
         if (diffDays < 7) return `Last Seen: ${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
 
-        const day = String(date.getDate()).padStart(2, '0');
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const year = date.getFullYear();
-        return `Last Seen: ${day}/${month}/${year}`;
+        // Use locale-aware date formatting for older timestamps
+        return `Last Seen: ${date.toLocaleDateString(undefined, {
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric'
+        })}`;
     } catch (error) {
         return "Offline";
     }
@@ -38,10 +38,12 @@ export function formatLastSeen(lastSeen) {
 export function formatDateTime(dateObj) {
     if (!dateObj) return "";
     const date = dateObj.toDate ? dateObj.toDate() :
-        dateObj instanceof Date ? dateObj :
-            new Date(dateObj);
+        dateObj.seconds ? new Date(dateObj.seconds * 1000) :
+            dateObj instanceof Date ? dateObj :
+                new Date(dateObj);
 
-    return date.toLocaleString('en-US', {
+    // Using undefined as the first argument ensures it uses the user's browser locale
+    return date.toLocaleString(undefined, {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
@@ -50,3 +52,4 @@ export function formatDateTime(dateObj) {
         hour12: true
     });
 }
+

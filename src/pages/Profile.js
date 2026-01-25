@@ -46,6 +46,7 @@ import { useGlobalDataCache } from "../contexts/GlobalDataCacheContext";
 import ActionMessageModal from "../components/ActionMessageModal";
 import { compressProfileImage } from "../utils/compressor";
 import { formatExpiry } from "../utils/expiryUtils";
+import { formatLastSeen } from "../utils/timeUtils";
 
 const OPENCAGE_API_KEY = "988148bc222049e2831059ea74476abb";
 const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
@@ -75,29 +76,6 @@ function getDistanceKm(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-function formatLastSeen(lastSeen) {
-  if (!lastSeen) return "Never online";
-  try {
-    let date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffSecs = Math.floor(diffMs / 1000);
-    const diffMins = Math.floor(diffSecs / 60);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffSecs < 60) return "Last Seen: just now";
-    if (diffMins < 60) return `Last Seen: ${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
-    if (diffHours < 24) return `Last Seen: ${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    if (diffDays === 1) return "Last Seen: yesterday";
-    if (diffDays < 7) return `Last Seen: ${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `Last Seen: ${day}/${month}/${year}`;
-  } catch (error) {
-    return "Offline";
-  }
-}
 
 function isUserOnline(userId, currentUserId, online, lastSeen) {
   // Current user is always shown as online
@@ -192,7 +170,7 @@ function PostMenu({ post, closeMenu, updatePosts, currentTab, setShowConfirm, se
       const promises = snap.docs.map(docSnap => {
         const data = docSnap.data();
         if (data.userId) {
-          const ownerName = profile?.username || "Owner";
+          const ownerName = profile?.username || profile?.name || "User";
           const titleWords = post.name || post.title || "";
           const postType = typeLabel.toLowerCase();
           const displayType = postType === 'ad' ? 'ads' : postType;
@@ -719,7 +697,7 @@ export default function Profile() {
   function WorkerCard({ post }) {
     const { title, rating = 0, location = {}, tags = [], latitude, longitude, createdBy, avatarUrl } = post;
     const workerCreatorProfile = userProfiles[createdBy] || {};
-    const displayUsername = workerCreatorProfile.username || "Unknown User";
+    const displayUsername = workerCreatorProfile.username || workerCreatorProfile.name || "User";
     const displayProfileImage = avatarUrl || workerCreatorProfile.photoURL || workerCreatorProfile.profileImage || defaultAvatar;
     const displayOnline = workerCreatorProfile.online;
     const displayLastSeen = workerCreatorProfile.lastSeen;

@@ -25,6 +25,7 @@ import { usePostDetailCache, useGlobalDataCache } from "../contexts/GlobalDataCa
 import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin, FiMoreVertical, FiTrash2, FiChevronLeft, FiChevronRight } from "react-icons/fi";
 import MapComponent from "../components/MapComponent";
 import defaultAvatar from "../assets/images/default_profile.svg";
+import { formatDateTime } from "../utils/timeUtils";
 
 function ManualStars({ value, onChange, size = 46 }) {
   const [hover, setHover] = useState(0);
@@ -46,17 +47,6 @@ function ManualStars({ value, onChange, size = 46 }) {
   );
 }
 
-function formatDateTime(dateObj) {
-  if (!dateObj) return "";
-  return dateObj.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: true
-  });
-}
 
 // Constants for review pagination - AGGRESSIVELY OPTIMIZED
 const REVIEWS_PAGE_SIZE = 9;
@@ -93,6 +83,7 @@ export default function AdDetail() {
   const [replyingTo, setReplyingTo] = useState(null);
   const [replyText, setReplyText] = useState("");
   const [expandedReplies, setExpandedReplies] = useState({});
+  const [notFound, setNotFound] = useState(false);
 
   // Pagination state for reviews
   const [hasMoreReviews, setHasMoreReviews] = useState(true);
@@ -100,54 +91,14 @@ export default function AdDetail() {
   const lastReviewRef = useRef(null);
   const allReviewsRef = useRef([]);
 
+  // Confirmation state for deleting reviews
+  const [reviewToDelete, setReviewToDelete] = useState(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingReview, setDeletingReview] = useState(false);
+
   // Cache initialization ref to prevent double loading
   const cacheInitializedRef = useRef(false);
   const dataFromCache = useRef(false);
-
-  // Initialize from cache on mount (instant display)
-  useEffect(() => {
-    if (!adId || cacheInitializedRef.current) return;
-    cacheInitializedRef.current = true;
-
-    const cached = getPostDetailCache('ad', adId);
-    if (cached && cached.data) {
-      dataFromCache.current = true;
-      const { adData, reviewsData, profilesData } = cached.data;
-
-      if (adData) {
-        setAd(adData);
-      }
-      if (reviewsData && Array.isArray(reviewsData)) {
-        allReviewsRef.current = reviewsData;
-        setReviews(reviewsData);
-        const userRate = reviewsData.find(r => r.userId === currentUserId && typeof r.rating === "number" && r.rating > 0);
-        setUserRatingDoc(userRate ?? null);
-        if (reviewsData.length < REVIEWS_PAGE_SIZE) {
-          setHasMoreReviews(false);
-        }
-      }
-      if (profilesData) {
-        setProfiles(profilesData);
-      }
-    } else {
-      dataFromCache.current = false;
-    }
-  }, [adId, getPostDetailCache, currentUserId]);
-
-  // PERFORMANCE: Preload all carousel images for instant swiping
-  useEffect(() => {
-    if (ad && ad.photos && ad.photos.length > 1 && !imagesPreloaded) {
-      const preloadImages = [];
-      ad.photos.forEach((photoUrl) => {
-        const img = new Image();
-        img.src = photoUrl;
-        preloadImages.push(img);
-      });
-      setImagesPreloaded(true);
-    }
-  }, [ad, imagesPreloaded]);
-
-
 
   // Fetch creator profile using ProfileCache
   const fetchCreatorProfile = useCallback(async (creatorId) => {
@@ -177,6 +128,66 @@ export default function AdDetail() {
     } catch (error) {
     }
   }, [fetchProfiles]);
+
+  // Initialize from cache on mount (instant display)
+  useEffect(() => {
+    if (!adId || cacheInitializedRef.current) return;
+    cacheInitializedRef.current = true;
+
+    const cached = getPostDetailCache('ad', adId);
+    if (cached && cached.data) {
+      dataFromCache.current = true;
+      const { adData, reviewsData, profilesData } = cached.data;
+
+      if (adData) {
+        setAd(adData);
+        // Ensure we have the latest creator profile even if ad is cached
+        if (adData.createdBy) {
+          fetchCreatorProfile(adData.createdBy);
+        }
+      }
+      if (reviewsData && Array.isArray(reviewsData)) {
+        allReviewsRef.current = reviewsData;
+        setReviews(reviewsData);
+        const userRate = reviewsData.find(r => r.userId === currentUserId && typeof r.rating === "number" && r.rating > 0);
+        setUserRatingDoc(userRate ?? null);
+        if (reviewsData.length < REVIEWS_PAGE_SIZE) {
+          setHasMoreReviews(false);
+        }
+      }
+      if (profilesData) {
+        setProfiles(profilesData);
+      }
+
+      // Check for missing reviewer profiles in cache and fetch them
+      if (reviewsData && Array.isArray(reviewsData)) {
+        const availableProfileIds = new Set(Object.keys(profilesData || {}));
+        const missingIds = [...new Set(reviewsData.map(r => r.userId).filter(uid => uid && !availableProfileIds.has(uid)))];
+        if (missingIds.length > 0) {
+          fetchReviewerProfiles(missingIds);
+        }
+      }
+    } else {
+      dataFromCache.current = false;
+    }
+  }, [adId, getPostDetailCache, currentUserId, fetchCreatorProfile, fetchReviewerProfiles]);
+
+  // PERFORMANCE: Preload all carousel images for instant swiping
+  useEffect(() => {
+    if (ad && ad.photos && ad.photos.length > 1 && !imagesPreloaded) {
+      const preloadImages = [];
+      ad.photos.forEach((photoUrl) => {
+        const img = new Image();
+        img.src = photoUrl;
+        preloadImages.push(img);
+      });
+      setImagesPreloaded(true);
+    }
+  }, [ad, imagesPreloaded]);
+
+
+
+
 
   // Load more reviews (pagination)
   const loadMoreReviews = useCallback(async () => {
@@ -267,9 +278,6 @@ export default function AdDetail() {
   useEffect(() => {
     if (!adId) return;
 
-    // If data loaded from cache, skip network requests to optimize reads
-    if (dataFromCache.current) return;
-
     // OPTIMIZATION: Use one-time fetch instead of continuous listener for ad document
     const fetchAdData = async () => {
       try {
@@ -290,12 +298,19 @@ export default function AdDetail() {
             adData,
           }, snap.data().updatedAt?.toMillis?.() || Date.now());
 
+        } else {
+          setNotFound(true);
         }
       } catch (error) {
+        console.error("Error fetching ad:", error);
+        setNotFound(true);
       }
     };
 
-    fetchAdData();
+    // Only fetch ad document if NOT loaded from cache
+    if (!dataFromCache.current) {
+      fetchAdData();
+    }
 
     // Fetch initial reviews with pagination (first 7) - Keep listener for live updates
     const reviewQ = query(
@@ -453,17 +468,33 @@ export default function AdDetail() {
     setTimeout(() => setToast(""), 1800);
   };
 
-  const deleteReview = async (reviewId, hasRating) => {
-    if (!window.confirm("Are you sure you want to delete this review? This action cannot be undone.")) return;
+  const confirmDeleteReview = async () => {
+    if (!reviewToDelete) return;
+
     try {
-      await deleteDoc(doc(db, "adReviews", reviewId));
-      if (hasRating) await updateAdRating();
+      setDeletingReview(true);
+      await deleteDoc(doc(db, "adReviews", reviewToDelete.id));
+
+      if (reviewToDelete.rating) {
+        await updateAdRating();
+      }
+
       setToast("Review deleted");
       setActiveMenuId(null);
+      setShowDeleteConfirm(false);
+      setReviewToDelete(null);
     } catch (error) {
-      setToast("Failed to delete");
+      setToast("Failed to delete review");
+    } finally {
+      setDeletingReview(false);
+      setTimeout(() => setToast(""), 2000);
     }
-    setTimeout(() => setToast(""), 1800);
+  };
+
+  const handleDeleteClick = (review) => {
+    setReviewToDelete(review);
+    setShowDeleteConfirm(true);
+    setActiveMenuId(null);
   };
 
   const submitReply = async (reviewId, reviewerId) => {
@@ -603,14 +634,27 @@ export default function AdDetail() {
     }
   };
 
+  if (notFound) return (
+    <div className="flex justify-center items-center h-screen flex-col gap-4">
+      <p className="text-gray-500 font-medium">Ad not found or has been deleted.</p>
+      <button
+        onClick={() => navigate('/ads')}
+        className="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors"
+      >
+        Back to Ads
+      </button>
+    </div>
+  );
+
   if (!ad) return (
     <div className="flex justify-center items-center h-screen">
       <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
     </div>
   );
 
-  const displayProfileImage = ad.profilePhotoUrl || creator?.photoURL || creator?.profileImage || defaultAvatar;
-  const displayUsername = creator?.username || ad.username || "Unknown User";
+  // Prioritize creator profile (latest) -> ad author metadata (stale) -> ad root fields -> fallback
+  const displayProfileImage = creator?.photoURL || creator?.profileImage || ad.profilePhotoUrl || ad.author?.photoURL || defaultAvatar;
+  const displayUsername = creator?.username || creator?.displayName || creator?.name || ad.author?.username || ad.author?.name || ad.username || (creator?.email ? creator.email.split('@')[0] : "User");
 
   return (
     <div className="relative bg-white min-h-screen flex flex-col max-w-md mx-auto" onClick={() => setActiveMenuId(null)}>
@@ -796,7 +840,11 @@ export default function AdDetail() {
             <>
               <div className="space-y-4">
                 {reviews.filter(r => r.text && r.text.trim()).map(r => {
-                  const user = profiles[r.userId] || { username: "Unknown", profileImage: "" };
+                  const userProfile = profiles[r.userId] || {};
+                  const user = {
+                    username: userProfile.username || userProfile.name || "User",
+                    profileImage: userProfile.profileImage || ""
+                  };
                   const dt = r.createdAt && r.createdAt.seconds ? new Date(r.createdAt.seconds * 1000) : null;
 
                   return (
@@ -812,7 +860,7 @@ export default function AdDetail() {
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between items-start">
                             <h4 className="font-semibold text-gray-900 truncate pr-6">
-                              {user.username || "Unknown User"}
+                              {user.username || user.name || user.displayName || r.username || r.authorName || (user.email ? user.email.split('@')[0] : "User")}
                             </h4>
                             {/* Three dots menu for owner or review creator */}
                             {(isOwner || r.userId === currentUserId) && (
@@ -841,9 +889,9 @@ export default function AdDetail() {
                                       <button
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          deleteReview(r.id, r.rating > 0);
+                                          handleDeleteClick(r);
                                         }}
-                                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                        className="w-full text-left px-4 py-2 text-red-600 hover:bg-red-50 flex items-center gap-2"
                                       >
                                         <FiTrash2 size={14} /> Delete
                                       </button>
@@ -1034,6 +1082,37 @@ export default function AdDetail() {
             Post Review
           </button>
         </Modal>
+      )}
+
+      {/* Custom Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in">
+          <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-xs w-full text-center">
+            <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FiTrash2 size={28} className="text-red-600" />
+            </div>
+            <h3 className="font-bold mb-2 text-lg text-gray-900">Delete Review?</h3>
+            <p className="text-gray-600 mb-6 text-sm">
+              Are you sure you want to delete? This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                className="flex-1 bg-gray-100 text-gray-700 px-4 py-2.5 rounded-xl font-bold hover:bg-gray-200 transition-colors text-sm"
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deletingReview}
+              >
+                No
+              </button>
+              <button
+                className="flex-1 bg-red-600 text-white px-4 py-2.5 rounded-xl font-bold hover:bg-red-700 transition-colors shadow-lg shadow-red-500/30 text-sm flex justify-center items-center gap-2"
+                onClick={confirmDeleteReview}
+                disabled={deletingReview}
+              >
+                {deletingReview ? "Deleting..." : "Yes"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {!!toast && (

@@ -5,7 +5,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 
 // Post Detail Cache Constants
 const POST_DETAIL_CACHE_KEY = 'post_detail_cache';
-const POST_DETAIL_CACHE_TTL = 300 * 24 * 60 * 60 * 1000; // 2 days - auto-cleanup if not visited
+const POST_DETAIL_CACHE_TTL = 300 * 24 * 60 * 60 * 1000; // 300 days - auto-cleanup if not visited
 
 /**
  * GlobalDataCacheContext - Provides global caching for Workers, Services, and Ads data
@@ -1176,7 +1176,7 @@ export function useNotesCache() {
  * Hook for Post Detail pages (WorkerDetail, ServiceDetail, AdDetail)
  * Provides localStorage-based caching with 2-day TTL
  * First visit: 1-2 reads (post + reviews)
- * Subsequent visits within 2 days: 0 reads if no changes
+ * Subsequent visits within 300 days: 0 reads if no changes
  */
 export function usePostDetailCache() {
   const { getPostDetailCache, setPostDetailCache, invalidatePostDetailCache } = useGlobalDataCache();

@@ -15,6 +15,7 @@ import {
 } from "../utils/searchEngine";
 import { useSearchCache } from "../contexts/GlobalDataCacheContext";
 import { formatExpiry } from "../utils/expiryUtils";
+import { formatLastSeen } from "../utils/timeUtils";
 
 // Calculate Haversine distance in km
 function getDistanceKm(lat1, lon1, lat2, lon2) {
@@ -40,40 +41,6 @@ function getDistanceKm(lat1, lon1, lat2, lon2) {
 }
 
 // Format last seen time
-function formatLastSeen(lastSeen) {
-  if (!lastSeen) return "Never online";
-  try {
-    let date = lastSeen.toDate ? lastSeen.toDate() :
-      lastSeen.seconds ? new Date(lastSeen.seconds * 1000) :
-        new Date(lastSeen);
-
-    const now = new Date();
-
-    // Check if timestamp is in the future (invalid)
-    if (date > now) {
-      return "Last Seen: Unknown";
-    }
-
-    const diffMs = now - date;
-    const diffSecs = Math.floor(diffMs / 1000);
-    const diffMins = Math.floor(diffSecs / 60);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffSecs < 60) return "Last Seen: just now";
-    if (diffMins < 60) return `Last Seen: ${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
-    if (diffHours < 24) return `Last Seen: ${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    if (diffDays === 1) return "Last Seen: yesterday";
-    if (diffDays < 7) return `Last Seen: ${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `Last Seen: ${day}/${month}/${year}`;
-  } catch (error) {
-    return "Offline";
-  }
-}
 
 // Check if user is online
 function isUserOnline(userId, currentUserId, online, lastSeen) {
@@ -557,9 +524,9 @@ function ServiceCard({ service, profile, userProfiles, currentUserId, navigate }
     try {
       const expiryDate = expiry.toDate ? expiry.toDate() : new Date(expiry);
       if (isUntilIChange()) {
-        return "Until: Not Available";
+        return "Expiry: N/A";
       } else {
-        return `Until: ${expiryDate.toLocaleString('en-US', {
+        return `Until: ${expiryDate.toLocaleString(undefined, {
           month: 'short',
           day: 'numeric',
           year: 'numeric',
@@ -572,6 +539,7 @@ function ServiceCard({ service, profile, userProfiles, currentUserId, navigate }
       return "Until: Unknown";
     }
   };
+
 
   const untilText = getUntilText();
 

@@ -14,7 +14,9 @@ import {
   serverTimestamp,
   increment,
   limit,
-  writeBatch
+  writeBatch,
+  where,
+  Timestamp
 } from "firebase/firestore";
 import {
   FiArrowLeft,
@@ -37,6 +39,7 @@ import { uploadToCloudinary } from "../utils/cloudinaryUpload";
 import { compressFile } from "../utils/compressor";
 import defaultProfile from "../assets/images/default_profile.svg";
 import { useGlobalDataCache } from "../contexts/GlobalDataCacheContext";
+import { formatLastSeen } from "../utils/timeUtils";
 
 function formatTime(date) {
   if (!date) return "";
@@ -44,27 +47,6 @@ function formatTime(date) {
   return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
-function formatLastSeen(date) {
-  if (!date) return "Never";
-  try {
-    const d = date.toDate ? date.toDate() : new Date(date);
-    const now = new Date();
-    const diffMs = now - d;
-    const diffMins = Math.floor(diffMs / (1000 * 60));
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-    if (diffMins < 1) return "just now";
-    if (diffMins < 60) return `${diffMins} mins ago`;
-    if (diffHours < 24) return `${diffHours} hours ago`;
-    if (diffDays === 1) return "yesterday";
-    if (diffDays < 7) return `${diffDays} days ago`;
-    return d.toLocaleDateString();
-  } catch (error) {
-    console.error("Error formatting last seen:", error);
-    return "Unknown";
-  }
-}
 
 function getDateLabel(date) {
   if (!date) return "";
@@ -294,7 +276,7 @@ function AudioMessage({ fileUrl, isOwnMessage }) {
   );
 }
 
-function Modal({ title, children, onClose, onConfirm, confirmText = "Confirm", confirmColor = "bg-red-600" }) {
+function Modal({ title, children, onClose, onConfirm, confirmText = "Confirm", confirmColor = "bg-red-600", isLoading = false }) {
   return React.createElement(
     "div",
     { className: "fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in" },
@@ -308,13 +290,22 @@ function Modal({ title, children, onClose, onConfirm, confirmText = "Confirm", c
         { className: "flex justify-end gap-3" },
         React.createElement(
           "button",
-          { onClick: onClose, className: "px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium" },
+          {
+            onClick: onClose,
+            className: "px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium",
+            disabled: isLoading
+          },
           "Cancel"
         ),
         React.createElement(
           "button",
-          { onClick: onConfirm, className: `px-4 py-2 text-white rounded-lg font-medium shadow-md ${confirmColor}` },
-          confirmText
+          {
+            onClick: onConfirm,
+            className: `px-4 py-2 text-white rounded-lg font-medium shadow-md ${confirmColor} flex items-center gap-2 ${isLoading ? 'opacity-70 cursor-wait' : ''}`,
+            disabled: isLoading
+          },
+          isLoading && React.createElement("div", { className: "w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" }),
+          isLoading ? "Processing..." : confirmText
         )
       )
     )
@@ -355,6 +346,7 @@ export default function ChatDetail() {
   // Tracking who blocked whom
   const [isBlockedByMe, setIsBlockedByMe] = useState(false);
   const [isBlockedByThem, setIsBlockedByThem] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Voice Recording State
   const [isRecording, setIsRecording] = useState(false);
@@ -368,6 +360,7 @@ export default function ChatDetail() {
   const [showBlockModal, setShowBlockModal] = useState(false);
   const [showMuteModal, setShowMuteModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showClearMessagesModal, setShowClearMessagesModal] = useState(false);
   const [showDeleteMessageModal, setShowDeleteMessageModal] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
 
@@ -467,10 +460,21 @@ export default function ChatDetail() {
     }
 
     // Otherwise, we need to subscribe to get the latest (or more) messages
+    let qConstraints = [orderBy("createdAt", "desc"), limit(limitCount)];
+
+    // If user has cleared chat, only fetch messages AFTER that time
+    const clearedTime = chat?.clearedAt?.[uid];
+    if (clearedTime) {
+      qConstraints = [
+        where("createdAt", ">", clearedTime),
+        orderBy("createdAt", "desc"),
+        limit(limitCount)
+      ];
+    }
+
     const q = query(
       collection(db, "chats", chatId, "messages"),
-      orderBy("createdAt", "desc"),
-      limit(limitCount)
+      ...qConstraints
     );
 
     const unsub = onSnapshot(q, { includeMetadataChanges: true }, (snap) => {
@@ -478,9 +482,32 @@ export default function ChatDetail() {
       const isFromCache = snap.metadata.fromCache;
       const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
+
+      // Client-side filtering for cleared messages (Double check in case query hasn't updated yet)
       const filteredMsgs = msgs.filter(msg => {
-        if (!msg.isBlocked) return true;
-        return msg.senderId === uid;
+        // Block check
+        if (!msg.isBlocked) {
+          if (msg.senderId !== uid) return false;
+        } else if (msg.senderId !== uid) {
+          // If message is not marked 'isBlocked', we keep it. 
+          // But wait, the original logic was:
+          // if (!msg.isBlocked) return true;
+          // return msg.senderId === uid;
+          // The query should generally filter blocked messages if we wanted to? 
+          // No, we store them with 'isBlocked: true' if they were sent while blocked.
+        }
+
+        // Cleared check
+        if (clearedTime) {
+          const cTime = clearedTime.toDate ? clearedTime.toDate().getTime() : new Date(clearedTime).getTime();
+          const mTime = msg.createdAt ? (msg.createdAt.toDate ? msg.createdAt.toDate().getTime() : new Date(msg.createdAt).getTime()) : Date.now();
+          if (mTime <= cTime) return false;
+        }
+
+        // Original logic preserved: if isBlocked is true, only show if I sent it
+        if (msg.isBlocked && msg.senderId !== uid) return false;
+
+        return true;
       });
 
       setMessages(filteredMsgs);
@@ -664,6 +691,20 @@ export default function ChatDetail() {
     } catch (e) { setToastMessage("Error unmuting chat"); }
   };
 
+  const handleClearMessages = async () => {
+    setIsDeleting(true);
+    try {
+      // Use Timestamp.now() for immediate client-side consistency
+      await updateDoc(doc(db, "chats", chatId), {
+        [`clearedAt.${uid}`]: Timestamp.now()
+      });
+      setMessages([]); // Optimistically clear
+      setToastMessage("Messages cleared");
+    } catch (e) { setToastMessage("Error clearing messages"); }
+    setIsDeleting(false);
+    setShowClearMessagesModal(false);
+  };
+
   const handleDeleteChat = async () => {
     try {
       // Logic deletion: Add current user to 'deletedBy' array
@@ -694,6 +735,7 @@ export default function ChatDetail() {
 
   const confirmDeleteMessage = async () => {
     if (!messageToDelete) return;
+    setIsDeleting(true);
     try {
       await updateDoc(doc(db, "chats", chatId, "messages", messageToDelete.id), {
         isDeleted: true,
@@ -705,6 +747,7 @@ export default function ChatDetail() {
     } catch (e) {
       setToastMessage("Error deleting message");
     }
+    setIsDeleting(false);
     setShowDeleteMessageModal(false);
     setMessageToDelete(null);
   };
@@ -900,7 +943,8 @@ export default function ChatDetail() {
           lastMessage: text,
           lastSenderId: uid,
           updatedAt: serverTimestamp(),
-          [`unseenCounts.${otherUserId}`]: increment(1)
+          [`unseenCounts.${otherUserId}`]: increment(1),
+          deletedBy: [] // Revive chat for both users
         });
       }
 
@@ -969,7 +1013,7 @@ export default function ChatDetail() {
             React.createElement(
               "p",
               { className: "font-bold opacity-70" },
-              msg.replyTo.senderId === uid ? 'You' : profile.username
+              msg.replyTo.senderId === uid ? 'You' : (profile.username || profile.name || "User")
             ),
             React.createElement(
               "p",
@@ -1127,13 +1171,26 @@ export default function ChatDetail() {
       },
       "Are you sure you want to delete this chat? This action cannot be undone."
     ),
+    showClearMessagesModal && React.createElement(
+      Modal,
+      {
+        title: "Clear Messages",
+        onClose: () => !isDeleting && setShowClearMessagesModal(false),
+        onConfirm: handleClearMessages,
+        confirmText: "Clear",
+        confirmColor: "bg-red-600",
+        isLoading: isDeleting
+      },
+      "Are you sure you want to clear all messages in this chat? The chat will remain in your list."
+    ),
     showDeleteMessageModal && React.createElement(
       Modal,
       {
         title: "Delete Message",
-        onClose: () => setShowDeleteMessageModal(false),
+        onClose: () => !isDeleting && setShowDeleteMessageModal(false),
         onConfirm: confirmDeleteMessage,
-        confirmText: "Delete"
+        confirmText: "Delete",
+        isLoading: isDeleting
       },
       "Are you sure you want to delete this message? This cannot be undone."
     ),
@@ -1174,12 +1231,11 @@ export default function ChatDetail() {
           React.createElement(
             "h1",
             { className: "font-bold text-sm text-gray-900" },
-            profile.username || "User"
-          ),
+            profile.username || profile.name || profile.displayName || (profile.email ? profile.email.split('@')[0] : "User")),
           React.createElement(
             "p",
             { className: `text-xs ${isBlockedByMe ? 'text-red-500 font-medium' : isBlockedByThem ? 'text-transparent' : userStatus.online ? 'text-green-600 font-medium' : 'text-gray-500'}` },
-            isBlockedByMe ? 'Blocked' : isBlockedByThem ? ' ' : userStatus.online ? 'Active now' : `Last seen: ${formatLastSeen(userStatus.lastSeen)}`
+            isBlockedByMe ? 'Blocked' : isBlockedByThem ? ' ' : userStatus.online ? 'Active now' : formatLastSeen(userStatus.lastSeen)
           )
         )
       ),
@@ -1232,6 +1288,14 @@ export default function ChatDetail() {
                 className: "w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50 text-sm"
               },
               "Mute Notifications"
+            ),
+            React.createElement(
+              "button",
+              {
+                onClick: () => { setShowClearMessagesModal(true); setShowOptions(false); },
+                className: "w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50 text-sm"
+              },
+              "Clear Messages"
             ),
             React.createElement(
               "button",
@@ -1289,7 +1353,7 @@ export default function ChatDetail() {
           React.createElement(
             "span",
             { className: "font-bold text-blue-600" },
-            `Replying to ${replyTo.senderId === uid ? 'yourself' : profile.username}`
+            `Replying to ${replyTo.senderId === uid ? 'yourself' : (profile.username || profile.name || "User")}`
           ),
           React.createElement(
             "p",

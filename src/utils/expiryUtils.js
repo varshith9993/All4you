@@ -19,7 +19,7 @@ export const formatExpiry = (expiry) => {
     if (!expiry) return { text: "", color: "text-gray-500", isExpiringNow: false, isExpiringSoon: false };
 
     try {
-        const expiryDate = expiry.toDate ? expiry.toDate() : new Date(expiry);
+        const expiryDate = expiry.toDate ? expiry.toDate() : (expiry.seconds ? new Date(expiry.seconds * 1000) : new Date(expiry));
         const now = new Date();
         const diffMs = expiryDate - now;
 
@@ -47,13 +47,19 @@ export const formatExpiry = (expiry) => {
         if (diffHours < 24) {
             return { text: `Expires in ${diffHours} hours`, color: "text-orange-600", isExpiringNow: false, isExpiringSoon: false };
         }
-        const day = String(expiryDate.getDate()).padStart(2, '0');
-        const month = String(expiryDate.getMonth() + 1).padStart(2, '0');
-        const yearNum = expiryDate.getFullYear();
-        return { text: `Expires: ${day}/${month}/${yearNum}`, color: "text-blue-600", isExpiringNow: false, isExpiringSoon: false };
+
+        // Use locale-aware date formatting
+        const formattedDate = expiryDate.toLocaleDateString(undefined, {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric'
+        });
+
+        return { text: `Expires: ${formattedDate}`, color: "text-blue-600", isExpiringNow: false, isExpiringSoon: false };
 
     } catch (error) {
         console.error("Error formatting expiry:", error);
         return { text: "Until: Unknown", color: "text-gray-500", isExpiringNow: false, isExpiringSoon: false };
     }
 };
+

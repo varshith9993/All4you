@@ -18,6 +18,7 @@ import {
 } from "react-icons/fi";
 import { formatExpiry } from "../utils/expiryUtils";
 import defaultAvatar from "../assets/images/default_profile.svg";
+import { formatLastSeen } from "../utils/timeUtils";
 
 // Helper functions
 function getDistanceKm(lat1, lon1, lat2, lon2) {
@@ -34,29 +35,6 @@ function getDistanceKm(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-function formatLastSeen(lastSeen) {
-  if (!lastSeen) return "Never online";
-  try {
-    let date = lastSeen.toDate ? lastSeen.toDate() : lastSeen.seconds ? new Date(lastSeen.seconds * 1000) : new Date(lastSeen);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffSecs = Math.floor(diffMs / 1000);
-    const diffMins = Math.floor(diffSecs / 60);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffSecs < 60) return "Last Seen: just now";
-    if (diffMins < 60) return `Last Seen: ${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
-    if (diffHours < 24) return `Last Seen: ${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    if (diffDays === 1) return "Last Seen: yesterday";
-    if (diffDays < 7) return `Last Seen: ${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `Last Seen: ${day}/${month}/${year}`;
-  } catch (error) {
-    return "Offline";
-  }
-}
 
 function isUserOnline(userId, currentUserId, online, lastSeen) {
   // Current user is always shown as online
@@ -104,7 +82,21 @@ export default function Favorites() {
         .map(f => {
           const post = list.find(p => p.id === f.postId);
           // VANISH LOGIC: Filter out if post is missing (deleted), disabled, or expired
-          if (!post || (post.status && post.status !== "active")) return null;
+          if (!post) return null;
+          if (post.status && post.status !== "active") return null;
+
+          // Check for expiration
+          if (post.expiry) {
+            try {
+              const expiryDate = post.expiry.toDate ? post.expiry.toDate() : (post.expiry.seconds ? new Date(post.expiry.seconds * 1000) : new Date(post.expiry));
+              // Check if it's a valid date and not "never" (year > 9000)
+              if (!isNaN(expiryDate.getTime()) && expiryDate.getFullYear() < 9000) {
+                if (expiryDate < new Date()) return null;
+              }
+            } catch (e) {
+              // assume valid if parsing fails
+            }
+          }
           return { ...post, favId: f.id, favCollection: colName };
         })
         .filter(Boolean);
@@ -127,6 +119,7 @@ export default function Favorites() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState([]);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState(null);
 
   const userProfile = globalUserProfile;
   const currentUserId = globalCurrentUserId || uid;
@@ -200,15 +193,26 @@ export default function Favorites() {
     return () => unsubscribe();
   }, [posts.workers, posts.services, posts.ads, subscribeToOnlineStatus]);
 
-  // Remove selected
-  async function removeSelected() {
-    await Promise.all(selected.map(item => {
-      const [favId, collection] = item.split('|');
-      return deleteDoc(doc(db, collection, favId));
-    }));
-    setSelected([]);
+  // Remove selected or single item
+  async function performDelete() {
+    if (itemToDelete) {
+      // Single DELETE
+      try {
+        await deleteDoc(doc(db, itemToDelete.collection, itemToDelete.id));
+      } catch (e) {
+        console.error("Failed to delete", e);
+      }
+      setItemToDelete(null);
+    } else {
+      // Bulk DELETE
+      await Promise.all(selected.map(item => {
+        const [favId, collection] = item.split('|');
+        return deleteDoc(doc(db, collection, favId));
+      }));
+      setSelected([]);
+      setSelectMode(false);
+    }
     setShowConfirm(false);
-    setSelectMode(false);
   }
 
   // Toggle selection
@@ -224,7 +228,7 @@ export default function Favorites() {
 
     const { title, rating = 0, location = {}, tags = [], latitude, longitude, createdBy, avatarUrl } = post;
     const workerCreatorProfile = userProfiles[createdBy] || {};
-    const displayUsername = workerCreatorProfile.username || "Unknown User";
+    const displayUsername = workerCreatorProfile.username || workerCreatorProfile.name || "User";
     const displayProfileImage = avatarUrl || workerCreatorProfile.photoURL || workerCreatorProfile.profileImage || defaultAvatar;
     const displayOnline = workerCreatorProfile.online;
     const displayLastSeen = workerCreatorProfile.lastSeen;
@@ -338,7 +342,7 @@ export default function Favorites() {
       return () => clearInterval(timer);
     }, [expiry]);
     const creatorProfile = userProfiles[createdBy] || {};
-    const displayUsername = creatorProfile.username || "Unknown User";
+    const displayUsername = creatorProfile.username || creatorProfile.name || "User";
     const displayProfileImage = profilePhotoUrl || creatorProfile.photoURL || creatorProfile.profileImage || defaultAvatar;
     const displayOnline = creatorProfile.online;
     const displayLastSeen = creatorProfile.lastSeen;
@@ -373,9 +377,9 @@ export default function Favorites() {
       try {
         const expiryDate = expiry.toDate ? expiry.toDate() : new Date(expiry);
         if (isUntilIChange()) {
-          return "Until: Not Available";
+          return "Expiry: N/A";
         } else {
-          return `Until: ${expiryDate.toLocaleString('en-US', {
+          return `Until: ${expiryDate.toLocaleString(undefined, {
             month: 'short',
             day: 'numeric',
             year: 'numeric',
@@ -514,7 +518,7 @@ export default function Favorites() {
 
     const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
     const adCreatorProfile = userProfiles[createdBy] || {};
-    const displayUsername = adCreatorProfile.username || "Unknown User";
+    const displayUsername = adCreatorProfile.username || adCreatorProfile.name || "User";
     const displayProfileImage = adCreatorProfile.photoURL || adCreatorProfile.profileImage || profileImage || defaultAvatar;
     const displayOnline = adCreatorProfile.online;
     const displayLastSeen = adCreatorProfile.lastSeen;
@@ -579,7 +583,11 @@ export default function Favorites() {
           </div>
           {!selectMode && (
             <button
-              onClick={(e) => { e.stopPropagation(); deleteDoc(doc(db, post.favCollection, post.favId)); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setItemToDelete({ id: post.favId, collection: post.favCollection });
+                setShowConfirm(true);
+              }}
               className="p-2 text-red-600 hover:bg-red-50 rounded-full transition-colors ml-2"
               title="Remove from favorites"
             >
@@ -829,20 +837,20 @@ export default function Favorites() {
             </div>
             <h3 className="font-bold mb-2 text-lg text-gray-900">Remove Favorites?</h3>
             <p className="text-gray-600 mb-6">
-              Are you sure you want to remove {selected.length} favorite{selected.length > 1 ? "s" : ""}?
+              Are you sure you want to remove {itemToDelete ? "this item" : `${selected.length} items`} from favorites?
             </p>
             <div className="flex gap-3">
               <button
                 className="flex-1 bg-gray-100 text-gray-700 px-5 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors"
-                onClick={() => setShowConfirm(false)}
+                onClick={() => { setShowConfirm(false); setItemToDelete(null); }}
               >
-                Cancel
+                No, Keep
               </button>
               <button
                 className="flex-1 bg-red-600 text-white px-5 py-3 rounded-xl font-bold hover:bg-red-700 transition-colors shadow-lg shadow-red-500/30"
-                onClick={removeSelected}
+                onClick={performDelete}
               >
-                Remove
+                Yes, Remove
               </button>
             </div>
           </div>

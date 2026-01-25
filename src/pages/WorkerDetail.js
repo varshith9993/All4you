@@ -26,6 +26,7 @@ import { FiArrowLeft, FiStar, FiMessageSquare, FiHeart, FiShare2, FiX, FiMapPin,
 import MapComponent from "../components/MapComponent";
 import ProfileImageViewer from "../components/ProfileImageViewer";
 import defaultAvatar from "../assets/images/default_profile.svg";
+import { formatDateTime } from "../utils/timeUtils";
 
 function ManualStars({ value, onChange, size = 46 }) {
   const [hover, setHover] = useState(0);
@@ -47,17 +48,6 @@ function ManualStars({ value, onChange, size = 46 }) {
   );
 }
 
-function formatDateTime(dateObj) {
-  if (!dateObj) return "";
-  return dateObj.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: true
-  });
-}
 
 
 // Function to get download URL with forced download
@@ -251,6 +241,7 @@ export default function WorkerDetail() {
   const [replyText, setReplyText] = useState("");
   const [expandedReplies, setExpandedReplies] = useState({});
   const [showProfileViewer, setShowProfileViewer] = useState(false);
+  const [notFound, setNotFound] = useState(false);
 
   // Pagination state for reviews
   const [hasMoreReviews, setHasMoreReviews] = useState(true);
@@ -258,9 +249,43 @@ export default function WorkerDetail() {
   const lastReviewRef = useRef(null);
   const allReviewsRef = useRef([]);
 
+  // Confirmation state for deleting reviews
+  const [reviewToDelete, setReviewToDelete] = useState(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingReview, setDeletingReview] = useState(false);
+
   // Cache initialization ref to prevent double loading
   const cacheInitializedRef = useRef(false);
   const dataFromCache = useRef(false);
+
+  // Fetch creator profile using ProfileCache
+  const fetchCreatorProfile = useCallback(async (creatorId) => {
+    if (!creatorId) return;
+    try {
+      // First check cache
+      const cached = getCachedProfile(creatorId);
+      if (cached) {
+        setCreatorProfile(cached);
+        return;
+      }
+      // Fetch using ProfileCache (batch-optimized)
+      const profiles = await fetchProfiles([creatorId]);
+      if (profiles[creatorId]) {
+        setCreatorProfile(profiles[creatorId]);
+      }
+    } catch (error) {
+    }
+  }, [fetchProfiles, getCachedProfile]);
+
+  // Fetch reviewer profiles using ProfileCache (batch optimized)
+  const fetchReviewerProfiles = useCallback(async (userIds) => {
+    if (!userIds || userIds.length === 0) return;
+    try {
+      const profilesData = await fetchProfiles(userIds);
+      setProfiles(prev => ({ ...prev, ...profilesData }));
+    } catch (error) {
+    }
+  }, [fetchProfiles]);
 
   // Initialize from cache on mount (instant display)
   useEffect(() => {
@@ -275,6 +300,9 @@ export default function WorkerDetail() {
       if (workerData) {
         setWorker(workerData);
         // Creator profile will be fetched separately if needed
+        if (workerData.createdBy) {
+          fetchCreatorProfile(workerData.createdBy);
+        }
       }
       if (reviewsData && Array.isArray(reviewsData)) {
         allReviewsRef.current = reviewsData;
@@ -288,10 +316,19 @@ export default function WorkerDetail() {
       if (profilesData) {
         setProfiles(profilesData);
       }
+
+      // Check for missing reviewer profiles in cache and fetch them
+      if (reviewsData && Array.isArray(reviewsData)) {
+        const availableProfileIds = new Set(Object.keys(profilesData || {}));
+        const missingIds = [...new Set(reviewsData.map(r => r.userId).filter(uid => uid && !availableProfileIds.has(uid)))];
+        if (missingIds.length > 0) {
+          fetchReviewerProfiles(missingIds);
+        }
+      }
     } else {
       dataFromCache.current = false;
     }
-  }, [id, getPostDetailCache, currentUserId]);
+  }, [id, getPostDetailCache, currentUserId, fetchCreatorProfile, fetchReviewerProfiles]);
 
 
 
@@ -339,34 +376,7 @@ export default function WorkerDetail() {
     }
   }, [id, worker]);
 
-  // Fetch creator profile using ProfileCache
-  const fetchCreatorProfile = useCallback(async (creatorId) => {
-    if (!creatorId) return;
-    try {
-      // First check cache
-      const cached = getCachedProfile(creatorId);
-      if (cached) {
-        setCreatorProfile(cached);
-        return;
-      }
-      // Fetch using ProfileCache (batch-optimized)
-      const profiles = await fetchProfiles([creatorId]);
-      if (profiles[creatorId]) {
-        setCreatorProfile(profiles[creatorId]);
-      }
-    } catch (error) {
-    }
-  }, [fetchProfiles, getCachedProfile]);
 
-  // Fetch reviewer profiles using ProfileCache (batch optimized)
-  const fetchReviewerProfiles = useCallback(async (userIds) => {
-    if (!userIds || userIds.length === 0) return;
-    try {
-      const profilesData = await fetchProfiles(userIds);
-      setProfiles(prev => ({ ...prev, ...profilesData }));
-    } catch (error) {
-    }
-  }, [fetchProfiles]);
 
   // Load more reviews (pagination)
   const loadMoreReviews = useCallback(async () => {
@@ -430,9 +440,6 @@ export default function WorkerDetail() {
   useEffect(() => {
     if (!id) return;
 
-    // If data loaded from cache, skip network requests to optimize reads
-    if (dataFromCache.current) return;
-
     // OPTIMIZATION: Use one-time fetch instead of continuous listener for worker document
     const fetchWorkerData = async () => {
       try {
@@ -454,12 +461,19 @@ export default function WorkerDetail() {
           }, snap.data().updatedAt?.toMillis?.() || Date.now());
 
 
+        } else {
+          setNotFound(true);
         }
       } catch (error) {
+        console.error("Error fetching worker:", error);
+        setNotFound(true);
       }
     };
 
-    fetchWorkerData();
+    // Only fetch worker document if NOT loaded from cache
+    if (!dataFromCache.current) {
+      fetchWorkerData();
+    }
 
     // Fetch initial reviews with pagination (first 7) - Keep listener for live updates
     const reviewQ = query(
@@ -672,23 +686,33 @@ export default function WorkerDetail() {
     setTimeout(() => setToast(""), 1800);
   };
 
-  const deleteReview = async (reviewId, hasRating) => {
-    if (!window.confirm("Are you sure you want to delete this review? This action cannot be undone.")) return;
+  const confirmDeleteReview = async () => {
+    if (!reviewToDelete) return;
 
     try {
-      await deleteDoc(doc(db, "workerReviews", reviewId));
+      setDeletingReview(true);
+      await deleteDoc(doc(db, "workerReviews", reviewToDelete.id));
 
-      if (hasRating) {
+      if (reviewToDelete.rating) {
         await updateWorkerRating();
       }
 
       setToast("Review deleted");
       setActiveMenuId(null);
+      setShowDeleteConfirm(false);
+      setReviewToDelete(null);
     } catch (error) {
       setToast("Failed to delete review");
+    } finally {
+      setDeletingReview(false);
+      setTimeout(() => setToast(""), 2000);
     }
+  };
 
-    setTimeout(() => setToast(""), 2000);
+  const handleDeleteClick = (review) => {
+    setReviewToDelete(review);
+    setShowDeleteConfirm(true);
+    setActiveMenuId(null);
   };
 
   const submitReply = async (reviewId, reviewerId) => {
@@ -866,15 +890,28 @@ export default function WorkerDetail() {
     setFileLoadErrors(prev => ({ ...prev, [url]: true }));
   };
 
+  if (notFound) return (
+    <div className="flex justify-center items-center h-screen flex-col gap-4">
+      <FiAlertCircle size={48} className="text-gray-300" />
+      <p className="text-gray-500 font-medium">Worker profile not found or has been deleted.</p>
+      <button
+        onClick={() => navigate('/workers')}
+        className="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors"
+      >
+        Back to Workers
+      </button>
+    </div>
+  );
+
   if (!worker) return (
     <div className="flex justify-center items-center h-screen">
       <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
     </div>
   );
 
-  // Prioritize worker-specific avatar, then creator profile, then default
-  const displayProfileImage = worker.avatarUrl || creatorProfile?.photoURL || creatorProfile?.profileImage || defaultAvatar;
-  const displayUsername = creatorProfile?.username || "Unknown User";
+  // Prioritize creator profile (latest) -> worker author metadata (stale) -> worker root fields -> fallback
+  const displayProfileImage = creatorProfile?.photoURL || creatorProfile?.profileImage || worker.avatarUrl || worker.author?.photoURL || defaultAvatar;
+  const displayUsername = creatorProfile?.username || creatorProfile?.displayName || creatorProfile?.name || worker.author?.username || worker.author?.name || worker.username || (creatorProfile?.email ? creatorProfile.email.split('@')[0] : "User");
 
   // Safe tags handling
   const displayTags = Array.isArray(worker.tags) ? worker.tags : (typeof worker.tags === 'string' ? worker.tags.split(',').map(t => t.trim()) : []);
@@ -915,6 +952,12 @@ export default function WorkerDetail() {
 
       <div className="px-4 pb-24 overflow-y-auto">
 
+        {/* Username */}
+        <div className="text-center mt-4 mb-3">
+          <h2 className="text-xl font-bold text-gray-900 tracking-tight">{displayUsername}</h2>
+          <p className="text-sm text-gray-500 tracking-normal">Worker</p>
+        </div>
+
         {/* 1. Profile Image */}
         <div className="flex justify-center mt-4 mb-3">
           <img
@@ -938,7 +981,6 @@ export default function WorkerDetail() {
         {/* 2. Title */}
         <div className="text-center mb-4">
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight leading-tight">{worker.title}</h1>
-          <p className="text-sm text-gray-500 mt-1 tracking-normal">by {displayUsername}</p>
         </div>
 
         {/* 3. Description */}
@@ -1166,7 +1208,11 @@ export default function WorkerDetail() {
           ) : (
             <div className="space-y-4">
               {reviews.filter(r => r.text && r.text.trim()).map(r => {
-                const user = profiles[r.userId] || { username: "Unknown", profileImage: "" };
+                const userProfile = profiles[r.userId] || {};
+                const user = {
+                  username: userProfile.username || userProfile.name || userProfile.displayName || r.username || r.authorName || (userProfile.email ? userProfile.email.split('@')[0] : "User"),
+                  profileImage: userProfile.profileImage || ""
+                };
                 const dt = r.createdAt && r.createdAt.seconds ? new Date(r.createdAt.seconds * 1000) : null;
                 return (
                   <div key={r.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm relative">
@@ -1181,7 +1227,7 @@ export default function WorkerDetail() {
                       <div className="flex-1 min-w-0">
                         <div className="flex justify-between items-start">
                           <h4 className="font-semibold text-gray-900 truncate pr-2">
-                            {user.username || "Unknown User"}
+                            {user.username}
                           </h4>
 
                           {/* Three dots menu for owner or review creator */}
@@ -1215,9 +1261,9 @@ export default function WorkerDetail() {
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        deleteReview(r.id, r.rating > 0);
+                                        handleDeleteClick(r);
                                       }}
-                                      className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                      className="w-full text-left px-4 py-2 text-red-600 hover:bg-red-50 flex items-center gap-2"
                                     >
                                       <FiTrash2 size={14} /> Delete
                                     </button>
@@ -1409,6 +1455,37 @@ export default function WorkerDetail() {
             Post Review
           </button>
         </Modal>
+      )}
+
+      {/* Custom Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in">
+          <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-xs w-full text-center">
+            <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FiTrash2 size={28} className="text-red-600" />
+            </div>
+            <h3 className="font-bold mb-2 text-lg text-gray-900">Delete Review?</h3>
+            <p className="text-gray-600 mb-6 text-sm">
+              Are you sure you want to delete? This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                className="flex-1 bg-gray-100 text-gray-700 px-4 py-2.5 rounded-xl font-bold hover:bg-gray-200 transition-colors text-sm"
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deletingReview}
+              >
+                No
+              </button>
+              <button
+                className="flex-1 bg-red-600 text-white px-4 py-2.5 rounded-xl font-bold hover:bg-red-700 transition-colors shadow-lg shadow-red-500/30 text-sm flex justify-center items-center gap-2"
+                onClick={confirmDeleteReview}
+                disabled={deletingReview}
+              >
+                {deletingReview ? "Deleting..." : "Yes"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* File Viewer Modal */}
