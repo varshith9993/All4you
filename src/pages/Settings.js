@@ -19,8 +19,11 @@ import {
   FiMessageCircle,
   FiCheck,
   FiShare2,
-  FiEdit3
+  FiEdit3,
+  FiGlobe,
+  FiMap
 } from "react-icons/fi";
+import { doc, updateDoc } from "firebase/firestore";
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -33,6 +36,11 @@ export default function Settings() {
   const [showReferModal, setShowReferModal] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const [userName, setUserName] = useState("");
+  const [userCountry, setUserCountry] = useState("");
+  const [contentScope, setContentScope] = useState("local");
+  const [showScopeConfirm, setShowScopeConfirm] = useState(false);
+  const [pendingScope, setPendingScope] = useState(null);
+  const [showFinalConfirm, setShowFinalConfirm] = useState(false);
 
   // OPTIMIZATION: Use GlobalDataCache instead of fetching profile separately
   const { userProfile } = useGlobalDataCache();
@@ -43,6 +51,8 @@ export default function Settings() {
       // Use cached profile data from GlobalDataCache (0 reads)
       if (userProfile && userProfile.username) {
         setUserName(userProfile.username);
+        setUserCountry(userProfile.country || "India");
+        setContentScope(userProfile.countryScope || "local");
 
 
 
@@ -138,7 +148,25 @@ export default function Settings() {
     }
   };
 
-  const SettingItem = ({ icon: Icon, label, onClick, color = "text-gray-700" }) => (
+  const confirmScopeChange = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      await updateDoc(doc(db, "profiles", user.uid), {
+        countryScope: pendingScope
+      });
+
+      setContentScope(pendingScope);
+      setShowScopeConfirm(false);
+      window.location.reload();
+    } catch (error) {
+      console.error("Error updating scope:", error);
+      alert("Failed to update content scope. Please try again.");
+    }
+  };
+
+  const SettingItem = ({ icon: Icon, label, onClick, color = "text-gray-700", value }) => (
     <button
       onClick={onClick}
       className="w-full flex items-center justify-between p-4 bg-white border-b border-gray-100 hover:bg-gray-50 transition-colors"
@@ -149,7 +177,10 @@ export default function Settings() {
         </div>
         <span className="font-medium text-gray-800">{label}</span>
       </div>
-      <FiChevronRight className="text-gray-400" size={20} />
+      <div className="flex items-center gap-2">
+        {value && <span className="text-sm text-gray-400 font-medium">{value}</span>}
+        <FiChevronRight className="text-gray-400" size={20} />
+      </div>
     </button>
   );
 
@@ -194,6 +225,13 @@ export default function Settings() {
               label="My Notes"
               onClick={() => navigate("/notes")}
               color="text-green-600"
+            />
+            <SettingItem
+              icon={contentScope === 'global' ? FiGlobe : FiMap}
+              label="Content Region"
+              value={contentScope === 'global' ? "Around the World" : (userCountry || "India") + " Only"}
+              onClick={() => setShowScopeConfirm(true)}
+              color={contentScope === 'global' ? "text-indigo-600" : "text-green-600"}
             />
           </div>
         </div>
@@ -387,73 +425,214 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Refer a Friend Modal */}
-      {showReferModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowReferModal(false)}>
-          <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b flex justify-between items-center bg-gradient-to-r from-teal-500 to-cyan-500">
-              <h3 className="font-bold text-lg text-white">Refer a Friend</h3>
-              <button
-                onClick={() => setShowReferModal(false)}
-                className="p-1 hover:bg-white/20 rounded-full transition-colors"
-              >
-                <FiX size={24} className="text-white" />
-              </button>
+      {/* Content Region Selection Modal */}
+      {showScopeConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowScopeConfirm(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden animate-scale-in" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="bg-gradient-to-r from-pink-500 to-indigo-600 px-4 py-6 mb-4">
+              <h3 className="font-bold text-xl text-white text-center">Choose Content Region</h3>
+              <p className="text-indigo-100 text-xs text-center mt-1">Select which posts you want to see</p>
             </div>
 
-            <div className="p-6 text-center">
-              <div className="w-20 h-20 bg-teal-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <FiShare2 size={40} className="text-teal-600" />
-              </div>
-
-              <h3 className="font-bold text-xl mb-2 text-gray-900">Share AeroSigil</h3>
-              <p className="text-gray-600 text-sm mb-6">
-                Help your friends discover local workers, services, and ads. Share the app link with them!
-              </p>
-
-              {/* App Link Display */}
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4">
-                <p className="text-xs text-gray-500 mb-1">App Link</p>
-                <p className="text-sm font-mono text-gray-800 break-all">{window.location.origin}</p>
-              </div>
-
-              {/* Copy Link Button */}
+            {/* Options */}
+            <div className="p-6 space-y-3">
+              {/* Local Option */}
               <button
-                onClick={handleCopyLink}
-                className={`w-full py-3 rounded-xl font-bold transition-all mb-3 flex items-center justify-center gap-2 ${copySuccess
-                  ? "bg-green-100 text-green-700 border-2 border-green-300"
-                  : "bg-teal-600 text-white hover:bg-teal-700"
+                onClick={() => setPendingScope('local')}
+                className={`w-full p-4 rounded-xl border-2 transition-all text-left ${(pendingScope === null ? contentScope : pendingScope) === 'local'
+                  ? 'border-green-500 bg-green-50'
+                  : 'border-gray-200 hover:border-green-300 bg-white'
                   }`}
               >
-                {copySuccess ? (
-                  <>
-                    <FiCheck size={20} />
-                    Link Copied!
-                  </>
-                ) : (
-                  <>
-                    <FiShare2 size={20} />
-                    Copy Link
-                  </>
-                )}
+                <div className="flex items-start gap-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${(pendingScope === null ? contentScope : pendingScope) === 'local'
+                    ? 'bg-green-500'
+                    : 'bg-gray-200'
+                    }`}>
+                    <FiMap size={20} className={(pendingScope === null ? contentScope : pendingScope) === 'local' ? 'text-white' : 'text-gray-500'} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h4 className="font-bold text-gray-900">{userCountry || "India"} Only</h4>
+                      {(pendingScope === null ? contentScope : pendingScope) === 'local' && (
+                        <FiCheck size={16} className="text-green-600" />
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-600">See posts only from {userCountry || "India"}. Perfect for finding local services and workers nearby.</p>
+                  </div>
+                </div>
               </button>
 
-              <p className="text-xs text-gray-500">
-                Share this link via WhatsApp, Email, SMS, or any messaging app
-              </p>
+              {/* Global Option */}
+              <button
+                onClick={() => setPendingScope('global')}
+                className={`w-full p-4 rounded-xl border-2 transition-all text-left ${(pendingScope === null ? contentScope : pendingScope) === 'global'
+                  ? 'border-indigo-500 bg-indigo-50'
+                  : 'border-gray-200 hover:border-indigo-300 bg-white'
+                  }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${(pendingScope === null ? contentScope : pendingScope) === 'global'
+                    ? 'bg-indigo-500'
+                    : 'bg-gray-200'
+                    }`}>
+                    <FiGlobe size={20} className={(pendingScope === null ? contentScope : pendingScope) === 'global' ? 'text-white' : 'text-gray-500'} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h4 className="font-bold text-gray-900">Around the World</h4>
+                      {(pendingScope === null ? contentScope : pendingScope) === 'global' && (
+                        <FiCheck size={16} className="text-indigo-600" />
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-600">See posts from all countries. Explore services and opportunities worldwide.</p>
+                  </div>
+                </div>
+              </button>
+
+              {/* Current Selection Info */}
+              {(pendingScope === null ? contentScope : pendingScope) !== contentScope && pendingScope !== null && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mt-4">
+                  <p className="text-xs text-yellow-800 text-center">
+                    ⚠️ The app will reload to apply changes
+                  </p>
+                </div>
+              )}
             </div>
 
-            <div className="p-4 border-t bg-gray-50">
+            {/* Actions */}
+            <div className="p-4 border-t bg-gray-50 flex gap-3">
               <button
-                onClick={() => setShowReferModal(false)}
-                className="w-full bg-gray-200 text-gray-800 py-3 rounded-xl font-bold hover:bg-gray-300 transition-colors"
+                onClick={() => {
+                  setPendingScope(null);
+                  setShowScopeConfirm(false);
+                }}
+                className="flex-1 bg-gray-200 text-gray-800 py-3 rounded-xl font-bold hover:bg-gray-300 transition-colors"
               >
-                Close
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowScopeConfirm(false);
+                  setShowFinalConfirm(true);
+                }}
+                disabled={pendingScope === null || pendingScope === contentScope}
+                className="flex-1 bg-gradient-to-r from-pink-500 to-indigo-600 text-white py-3 rounded-xl font-bold hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Apply Changes
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Final Confirmation Modal */}
+      {showFinalConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowFinalConfirm(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl p-6 text-center animate-scale-in" onClick={e => e.stopPropagation()}>
+            <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FiAlertTriangle size={32} className="text-yellow-600" />
+            </div>
+            <h3 className="font-bold text-xl mb-2 text-gray-900">Are you sure?</h3>
+            <p className="text-gray-600 mb-6 text-sm">
+              Do you want to change your content region to {pendingScope === 'global' ? '"Around the World"' : `"${userCountry || "India"} Only"`}?
+              <br /><br />
+              The app will reload to apply these changes.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowFinalConfirm(false);
+                  setShowScopeConfirm(true);
+                }}
+                className="flex-1 bg-gray-100 text-gray-800 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors"
+              >
+                No
+              </button>
+              <button
+                onClick={() => {
+                  setShowFinalConfirm(false);
+                  confirmScopeChange();
+                }}
+                className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors"
+              >
+                Yes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Refer a Friend Modal */}
+      {
+        showReferModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowReferModal(false)}>
+            <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="p-4 border-b flex justify-between items-center bg-gradient-to-r from-teal-500 to-cyan-500">
+                <h3 className="font-bold text-lg text-white">Refer a Friend</h3>
+                <button
+                  onClick={() => setShowReferModal(false)}
+                  className="p-1 hover:bg-white/20 rounded-full transition-colors"
+                >
+                  <FiX size={24} className="text-white" />
+                </button>
+              </div>
+
+              <div className="p-6 text-center">
+                <div className="w-20 h-20 bg-teal-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <FiShare2 size={40} className="text-teal-600" />
+                </div>
+
+                <h3 className="font-bold text-xl mb-2 text-gray-900">Share AeroSigil</h3>
+                <p className="text-gray-600 text-sm mb-6">
+                  Help your friends discover local workers, services, and ads. Share the app link with them!
+                </p>
+
+                {/* App Link Display */}
+                <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4">
+                  <p className="text-xs text-gray-500 mb-1">App Link</p>
+                  <p className="text-sm font-mono text-gray-800 break-all">{window.location.origin}</p>
+                </div>
+
+                {/* Copy Link Button */}
+                <button
+                  onClick={handleCopyLink}
+                  className={`w-full py-3 rounded-xl font-bold transition-all mb-3 flex items-center justify-center gap-2 ${copySuccess
+                    ? "bg-green-100 text-green-700 border-2 border-green-300"
+                    : "bg-teal-600 text-white hover:bg-teal-700"
+                    }`}
+                >
+                  {copySuccess ? (
+                    <>
+                      <FiCheck size={20} />
+                      Link Copied!
+                    </>
+                  ) : (
+                    <>
+                      <FiShare2 size={20} />
+                      Copy Link
+                    </>
+                  )}
+                </button>
+
+                <p className="text-xs text-gray-500">
+                  Share this link via WhatsApp, Email, SMS, or any messaging app
+                </p>
+              </div>
+
+              <div className="p-4 border-t bg-gray-50">
+                <button
+                  onClick={() => setShowReferModal(false)}
+                  className="w-full bg-gray-200 text-gray-800 py-3 rounded-xl font-bold hover:bg-gray-300 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
     </div>
   );
 }

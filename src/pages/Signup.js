@@ -15,6 +15,7 @@ import { FiEye, FiEyeOff, FiMapPin, FiUser, FiMail, FiLock, FiNavigation } from 
 import { FcGoogle } from "react-icons/fc";
 import LocationPickerModal from "../components/LocationPickerModal";
 
+
 const OPENCAGE_API_KEY = "43ac78a805af4868b01f3dc9dcae8556";
 
 
@@ -26,6 +27,7 @@ export default function Signup() {
   const [landmark, setLandmark] = useState("");
   const [city, setCity] = useState("");
   const [pincode, setPincode] = useState("");
+  const [country, setCountry] = useState("");
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
@@ -42,6 +44,8 @@ export default function Signup() {
   const [signupMethod, setSignupMethod] = useState("email"); // "email" | "google"
   const [googleUser, setGoogleUser] = useState(null);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [contentScope, setContentScope] = useState("local"); // "local" | "global"
+
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -59,6 +63,22 @@ export default function Signup() {
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
+
+  // Auto-detect Country on Mount
+  useEffect(() => {
+    const detectCountry = async () => {
+      try {
+        const res = await fetch('https://ipapi.co/json/');
+        const data = await res.json();
+        if (data && data.country_name) {
+          setCountry(data.country_name);
+        }
+      } catch (err) {
+        // Fallback or silent fail
+      }
+    };
+    detectCountry();
+  }, []);
 
   // Auto-redirect if already logged in AND verified (skip logic if waiting for verification to start polling)
   useEffect(() => {
@@ -110,9 +130,9 @@ export default function Signup() {
 
 
   const validatePassword = () => {
-    // 6 to 12 chars
-    if (password.length < 6 || password.length > 12) {
-      return "Password must be 6-12 characters long.";
+    // At least 6 characters
+    if (password.length < 6) {
+      return "Password must be at least 6 characters long.";
     }
 
     // Must contain at least one letter and one number
@@ -174,6 +194,7 @@ export default function Signup() {
               setPlace(comp.suburb || comp.neighbourhood || comp.village || "");
               setCity(comp.city || comp.town || comp.county || "");
               setPincode(comp.postcode || "");
+              if (comp.country) setCountry(comp.country);
               setMessage("Location autofilled successfully!");
             } else {
               throw new Error("No location details");
@@ -281,7 +302,9 @@ export default function Signup() {
         longitude: parseFloat(longitude),
         createdAt: new Date(),
         uid: user.uid,
-        email: cleanEmail
+        email: cleanEmail,
+        country: country.trim() || "India", // Default if detection fails
+        countryScope: contentScope // User's selected scope
       });
 
       // 3. Do NOT sign out. Wait for them to click the link.
@@ -372,6 +395,7 @@ export default function Signup() {
       !place.trim() ||
       !city.trim() ||
       !pincode.trim() ||
+      !country.trim() ||
       (!locationEdited && (!latitude || !longitude))
     ) {
       setError("All fields including accurate location info are required.");
@@ -415,7 +439,9 @@ export default function Signup() {
         longitude: parseFloat(longitude),
         createdAt: new Date(),
         uid: googleUser.uid,
-        email: googleUser.email
+        email: googleUser.email,
+        country: country.trim() || "India",
+        countryScope: contentScope // User's selected scope
       });
 
       // Navigate to workers
@@ -524,7 +550,7 @@ export default function Signup() {
                 {showPassword ? <FiEye size={20} /> : <FiEyeOff size={20} />}
               </button>
             </div>
-            <p className="text-xs text-gray-500 mt-1 ml-4">Password must be 6-12 chars (include letters & numbers)</p>
+            <p className="text-xs text-gray-500 mt-1 ml-4">Password must be at least 6 chars with letters & numbers</p>
 
             {/* Location Section */}
             <div className="space-y-3 pt-2">
@@ -629,6 +655,62 @@ export default function Signup() {
                   disabled={submitting}
                 />
               </div>
+
+              {/* Country (Auto-detected, Read-only) */}
+              <div className="relative">
+                <FiMapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                <input
+                  type="text"
+                  placeholder="Country (Auto-detected)"
+                  value={country}
+                  readOnly
+                  className="w-full pl-12 pr-4 py-3 bg-gray-100 border border-gray-200 rounded-xl focus:outline-none cursor-not-allowed text-gray-600 font-medium"
+                />
+              </div>
+
+              {/* Content Scope Radio Buttons */}
+              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-4 rounded-xl border border-indigo-100">
+                <label className="block text-sm font-bold text-gray-700 mb-3">Show posts from:</label>
+                <div className="space-y-2">
+                  <label className={`flex items-center p-3 rounded-lg border-2 cursor-pointer transition-all ${contentScope === 'local'
+                    ? 'border-green-500 bg-green-50'
+                    : 'border-gray-200 bg-white hover:border-green-300'
+                    }`}>
+                    <input
+                      type="radio"
+                      name="contentScope"
+                      value="local"
+                      checked={contentScope === 'local'}
+                      onChange={(e) => setContentScope(e.target.value)}
+                      className="mr-3 w-4 h-4 text-green-600"
+                      disabled={submitting}
+                    />
+                    <div className="flex-1">
+                      <div className="font-bold text-gray-900 text-sm">{country || 'Selected Country'} Only</div>
+                      <div className="text-xs text-gray-600">See posts only from your country</div>
+                    </div>
+                  </label>
+                  <label className={`flex items-center p-3 rounded-lg border-2 cursor-pointer transition-all ${contentScope === 'global'
+                    ? 'border-indigo-500 bg-indigo-50'
+                    : 'border-gray-200 bg-white hover:border-indigo-300'
+                    }`}>
+                    <input
+                      type="radio"
+                      name="contentScope"
+                      value="global"
+                      checked={contentScope === 'global'}
+                      onChange={(e) => setContentScope(e.target.value)}
+                      className="mr-3 w-4 h-4 text-indigo-600"
+                      disabled={submitting}
+                    />
+                    <div className="flex-1">
+                      <div className="font-bold text-gray-900 text-sm">Around the World</div>
+                      <div className="text-xs text-gray-600">See posts from all countries</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
 
               {/* Location Tip */}
               <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-100 rounded-lg">
@@ -773,7 +855,7 @@ export default function Signup() {
                     {showPassword ? <FiEye size={20} /> : <FiEyeOff size={20} />}
                   </button>
                 </div>
-                <p className="text-xs text-gray-500 mt-1 ml-4">Set a password to login without Google if needed.</p>
+                <p className="text-xs text-gray-500 mt-1 ml-4">Password must be at least 6 chars with letters & numbers</p>
 
                 {/* Reuse Location Section Logic */}
                 <div className="space-y-3 pt-2">
@@ -877,6 +959,61 @@ export default function Signup() {
                       required
                       disabled={submitting}
                     />
+                  </div>
+
+                  {/* Country (Auto-detected, Read-only) */}
+                  <div className="relative">
+                    <FiMapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                    <input
+                      type="text"
+                      placeholder="Country (Auto-detected)"
+                      value={country}
+                      readOnly
+                      className="w-full pl-12 pr-4 py-3 bg-gray-100 border border-gray-200 rounded-xl focus:outline-none cursor-not-allowed text-gray-600 font-medium"
+                    />
+                  </div>
+
+                  {/* Content Scope Radio Buttons */}
+                  <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-4 rounded-xl border border-indigo-100">
+                    <label className="block text-sm font-bold text-gray-700 mb-3">Show posts from:</label>
+                    <div className="space-y-2">
+                      <label className={`flex items-center p-3 rounded-lg border-2 cursor-pointer transition-all ${contentScope === 'local'
+                        ? 'border-green-500 bg-green-50'
+                        : 'border-gray-200 bg-white hover:border-green-300'
+                        }`}>
+                        <input
+                          type="radio"
+                          name="contentScopeGoogle"
+                          value="local"
+                          checked={contentScope === 'local'}
+                          onChange={(e) => setContentScope(e.target.value)}
+                          className="mr-3 w-4 h-4 text-green-600"
+                          disabled={submitting}
+                        />
+                        <div className="flex-1">
+                          <div className="font-bold text-gray-900 text-sm">{country || 'Selected Country'} Only</div>
+                          <div className="text-xs text-gray-600">See posts only from your country</div>
+                        </div>
+                      </label>
+                      <label className={`flex items-center p-3 rounded-lg border-2 cursor-pointer transition-all ${contentScope === 'global'
+                        ? 'border-indigo-500 bg-indigo-50'
+                        : 'border-gray-200 bg-white hover:border-indigo-300'
+                        }`}>
+                        <input
+                          type="radio"
+                          name="contentScopeGoogle"
+                          value="global"
+                          checked={contentScope === 'global'}
+                          onChange={(e) => setContentScope(e.target.value)}
+                          className="mr-3 w-4 h-4 text-indigo-600"
+                          disabled={submitting}
+                        />
+                        <div className="flex-1">
+                          <div className="font-bold text-gray-900 text-sm">Around the World</div>
+                          <div className="text-xs text-gray-600">See posts from all countries</div>
+                        </div>
+                      </label>
+                    </div>
                   </div>
                 </div>
 

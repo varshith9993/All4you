@@ -3,10 +3,11 @@ import { auth, db } from "../firebase";
 import { collection, addDoc, serverTimestamp, doc, getDoc } from "firebase/firestore";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import { FiMapPin, FiTag, FiFileText, FiUpload, FiX, FiCheck, FiArrowLeft, FiImage } from "react-icons/fi";
+import { FiMapPin, FiTag, FiFileText, FiUpload, FiX, FiCheck, FiChevronDown, FiArrowLeft, FiImage } from "react-icons/fi";
 import LocationPickerModal from "../components/LocationPickerModal";
 import ActionMessageModal from "../components/ActionMessageModal";
 import { compressFile } from "../utils/compressor";
+import { countries } from "../utils/countries";
 
 const suggestedTags = ["mechanic", "security", "receptionist", "waiter", "tutor", "electrician", "driver", "teacher", "plumber", "carpenter", "painter", "cleaner", "cook", "gardener", "care taker", "marketing", "technician", "delivery boy", "developer", "labour", "driving tutor", "coding tutor"];
 const LOCATIONIQ_API_KEY = "pk.c46b235dc808aed78cb86bd70c83fab0";
@@ -23,6 +24,7 @@ export default function AddWorkers() {
   const [locationLandmark, setLocationLandmark] = useState("");
   const [locationCity, setLocationCity] = useState("");
   const [pincode, setPincode] = useState("");
+  const [country, setCountry] = useState("India"); // Default to India
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState([]);
@@ -142,6 +144,7 @@ export default function AddWorkers() {
           setLocationArea(addr.suburb || addr.neighbourhood || addr.village || "");
           setLocationCity(addr.city || addr.town || addr.county || "");
           setPincode(addr.postcode || "");
+          if (addr.country) setCountry(addr.country);
         } catch {
           setError("Failed to get location details");
         } finally {
@@ -198,12 +201,15 @@ export default function AddWorkers() {
           landmark: locationLandmark.trim(),
           city: locationCity.trim(),
           pincode: pincode.trim(),
+          country: country.trim() || "India"
         },
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         profileImage: profilePhotoUrl || "",
         files: uploadedFiles,
         status: "active",
+        country: country.trim() || "India",
+        countryScope: 'local', // Workers are local by default
 
         // Denormalized Author Data - Optimizes reads by embedding author info
         author: {
@@ -391,58 +397,87 @@ export default function AddWorkers() {
                 Pin on Map
               </button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <input
-                type="text"
-                placeholder="Area *"
-                value={locationArea}
-                onChange={(e) => setLocationArea(e.target.value)}
-                className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                required
-              />
-              <input
-                type="text"
-                placeholder="City *"
-                value={locationCity}
-                onChange={(e) => setLocationCity(e.target.value)}
-                className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                required
-              />
-              <input
-                type="text"
-                placeholder="Landmark (optional)"
-                value={locationLandmark}
-                onChange={(e) => setLocationLandmark(e.target.value)}
-                className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
-              <input
-                type="text"
-                placeholder="Pincode *"
-                value={pincode}
-                onChange={(e) => setPincode(e.target.value)}
-                className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                required
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4 mt-4">
-              <input
-                type="text"
-                placeholder="Latitude"
-                value={latitude}
-                onChange={(e) => setLatitude(e.target.value)}
-                className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                required
-                readOnly={locationLoading}
-              />
-              <input
-                type="text"
-                placeholder="Longitude"
-                value={longitude}
-                onChange={(e) => setLongitude(e.target.value)}
-                className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                required
-                readOnly={locationLoading}
-              />
+            <div className="space-y-4">
+              {/* Row 1: Area & City */}
+              <div className="grid grid-cols-2 gap-4">
+                <input
+                  type="text"
+                  placeholder="Area *"
+                  value={locationArea}
+                  onChange={(e) => setLocationArea(e.target.value)}
+                  className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="City *"
+                  value={locationCity}
+                  onChange={(e) => setLocationCity(e.target.value)}
+                  className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  required
+                />
+              </div>
+
+              {/* Row 2: Pincode & Landmark */}
+              <div className="grid grid-cols-2 gap-4">
+                <input
+                  type="text"
+                  placeholder="Pincode *"
+                  value={pincode}
+                  onChange={(e) => setPincode(e.target.value)}
+                  className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="Landmark (optional)"
+                  value={locationLandmark}
+                  onChange={(e) => setLocationLandmark(e.target.value)}
+                  className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+
+              {/* Row 3: Country */}
+              <div className="w-full relative">
+                <select
+                  value={country}
+                  onChange={(e) => setCountry(e.target.value)}
+                  className="w-full border border-gray-300 rounded-xl px-4 py-3 pr-10 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none"
+                  required
+                >
+                  <option value="">Select Country</option>
+                  {countries.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400 ">
+                  <FiChevronDown />
+                </div>
+              </div>
+
+              {/* Row 4: Lat & Long */}
+              <div className="grid grid-cols-2 gap-4">
+                <input
+                  type="text"
+                  placeholder="Latitude"
+                  value={latitude}
+                  onChange={(e) => setLatitude(e.target.value)}
+                  className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  required
+                  readOnly
+                />
+                <input
+                  type="text"
+                  placeholder="Longitude"
+                  value={longitude}
+                  onChange={(e) => setLongitude(e.target.value)}
+                  className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  required
+                  readOnly
+                />
+              </div>
             </div>
             <p className="text-xs text-gray-500 mt-2">* Required for distance calculation</p>
           </div>
@@ -543,6 +578,7 @@ export default function AddWorkers() {
             setLocationArea(location.area);
             setLocationCity(location.city);
             setPincode(location.pincode);
+            if (location.country) setCountry(location.country);
             setShowLocationPicker(false);
             setError("");
           }}

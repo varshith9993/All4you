@@ -9,10 +9,11 @@ import {
 } from "firebase/firestore";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import { FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck, FiArrowLeft } from "react-icons/fi";
+import { FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck, FiArrowLeft, FiChevronDown } from "react-icons/fi";
 import LocationPickerModal from "../components/LocationPickerModal";
 import ActionMessageModal from "../components/ActionMessageModal";
 import { compressFile } from "../utils/compressor";
+import { countries } from "../utils/countries";
 
 const suggestedTags = ["furniture", "mobile", "bike", "freelancing", "petrol pump", "farm house", "land", "car", "fridge", "T.V", "watch", "house", "apppartment", "gold shop", "loan", "restraunt", "hotel", "boutique", "cloth shop", "footwear shop", "A.C", "laptop", "iphone"];
 const LOCATIONIQ_API_KEY = "pk.a9310b368752337ce215643e50ac0172";
@@ -30,6 +31,7 @@ export default function AddAds() {
   const [locationLandmark, setLocationLandmark] = useState("");
   const [locationCity, setLocationCity] = useState("");
   const [pincode, setPincode] = useState("");
+  const [country, setCountry] = useState("India"); // Default to India
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
   const [photos, setPhotos] = useState([]);
@@ -131,6 +133,7 @@ export default function AddAds() {
           setLocationArea(addr.suburb || addr.neighbourhood || addr.village || "");
           setLocationCity(addr.city || addr.town || addr.county || "");
           setPincode(addr.postcode || "");
+          if (addr.country) setCountry(addr.country);
         } catch {
           setError("Failed to get location details");
         } finally {
@@ -211,12 +214,15 @@ export default function AddAds() {
           landmark: locationLandmark.trim(),
           city: locationCity.trim(),
           pincode: pincode.trim(),
+          country: country.trim() || "India"
         },
         latitude: latitude.toString(),
         longitude: longitude.toString(),
         rating: 0,
         distance: "---",
         status: "active",
+        country: country.trim() || "India",
+        countryScope: 'local', // Default local
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         createdBy: currentUser.uid,
@@ -442,58 +448,87 @@ export default function AddAds() {
                 Pin on Map
               </button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <input
-                type="text"
-                placeholder="Area *"
-                value={locationArea}
-                onChange={(e) => setLocationArea(e.target.value)}
-                className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                required
-              />
-              <input
-                type="text"
-                placeholder="City *"
-                value={locationCity}
-                onChange={(e) => setLocationCity(e.target.value)}
-                className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                required
-              />
-              <input
-                type="text"
-                placeholder="Landmark (optional)"
-                value={locationLandmark}
-                onChange={(e) => setLocationLandmark(e.target.value)}
-                className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
-              <input
-                type="text"
-                placeholder="Pincode *"
-                value={pincode}
-                onChange={(e) => setPincode(e.target.value)}
-                className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                required
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4 mt-4">
-              <input
-                type="text"
-                placeholder="Latitude"
-                value={latitude}
-                onChange={(e) => setLatitude(e.target.value)}
-                className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                required
-                readOnly={locationLoading}
-              />
-              <input
-                type="text"
-                placeholder="Longitude"
-                value={longitude}
-                onChange={(e) => setLongitude(e.target.value)}
-                className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                required
-                readOnly={locationLoading}
-              />
+            <div className="space-y-4">
+              {/* Row 1: Area & City */}
+              <div className="grid grid-cols-2 gap-4">
+                <input
+                  type="text"
+                  placeholder="Area *"
+                  value={locationArea}
+                  onChange={(e) => setLocationArea(e.target.value)}
+                  className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="City *"
+                  value={locationCity}
+                  onChange={(e) => setLocationCity(e.target.value)}
+                  className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  required
+                />
+              </div>
+
+              {/* Row 2: Pincode & Landmark */}
+              <div className="grid grid-cols-2 gap-4">
+                <input
+                  type="text"
+                  placeholder="Pincode *"
+                  value={pincode}
+                  onChange={(e) => setPincode(e.target.value)}
+                  className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="Landmark (optional)"
+                  value={locationLandmark}
+                  onChange={(e) => setLocationLandmark(e.target.value)}
+                  className="border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+
+              {/* Row 3: Country */}
+              <div className="w-full relative">
+                <select
+                  value={country}
+                  onChange={(e) => setCountry(e.target.value)}
+                  className="w-full border border-gray-300 rounded-xl px-4 py-3 pr-10 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none"
+                  required
+                >
+                  <option value="">Select Country</option>
+                  {countries.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                  <FiChevronDown />
+                </div>
+              </div>
+
+              {/* Row 4: Lat & Long */}
+              <div className="grid grid-cols-2 gap-4">
+                <input
+                  type="text"
+                  placeholder="Latitude"
+                  value={latitude}
+                  onChange={(e) => setLatitude(e.target.value)}
+                  className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  required
+                  readOnly
+                />
+                <input
+                  type="text"
+                  placeholder="Longitude"
+                  value={longitude}
+                  onChange={(e) => setLongitude(e.target.value)}
+                  className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  required
+                  readOnly
+                />
+              </div>
             </div>
             <p className="text-xs text-gray-500 mt-2">* Required for distance calculation</p>
           </div>
@@ -537,6 +572,7 @@ export default function AddAds() {
             setLocationArea(location.area);
             setLocationCity(location.city);
             setPincode(location.pincode);
+            if (location.country) setCountry(location.country);
             setShowLocationPicker(false);
             setError("");
           }}

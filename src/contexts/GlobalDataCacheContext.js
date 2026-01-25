@@ -1108,12 +1108,13 @@ export function useGlobalDataCache() {
  * This eliminates the need for Layout.js to create its own listeners
  */
 export function useLayoutCache() {
-  const { hasUnreadChats, hasUnreadNotifs, markNotificationsViewed, currentUserId } = useGlobalDataCache();
+  const { hasUnreadChats, hasUnreadNotifs, markNotificationsViewed, currentUserId, userProfile } = useGlobalDataCache();
   return {
     hasUnreadChats,
     hasUnreadNotifs,
     markNotificationsViewed,
-    currentUserId
+    currentUserId,
+    userProfile
   };
 }
 

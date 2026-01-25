@@ -111,6 +111,7 @@ function FilterModal({ isOpen, onClose, filters, setFilters, applyFilters }) {
       city: "",
       landmark: "",
       pincode: "",
+      country: "",
       tags: ""
     };
     setLocalFilters(resetFilters);
@@ -272,6 +273,16 @@ function FilterModal({ isOpen, onClose, filters, setFilters, applyFilters }) {
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={localFilters.pincode}
                   onChange={(e) => setLocalFilters({ ...localFilters, pincode: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Country (comma separated)</label>
+                <input
+                  type="text"
+                  placeholder="e.g., India, USA"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={localFilters.country || ""}
+                  onChange={(e) => setLocalFilters({ ...localFilters, country: e.target.value })}
                 />
               </div>
             </div>
@@ -494,6 +505,7 @@ export default function Workers() {
     city: "",
     landmark: "",
     pincode: "",
+    country: "",
     tags: ""
   });
 
@@ -713,6 +725,10 @@ export default function Workers() {
       if (!checkLocationFilter(debouncedFilters.landmark, worker.location?.landmark)) return false;
       if (!checkLocationFilter(debouncedFilters.pincode, worker.location?.pincode)) return false;
 
+      // Country Filter (check deep location.location.country first, then worker.country)
+      const workerCountry = worker.location?.country || worker.country;
+      if (!checkLocationFilter(debouncedFilters.country, workerCountry)) return false;
+
       // Tags filter
       if (debouncedFilters.tags) {
         const tagFilters = debouncedFilters.tags.split(',').map(t => t.trim().toLowerCase()).filter(t => t);
@@ -800,6 +816,7 @@ export default function Workers() {
     filters.city ||
     filters.landmark ||
     filters.pincode ||
+    filters.country ||
     filters.tags;
 
   if (loading) {

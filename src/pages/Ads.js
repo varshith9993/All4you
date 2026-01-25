@@ -321,6 +321,7 @@ function FilterModal({ isOpen, onClose, filters, setFilters, applyFilters }) {
       city: "",
       landmark: "",
       pincode: "",
+      country: "",
       tags: ""
     };
     setLocalFilters(resetFilters);
@@ -482,6 +483,16 @@ function FilterModal({ isOpen, onClose, filters, setFilters, applyFilters }) {
                   onChange={(e) => setLocalFilters({ ...localFilters, pincode: e.target.value })}
                 />
               </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Country (comma separated)</label>
+                <input
+                  type="text"
+                  placeholder="e.g., India, USA"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={localFilters.country || ""}
+                  onChange={(e) => setLocalFilters({ ...localFilters, country: e.target.value })}
+                />
+              </div>
             </div>
           </div>
 
@@ -550,6 +561,7 @@ export default function Ads() {
     city: "",
     landmark: "",
     pincode: "",
+    country: "",
     tags: ""
   });
 
@@ -773,7 +785,13 @@ export default function Ads() {
         ad.location?.pincode?.includes(pincode)
       );
 
-      return matchesArea && matchesCity && matchesLandmark && matchesPincode;
+      // Country Filter
+      const adCountry = ad.location?.country || ad.country;
+      const matchesCountry = !debouncedFilters.country || debouncedFilters.country.split(',').map(c => c.trim().toLowerCase()).filter(c => c).some(country =>
+        adCountry?.toLowerCase().includes(country)
+      );
+
+      return matchesArea && matchesCity && matchesLandmark && matchesPincode && matchesCountry;
     });
 
     const tagsFilters = debouncedFilters.tags ? debouncedFilters.tags.split(',').map(t => t.trim().toLowerCase()).filter(t => t) : [];
@@ -842,7 +860,7 @@ export default function Ads() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, [displayCount, filteredAds.length, hasMore, loadingMore, loadMoreAds, currentPageSize]);
 
-  const hasActiveFilters = filters.distance.min > 0 || filters.distance.max || filters.rating.min > 0 || filters.rating.max < 5 || filters.onlineStatus !== "all" || filters.area || filters.city || filters.landmark || filters.pincode || filters.tags;
+  const hasActiveFilters = filters.distance.min > 0 || filters.distance.max || filters.rating.min > 0 || filters.rating.max < 5 || filters.onlineStatus !== "all" || filters.area || filters.city || filters.landmark || filters.pincode || filters.country || filters.tags;
 
   return (
     <Layout
@@ -924,13 +942,18 @@ export default function Ads() {
                   Pincode: {filters.pincode}
                 </span>
               )}
+              {filters.country && (
+                <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                  Country: {filters.country}
+                </span>
+              )}
               {filters.tags && (
                 <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
                   Tags: {filters.tags}
                 </span>
               )}
               <button
-                onClick={() => setFilters({ distance: { min: 0, max: null }, distanceUnit: 'km', rating: { min: 0, max: 5 }, onlineStatus: "all", area: "", city: "", landmark: "", pincode: "", tags: "" })}
+                onClick={() => setFilters({ distance: { min: 0, max: null }, distanceUnit: 'km', rating: { min: 0, max: 5 }, onlineStatus: "all", area: "", city: "", landmark: "", pincode: "", country: "", tags: "" })}
                 className="text-red-500 text-xs hover:text-red-700 font-medium transition-colors"
               >
                 Clear All

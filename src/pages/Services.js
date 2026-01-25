@@ -131,6 +131,7 @@ function FilterModal({ isOpen, onClose, filters, setFilters, applyFilters }) {
       city: "",
       landmark: "",
       pincode: "",
+      country: "",
       tags: "",
       expiryType: "all",
       expiryDate: "",
@@ -308,6 +309,16 @@ function FilterModal({ isOpen, onClose, filters, setFilters, applyFilters }) {
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={localFilters.pincode || ""}
                   onChange={(e) => setLocalFilters({ ...localFilters, pincode: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Country (comma separated)</label>
+                <input
+                  type="text"
+                  placeholder="e.g., India, USA"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={localFilters.country || ""}
+                  onChange={(e) => setLocalFilters({ ...localFilters, country: e.target.value })}
                 />
               </div>
             </div>
@@ -747,6 +758,7 @@ export default function Services() {
     city: "",
     landmark: "",
     pincode: "",
+    country: "",
     tags: "",
     expiryType: "all",
     expiryDate: "",
@@ -995,6 +1007,10 @@ export default function Services() {
       if (!checkLocationFilter(debouncedFilters.landmark, service.location?.landmark)) return false;
       if (!checkLocationFilter(debouncedFilters.pincode, service.location?.pincode)) return false;
 
+      // Country Filter
+      const serviceCountry = service.location?.country || service.country;
+      if (!checkLocationFilter(debouncedFilters.country, serviceCountry)) return false;
+
       // Tags filter
       if (debouncedFilters.tags) {
         const tagFilters = debouncedFilters.tags.split(',').map(t => t.trim().toLowerCase()).filter(t => t);
@@ -1122,6 +1138,7 @@ export default function Services() {
     filters.city ||
     filters.landmark ||
     filters.pincode ||
+    filters.country ||
     filters.tags ||
     filters.expiryType !== "all" ||
     filters.expiryDate;
@@ -1223,6 +1240,11 @@ export default function Services() {
                     Pincode: {filters.pincode}
                   </span>
                 )}
+                {filters.country && (
+                  <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+                    Country: {filters.country}
+                  </span>
+                )}
                 {filters.tags && (
                   <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
                     Tags: {filters.tags}
@@ -1248,6 +1270,7 @@ export default function Services() {
                     city: "",
                     landmark: "",
                     pincode: "",
+                    country: "",
                     tags: "",
                     expiryType: "all",
                     expiryDate: "",

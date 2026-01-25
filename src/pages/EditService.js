@@ -4,11 +4,12 @@ import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
-import { FiClock, FiCalendar, FiMapPin, FiX, FiImage, FiFileText, FiUpload, FiArrowLeft, FiRotateCcw } from "react-icons/fi";
+import { FiClock, FiCalendar, FiMapPin, FiX, FiImage, FiChevronDown, FiFileText, FiUpload, FiArrowLeft, FiRotateCcw } from "react-icons/fi";
 
 import LocationPickerModal from "../components/LocationPickerModal";
 import ActionMessageModal from "../components/ActionMessageModal";
 import { compressFile } from "../utils/compressor";
+import { countries } from "../utils/countries";
 
 const suggestedTags = ["delivery", "bike rental", "car rental", "bengaluru to hyderabad", "mumbai to bengaluru", "rental", "tutor", "driver", "lend money", "borrow money", "furniture rental", "shelter", "hotel", "group buying", "discount sharing", "personal delivery", "personal pickup", "code fixer", "repairs", "laptop renting"];
 const LOCATIONIQ_API_KEY = "pk.f85d97d836243abb9099ada5ebe13c73";
@@ -27,6 +28,7 @@ export default function EditService() {
     const [locationLandmark, setLocationLandmark] = useState("");
     const [locationCity, setLocationCity] = useState("");
     const [pincode, setPincode] = useState("");
+    const [country, setCountry] = useState("India");
     const [latitude, setLatitude] = useState("");
     const [longitude, setLongitude] = useState("");
 
@@ -87,6 +89,7 @@ export default function EditService() {
                         locationLandmark: data.location?.landmark || "",
                         locationCity: data.location?.city || "",
                         pincode: data.location?.pincode || "",
+                        country: data.location?.country || data.country || "India",
                         expiry: data.expiry ? (data.expiry.toDate ? data.expiry.toDate() : new Date(data.expiry)) : null
                     };
 
@@ -101,7 +104,9 @@ export default function EditService() {
                     setLocationArea(serviceData.locationArea);
                     setLocationLandmark(serviceData.locationLandmark);
                     setLocationCity(serviceData.locationCity);
+                    setLocationCity(serviceData.locationCity);
                     setPincode(serviceData.pincode);
+                    setCountry(serviceData.country);
                     setLatitude(data.latitude || "");
                     setLongitude(data.longitude || "");
                     setCurrentExpiry(serviceData.expiry);
@@ -152,6 +157,7 @@ export default function EditService() {
                 setLocationArea(addr.suburb || addr.neighbourhood || addr.village || "");
                 setLocationCity(addr.city || addr.town || addr.county || "");
                 setPincode(addr.postcode || "");
+                if (addr.country) setCountry(addr.country);
             } catch {
                 setError("Failed to get location details.");
             } finally {
@@ -206,7 +212,9 @@ export default function EditService() {
         setLocationArea(originalData.locationArea);
         setLocationLandmark(originalData.locationLandmark);
         setLocationCity(originalData.locationCity);
+        setLocationCity(originalData.locationCity);
         setPincode(originalData.pincode);
+        setCountry(originalData.country);
         setCurrentExpiry(originalData.expiry);
         setExpiryMode("keep");
         setExpiryPreset("");
@@ -280,7 +288,10 @@ export default function EditService() {
                     landmark: locationLandmark.trim(),
                     city: locationCity.trim(),
                     pincode: pincode.trim(),
+                    country: country.trim() || "India"
                 },
+                country: country.trim() || "India",
+                countryScope: 'local', // Default local
                 latitude: parseFloat(latitude),
                 longitude: parseFloat(longitude),
                 attachments: finalAttachments,
@@ -469,16 +480,84 @@ export default function EditService() {
                                 Pin on Map
                             </button>
                         </div>
-                        <div className="space-y-3">
-                            <input type="text" placeholder="Area" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={locationArea} onChange={(e) => setLocationArea(e.target.value)} required />
-                            <input type="text" placeholder="Landmark (optional)" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={locationLandmark} onChange={(e) => setLocationLandmark(e.target.value)} />
-                            <div className="grid grid-cols-2 gap-3">
-                                <input type="text" placeholder="City" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={locationCity} onChange={(e) => setLocationCity(e.target.value)} required />
-                                <input type="text" placeholder="Pincode" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={pincode} onChange={(e) => setPincode(e.target.value)} required />
+                        <div className="space-y-4">
+                            {/* Row 1: Area & City */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <input
+                                    type="text"
+                                    placeholder="Area *"
+                                    value={locationArea}
+                                    onChange={(e) => setLocationArea(e.target.value)}
+                                    className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                                    required
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="City *"
+                                    value={locationCity}
+                                    onChange={(e) => setLocationCity(e.target.value)}
+                                    className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                                    required
+                                />
                             </div>
-                            <div className="grid grid-cols-2 gap-3 mt-4">
-                                <input type="text" placeholder="Latitude" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={latitude} onChange={(e) => setLatitude(e.target.value)} required />
-                                <input type="text" placeholder="Longitude" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={longitude} onChange={(e) => setLongitude(e.target.value)} required />
+
+                            {/* Row 2: Pincode & Landmark */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <input
+                                    type="text"
+                                    placeholder="Pincode *"
+                                    value={pincode}
+                                    onChange={(e) => setPincode(e.target.value)}
+                                    className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                                    required
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="Landmark (optional)"
+                                    value={locationLandmark}
+                                    onChange={(e) => setLocationLandmark(e.target.value)}
+                                    className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                                />
+                            </div>
+
+                            {/* Row 3: Country */}
+                            <div className="w-full relative">
+                                <select
+                                    value={country}
+                                    onChange={(e) => setCountry(e.target.value)}
+                                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all appearance-none"
+                                    required
+                                >
+                                    <option value="">Select Country</option>
+                                    {countries.map((c) => (
+                                        <option key={c} value={c}>
+                                            {c}
+                                        </option>
+                                    ))}
+                                </select>
+                                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-sm">
+                                    <FiChevronDown />
+                                </div>
+                            </div>
+
+                            {/* Row 4: Lat & Long */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <input
+                                    type="text"
+                                    placeholder="Latitude"
+                                    value={latitude}
+                                    onChange={(e) => setLatitude(e.target.value)}
+                                    className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                                    required
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="Longitude"
+                                    value={longitude}
+                                    onChange={(e) => setLongitude(e.target.value)}
+                                    className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                                    required
+                                />
                             </div>
                         </div>
                     </div>
@@ -709,6 +788,7 @@ export default function EditService() {
                     setLocationArea(location.area);
                     setLocationCity(location.city);
                     setPincode(location.pincode);
+                    if (location.country) setCountry(location.country);
                     setShowLocationPicker(false);
                     setError("");
                 }}

@@ -12,6 +12,7 @@ import {
     FiMessageCircle,
     FiChevronLeft,
 } from "react-icons/fi";
+import { FaCoins } from "react-icons/fa";
 
 /**
  * Unified Layout component for AeroSigil.
@@ -37,7 +38,7 @@ export default function Layout({
 
     // OPTIMIZATION: Use global cache instead of creating 5 listeners on every page load
     // This eliminates ~50% of unnecessary Firestore reads from repeated listener subscriptions
-    const { hasUnreadChats, hasUnreadNotifs, markNotificationsViewed, currentUserId } = useLayoutCache();
+    const { hasUnreadChats, hasUnreadNotifs, markNotificationsViewed, currentUserId, userProfile } = useLayoutCache();
 
     // Clear notification dot when on the notifications page
     useEffect(() => {
@@ -96,6 +97,16 @@ export default function Layout({
                     </div>
 
                     <div className="flex items-center space-x-4 flex-shrink-0">
+                        <button
+                            onClick={() => navigate('/coins')}
+                            className="relative hover:text-blue-600 transition-colors mr-1"
+                            aria-label="Coins"
+                        >
+                            <FaCoins size={24} className="text-yellow-500" />
+                            <span className="absolute -bottom-2 -right-4 bg-blue-600 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full min-w-[16px] flex items-center justify-center border-2 border-white shadow-sm z-10">
+                                {userProfile?.coins || 0}
+                            </span>
+                        </button>
                         <button
                             onClick={() => navigate('/favorites')}
                             className="hover:text-blue-600 transition-colors"

@@ -34,6 +34,7 @@ import Notes from "./pages/Notes";
 import TermsAndConditions from "./pages/TermsAndConditions";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import VerifyEmail from "./pages/VerifyEmail";
+import Coins from "./pages/Coins";
 
 export default function App() {
   const [showOfflineScreen, setShowOfflineScreen] = useState(false);
@@ -181,6 +182,7 @@ export default function App() {
               <Route path="/terms" element={<TermsAndConditions />} />
               <Route path="/privacy-policy" element={<PrivacyPolicy />} />
               <Route path="/verify-email" element={<VerifyEmail />} />
+              <Route path="/coins" element={<Coins />} />
               <Route path="*" element={<div>404 Page Not Found</div>} />
             </Routes>
           </ProfileCacheProvider>
