@@ -1,23 +1,137 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# ============================================
+# SENSITIVE FILES - NEVER COMMIT THESE!
+# ============================================
 
-# dependencies
+# Environment variables (contains API keys & secrets)
+.env
+.env.*
+!.env.example
+functions/.env
+functions/.env.*
+
+# SSL Certificates & Private Keys
+*.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+
+# Firebase service account keys
+*serviceAccountKey*.json
+serviceAccount*.json
+
+# ============================================
+# DEPENDENCIES
+# ============================================
+node_modules/
 /node_modules
 /.pnp
 .pnp.js
+functions/node_modules/
 
-# testing
-/coverage
-
-# production
+# ============================================
+# BUILD & PRODUCTION
+# ============================================
 /build
+/dist
+/.next
+/out
+build/
+dist/
 
-# misc
+# ============================================
+# TESTING
+# ============================================
+/coverage
+coverage/
+*.lcov
+.nyc_output
+
+# ============================================
+# FIREBASE
+# ============================================
+.firebase/
+.firebaserc
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+database-debug.log
+pubsub-debug.log
+firebase-debug.*.log
+
+# ============================================
+# ANDROID & CAPACITOR
+# ============================================
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/google-services.json
+android/app/release/
+android/app/*.apk
+android/app/*.aab
+android/.idea/
+android/captures/
+*.iml
+
+# ============================================
+# IOS
+# ============================================
+ios/App/Pods/
+ios/App/build/
+ios/App/*.xcworkspace
+ios/App/GoogleService-Info.plist
+*.mobileprovision
+*.p12
+
+# ============================================
+# IDE & EDITORS
+# ============================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# ============================================
+# LOGS
+# ============================================
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+*.log
+
+# ============================================
+# TEMPORARY FILES
+# ============================================
+*.tmp
+*.temp
+.cache/
+.parcel-cache/
+.temp/
+tmp/
+
+# ============================================
+# MISC
+# ============================================
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+.eslintcache
 
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Backup files
+*.bak
+*.backup
+*~
+
+# OS generated files
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
