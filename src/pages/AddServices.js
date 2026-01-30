@@ -3,16 +3,16 @@ import { auth, db } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, addDoc, serverTimestamp, getDoc, doc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
 import { FiClock, FiMapPin, FiTag, FiFileText, FiUpload, FiX, FiChevronDown, FiCheck, FiArrowLeft } from "react-icons/fi";
 import LocationPickerModal from "../components/LocationPickerModal";
 import ActionMessageModal from "../components/ActionMessageModal";
 import { compressFile } from "../utils/compressor";
 import { countries } from "../utils/countries";
+import { uploadFile } from "../utils/storage";
 
+import { reverseGeocode } from "../utils/locationService";
 const suggestedTags = ["delivery", "bike rental", "car rental", "bengaluru to hyderabad", "mumbai to bengaluru", "rental", "tutor", "driver", "lend money", "borrow money", "furniture rental", "shelter", "hotel", "group buying", "discount sharing", "personal delivery", "personal pickup", "code fixer", "repairs", "laptop renting"];
-const LOCATIONIQ_API_KEY = "pk.f85d97d836243abb9099ada5ebe13c73";
-// const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/auto/upload"; // Deprecated global const
+// API Keys removed - handled by backend proxy via locationService
 
 export default function AddServices() {
   const [title, setTitle] = useState("");
@@ -61,27 +61,13 @@ export default function AddServices() {
 
   const uploadFileToCloudinary = async (file) => {
     const compressedFile = await compressFile(file, {}, 'SERVICE_POST');
-    const formData = new FormData();
-    formData.append("file", compressedFile);
-    formData.append("upload_preset", "ml_default");
-
-    // Use 'auto' resource type for all files
-    // This allows Cloudinary to automatically detect the file type
-    // and handle PDFs better than 'raw' type (which has restrictions on free accounts)
-    const uploadUrl = `https://api.cloudinary.com/v1_1/devs4x2aa/auto/upload`;
-
-    const response = await fetch(uploadUrl, {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(`Failed to upload file: ${errorData.error?.message || 'Unknown error'}`);
+    try {
+      const url = await uploadFile(compressedFile, 'services');
+      return url;
+    } catch (error) {
+      console.error("File upload error:", error);
+      throw new Error(`Failed to upload file: ${error.message}`);
     }
-
-    const data = await response.json();
-    return data.secure_url;
   };
 
   const handleAddTag = () => {
@@ -108,15 +94,8 @@ export default function AddServices() {
       setLatitude(latitude.toString());
       setLongitude(longitude.toString());
       try {
-        const geoRes = await axios.get(`https://us1.locationiq.com/v1/reverse.php`, {
-          params: {
-            key: LOCATIONIQ_API_KEY,
-            lat: latitude,
-            lon: longitude,
-            format: 'json'
-          },
-        });
-        const addr = geoRes.data.address;
+        const data = await reverseGeocode(latitude, longitude, 'locationiq');
+        const addr = data.address;
         setLocationArea(addr.suburb || addr.neighbourhood || addr.village || "");
         setLocationCity(addr.city || addr.town || addr.county || "");
         setPincode(addr.postcode || "");
@@ -740,7 +719,6 @@ export default function AddServices() {
         <LocationPickerModal
           show={showLocationPicker}
           initialPosition={{ lat: latitude, lng: longitude }}
-          apiKey={LOCATIONIQ_API_KEY}
           apiProvider="locationiq"
           onConfirm={(location) => {
             setLatitude(location.lat);

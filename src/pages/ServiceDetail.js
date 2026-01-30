@@ -297,17 +297,16 @@ function ServiceDetail() {
         cacheInitializedRef.current = true;
 
         const cached = getPostDetailCache('service', id);
-        if (cached && cached.data) {
+        if (cached && cached.data && cached.data.serviceData) {
             dataFromCache.current = true;
             const { serviceData, reviewsData, profilesData } = cached.data;
 
-            if (serviceData) {
-                setService(serviceData);
-                // Ensure we have the latest creator profile even if service is cached
-                if (serviceData.createdBy) {
-                    fetchCreatorProfile(serviceData.createdBy);
-                }
+            setService(serviceData);
+            // Ensure we have the latest creator profile even if service is cached
+            if (serviceData.createdBy) {
+                fetchCreatorProfile(serviceData.createdBy);
             }
+
             if (reviewsData && Array.isArray(reviewsData)) {
                 allReviewsRef.current = reviewsData;
                 setReviews(reviewsData);
@@ -1557,9 +1556,7 @@ function ServiceDetail() {
                                         {currentFile.isOversized && (
                                             <span className="bg-red-500 text-white px-2 py-0.5 rounded-full text-xs">Large File</span>
                                         )}
-                                        {currentFile.url.includes("cloudinary.com") && (
-                                            <span className="bg-blue-500 text-white px-2 py-0.5 rounded-full text-xs">Cloudinary</span>
-                                        )}
+                                        {/* Cloudinary label removed */}
                                     </div>
                                 </div>
                             </div>
@@ -1599,15 +1596,13 @@ function ServiceDetail() {
                                             <h4 className="text-xl font-bold text-gray-900 mb-2">PDF Document</h4>
                                             <p className="text-gray-600 mb-2">{currentFile.name}</p>
                                             <p className="text-gray-500 text-sm mb-2">{currentFile.size}</p>
-                                            {currentFile.url.includes("cloudinary.com") && (
-                                                <p className="text-blue-600 text-sm mb-6">Stored on Cloudinary</p>
-                                            )}
+                                            {/* Cloudinary text removed */}
                                         </div>
 
                                         <div className="flex flex-col gap-3 max-w-sm mx-auto">
                                             <button
                                                 onClick={() => {
-                                                    // For Cloudinary PDFs, open directly
+                                                    // For PDF files, open directly
                                                     window.open(currentFile.url, '_blank', 'noopener,noreferrer');
                                                 }}
                                                 className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
@@ -1636,7 +1631,7 @@ function ServiceDetail() {
                                         </div>
 
                                         <p className="text-sm text-gray-500 mt-4">
-                                            Cloudinary PDFs usually open directly in your browser's PDF viewer.
+                                            PDFs usually open directly in your browser's PDF viewer.
                                         </p>
                                     </div>
                                 ) : (
@@ -1682,8 +1677,8 @@ function ServiceDetail() {
                                 <span className="text-sm text-gray-600">
                                     {currentFile.isOversized
                                         ? 'File exceeds 2.5MB limit - download required'
-                                        : currentFile.extension === 'pdf' && currentFile.url.includes("cloudinary.com")
-                                            ? 'Cloudinary PDF - Opens directly in browser PDF viewer'
+                                        : currentFile.extension === 'pdf'
+                                            ? 'PDF - Opens directly in browser PDF viewer'
                                             : 'File will open in a new tab for better viewing experience'}
                                 </span>
                                 <button

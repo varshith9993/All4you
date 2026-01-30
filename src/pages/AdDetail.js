@@ -135,17 +135,16 @@ export default function AdDetail() {
     cacheInitializedRef.current = true;
 
     const cached = getPostDetailCache('ad', adId);
-    if (cached && cached.data) {
+    if (cached && cached.data && cached.data.adData) {
       dataFromCache.current = true;
       const { adData, reviewsData, profilesData } = cached.data;
 
-      if (adData) {
-        setAd(adData);
-        // Ensure we have the latest creator profile even if ad is cached
-        if (adData.createdBy) {
-          fetchCreatorProfile(adData.createdBy);
-        }
+      setAd(adData);
+      // Ensure we have the latest creator profile even if ad is cached
+      if (adData.createdBy) {
+        fetchCreatorProfile(adData.createdBy);
       }
+
       if (reviewsData && Array.isArray(reviewsData)) {
         allReviewsRef.current = reviewsData;
         setReviews(reviewsData);

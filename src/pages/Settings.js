@@ -5,6 +5,7 @@ import { userStatusManager } from "../auth/UserStatusManager";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { useGlobalDataCache } from "../contexts/GlobalDataCacheContext";
+import NotificationSettings from '../components/NotificationSettings';
 import {
   FiArrowLeft,
   FiUser,
@@ -234,6 +235,11 @@ export default function Settings() {
               color={contentScope === 'global' ? "text-indigo-600" : "text-green-600"}
             />
           </div>
+        </div>
+
+        {/* Push Notifications Section */}
+        <div className="mb-6 px-4">
+          <NotificationSettings />
         </div>
 
         {/* Support & Legal Section */}

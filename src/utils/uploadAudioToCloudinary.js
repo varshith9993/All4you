@@ -1,15 +1,18 @@
 // utils/uploadAudioToCloudinary.js
+import { uploadFile } from './storage';
+
 export async function uploadAudioToCloudinary(audioFileOrBlob) {
-  const CLOUDINARY_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/auto/upload";
-  const CLOUDINARY_UPLOAD_PRESET = "ml_default";
+  try {
+    // Ensure it's a File object if possible, R2 needs name/type
+    let fileToUpload = audioFileOrBlob;
+    if (audioFileOrBlob instanceof Blob && !audioFileOrBlob.name) {
+      fileToUpload = new File([audioFileOrBlob], `audio_${Date.now()}.webm`, { type: audioFileOrBlob.type || 'audio/webm' });
+    }
 
-  const formData = new FormData();
-  formData.append("file", audioFileOrBlob);
-  formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
-
-  const response = await fetch(CLOUDINARY_URL, { method: "POST", body: formData });
-
-  if (!response.ok) throw new Error("Failed to upload audio");
-  const data = await response.json();
-  return data.secure_url;
+    const publicUrl = await uploadFile(fileToUpload, 'audio');
+    return publicUrl;
+  } catch (error) {
+    console.error("R2 Audio Upload Error:", error);
+    throw error;
+  }
 }

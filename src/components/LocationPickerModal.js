@@ -172,15 +172,10 @@ export default function LocationPickerModal({ show, initialPosition, onConfirm, 
                 }
 
                 let results = [];
-                if (apiProvider === 'locationiq') {
-                    if (!apiKey) throw new Error("API Key missing");
+                // Use backend proxy via locationService
+                const data = await import('../utils/locationService').then(mod => mod.autocomplete(formattedQuery, apiProvider));
 
-                    // Increased limit to 10 for broader results
-                    // Added dedupe=1 to remove duplicates
-                    // Added explicit postal address handling
-                    // match_all_queries=0 allows matching any of the words in the query
-                    const response = await fetch(`https://api.locationiq.com/v1/autocomplete.php?key=${apiKey}&q=${encodeURIComponent(formattedQuery)}&limit=10&format=json&countrycodes=in&dedupe=1&match_all_queries=0&tag=place:city,place:town,place:village,boundary:administrative,postal_code`);
-                    const data = await response.json();
+                if (apiProvider === 'locationiq') {
                     if (Array.isArray(data)) {
                         results = data.map(item => ({
                             display_name: item.display_name,
@@ -193,12 +188,6 @@ export default function LocationPickerModal({ show, initialPosition, onConfirm, 
                     }
                 } else {
                     // OpenCage
-                    if (!apiKey) throw new Error("API Key missing");
-
-                    // Increased limit to 10
-                    // Added no_dedupe=1 to see all variants
-                    const response = await fetch(`https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(formattedQuery)}&key=${apiKey}&limit=10&countrycode=in&no_dedupe=1`);
-                    const data = await response.json();
                     if (data && data.results) {
                         results = data.results.map(item => ({
                             display_name: item.formatted,
@@ -310,16 +299,11 @@ export default function LocationPickerModal({ show, initialPosition, onConfirm, 
             let area = '';
             let city = '';
             let pincode = '';
-            let url = '';
+
+            // Use backend proxy via locationService
+            const data = await import('../utils/locationService').then(mod => mod.reverseGeocode(lat, lng, apiProvider));
 
             if (apiProvider === 'locationiq') {
-                // LocationIQ Logic
-                if (!apiKey) throw new Error("LocationIQ API Key missing");
-                url = `https://us1.locationiq.com/v1/reverse.php?key=${apiKey}&lat=${lat}&lon=${lng}&format=json`;
-
-                const response = await fetch(url);
-                const data = await response.json();
-
                 if (data && data.address) {
                     const addr = data.address;
                     area = addr.suburb || addr.neighbourhood || addr.village || addr.residential || '';
@@ -327,13 +311,6 @@ export default function LocationPickerModal({ show, initialPosition, onConfirm, 
                     pincode = addr.postcode || '';
                 }
             } else if (apiProvider === 'opencage') {
-                // OpenCage Logic
-                if (!apiKey) throw new Error("OpenCage API Key missing");
-                url = `https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lng}&key=${apiKey}`;
-
-                const response = await fetch(url);
-                const data = await response.json();
-
                 if (data && data.results && data.results.length > 0) {
                     const comp = data.results[0].components;
                     area = comp.suburb || comp.neighbourhood || comp.village || comp.residential || '';
@@ -341,7 +318,8 @@ export default function LocationPickerModal({ show, initialPosition, onConfirm, 
                     pincode = comp.postcode || '';
                 }
             } else {
-                throw new Error(`Unsupported API Provider: ${apiProvider}`);
+                // Should not happen if backend defaults correctly, but safety check
+                console.warn(`Unexpected API Provider: ${apiProvider}`);
             }
 
             setAddress({ area, city, pincode });
@@ -352,7 +330,7 @@ export default function LocationPickerModal({ show, initialPosition, onConfirm, 
         } finally {
             setGeocoding(false);
         }
-    }, [apiKey, apiProvider]);
+    }, [apiProvider]);
 
     // Reverse geocode when position changes
     useEffect(() => {

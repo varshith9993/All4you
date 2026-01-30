@@ -3,16 +3,15 @@ import { db, storage } from "../firebase";
 import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useNavigate, useParams } from "react-router-dom";
-import axios from "axios";
 import { FiClock, FiCalendar, FiMapPin, FiX, FiImage, FiChevronDown, FiFileText, FiUpload, FiArrowLeft, FiRotateCcw } from "react-icons/fi";
-
 import LocationPickerModal from "../components/LocationPickerModal";
 import ActionMessageModal from "../components/ActionMessageModal";
 import { compressFile } from "../utils/compressor";
 import { countries } from "../utils/countries";
 
+import { reverseGeocode } from "../utils/locationService";
 const suggestedTags = ["delivery", "bike rental", "car rental", "bengaluru to hyderabad", "mumbai to bengaluru", "rental", "tutor", "driver", "lend money", "borrow money", "furniture rental", "shelter", "hotel", "group buying", "discount sharing", "personal delivery", "personal pickup", "code fixer", "repairs", "laptop renting"];
-const LOCATIONIQ_API_KEY = "pk.f85d97d836243abb9099ada5ebe13c73";
+// API Keys removed - handled by backend proxy via locationService
 
 export default function EditService() {
     const { id } = useParams();
@@ -145,15 +144,8 @@ export default function EditService() {
             setLatitude(latitude.toString());
             setLongitude(longitude.toString());
             try {
-                const geoRes = await axios.get(`https://us1.locationiq.com/v1/reverse.php`, {
-                    params: {
-                        key: LOCATIONIQ_API_KEY,
-                        lat: latitude,
-                        lon: longitude,
-                        format: 'json'
-                    },
-                });
-                const addr = geoRes.data.address;
+                const data = await reverseGeocode(latitude, longitude, 'locationiq');
+                const addr = data.address;
                 setLocationArea(addr.suburb || addr.neighbourhood || addr.village || "");
                 setLocationCity(addr.city || addr.town || addr.county || "");
                 setPincode(addr.postcode || "");
@@ -780,7 +772,6 @@ export default function EditService() {
             <LocationPickerModal
                 show={showLocationPicker}
                 initialPosition={{ lat: latitude, lng: longitude }}
-                apiKey={LOCATIONIQ_API_KEY}
                 apiProvider="locationiq"
                 onConfirm={(location) => {
                     setLatitude(location.lat);

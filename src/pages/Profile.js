@@ -38,6 +38,7 @@ import {
 import { db, auth } from "../firebase";
 import { useLocationWithAddress } from "../hooks/useLocationWithAddress";
 import Layout from "../components/Layout";
+import { uploadFile } from "../utils/storage";
 import defaultAvatar from "../assets/images/default_profile.svg";
 import LocationPickerModal from "../components/LocationPickerModal";
 import ImageCropperModal from "../components/ImageCropperModal";
@@ -48,17 +49,16 @@ import { compressProfileImage } from "../utils/compressor";
 import { formatExpiry } from "../utils/expiryUtils";
 import { formatLastSeen } from "../utils/timeUtils";
 
-const OPENCAGE_API_KEY = "988148bc222049e2831059ea74476abb";
-const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
-const CLOUDINARY_UPLOAD_PRESET = "ml_default";
+// API Keys removed - handled by backend proxy via locationService
 
 async function uploadToCloudinary(file) {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
-  const res = await fetch(CLOUDINARY_UPLOAD_URL, { method: "POST", body: formData });
-  const data = await res.json();
-  return data.secure_url || "";
+  try {
+    const url = await uploadFile(file, 'profiles');
+    return url;
+  } catch (error) {
+    console.error("Profile Image Upload Error:", error);
+    throw error;
+  }
 }
 
 // Helper functions
@@ -423,15 +423,18 @@ export default function Profile() {
   const [userProfiles, setUserProfiles] = useState({});
   const [actionModal, setActionModal] = useState({ isOpen: false, title: "", message: "", type: "success" });
 
-  const { location, address, error: locationErr, loading: locationLoading, addressLoading, requestLocation } = useLocationWithAddress(OPENCAGE_API_KEY, 'opencage');
+  const { location, address, error: locationErr, loading: locationLoading, addressLoading, requestLocation } = useLocationWithAddress(null, 'opencage');
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
+      if (!u) {
+        navigate("/login");
+      }
     });
 
     return () => unsub();
-  }, []);
+  }, [navigate]);
 
   // Sync editing profile with global profile when not editing
   useEffect(() => {
@@ -1808,7 +1811,6 @@ export default function Profile() {
     React.createElement(LocationPickerModal, {
       show: showLocationPicker,
       initialPosition: { lat: editingProfile.latitude, lng: editingProfile.longitude },
-      apiKey: OPENCAGE_API_KEY, // Pass explicit key
       apiProvider: "opencage",
       onConfirm: (location) => {
         setEditingProfile(prev => ({

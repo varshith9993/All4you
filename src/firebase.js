@@ -3,6 +3,7 @@ import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth"
 import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
 import { getDatabase } from "firebase/database";
 import { getStorage } from "firebase/storage";
+import { getMessaging, isSupported } from "firebase/messaging";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDn52J3u3BZicSgsLBDGoZ0kjPZIHtVutk",
@@ -10,8 +11,9 @@ const firebaseConfig = {
   projectId: "g-maps-api-472115",
   storageBucket: "g-maps-api-472115.firebasestorage.app",
   messagingSenderId: "687085939527",
-  appId: "YOUR_FIREBASE_APP_ID",
+  appId: "1:687085939527:web:9082b5bb1a5843df7efa62",
   databaseURL: "https://g-maps-api-472115-default-rtdb.asia-southeast1.firebasedatabase.app/",
+  measurementId: "G-DM6TS1EL0W"
 };
 
 
@@ -38,3 +40,16 @@ enableIndexedDbPersistence(db).catch((err) => {
 
 export const rtdb = getDatabase(app);
 export const storage = getStorage(app);
+
+// Initialize messaging only if supported (not supported in all browsers)
+let messaging = null;
+isSupported().then(supported => {
+  if (supported) {
+    messaging = getMessaging(app);
+  }
+}).catch(err => {
+  console.warn("Firebase Messaging not supported:", err);
+});
+
+export { messaging };
+

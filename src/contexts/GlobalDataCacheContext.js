@@ -230,7 +230,9 @@ export function GlobalDataCacheProvider({ children }) {
 
     listenerStateRef.current.userProfile.unsubscribe = onSnapshot(profileRef, (docSnap) => {
       if (docSnap.exists()) {
-        localStorage.setItem('global_user_profile', JSON.stringify(docSnap.data()));
+        const data = docSnap.data();
+        localStorage.setItem('global_user_profile', JSON.stringify(data));
+        setUserProfile(data); // Update state to trigger re-renders
       }
     }, (error) => {
     });
@@ -1048,15 +1050,40 @@ export function GlobalDataCacheProvider({ children }) {
 
     // Utility functions
     getCacheStats,
-    getMessageCache: (chatId) => messageCacheRef.current[chatId],
+    getMessageCache: (chatId) => messageCacheRef.current[chatId] || null,
     setMessageCache: (chatId, messages, lastUpdate) => {
-      messageCacheRef.current[chatId] = { messages, lastUpdate };
+      // Store messages with timestamps converted to milliseconds for JSON serialization
+      const serializedMessages = messages.map(msg => ({
+        ...msg,
+        createdAt: msg.createdAt?.toMillis ? msg.createdAt.toMillis() :
+          msg.createdAt?.seconds ? msg.createdAt.seconds * 1000 :
+            msg.createdAt,
+        updatedAt: msg.updatedAt?.toMillis ? msg.updatedAt.toMillis() :
+          msg.updatedAt?.seconds ? msg.updatedAt.seconds * 1000 :
+            msg.updatedAt
+      }));
+
+      messageCacheRef.current[chatId] = { messages: serializedMessages, lastUpdate };
+
       // Limit cache size to avoid localStorage limits (keep last 20 chats)
       const keys = Object.keys(messageCacheRef.current);
       if (keys.length > 20) {
         delete messageCacheRef.current[keys[0]];
       }
-      localStorage.setItem('global_message_cache', JSON.stringify(messageCacheRef.current));
+
+      try {
+        localStorage.setItem('global_message_cache', JSON.stringify(messageCacheRef.current));
+      } catch (e) {
+        console.error('Failed to save message cache:', e);
+        // If localStorage is full, clear old entries
+        const keysToRemove = keys.slice(0, 10);
+        keysToRemove.forEach(key => delete messageCacheRef.current[key]);
+        try {
+          localStorage.setItem('global_message_cache', JSON.stringify(messageCacheRef.current));
+        } catch (e2) {
+          console.error('Failed to save message cache after cleanup:', e2);
+        }
+      }
     }
   }), [
     currentUserId,

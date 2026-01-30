@@ -1,8 +1,8 @@
 import { useState, useCallback } from "react";
-
-
+import { reverseGeocode } from "../utils/locationService";
 
 export function useLocationWithAddress(apiKey, apiProvider) {
+  // apiKey argument is kept for signature compatibility but ignored
   const [location, setLocation] = useState(null);
   const [address, setAddress] = useState(null);
   const [error, setError] = useState(null);
@@ -10,14 +10,11 @@ export function useLocationWithAddress(apiKey, apiProvider) {
   const [addressLoading, setAddressLoading] = useState(false);
 
   const fetchAddress = useCallback(async (lat, lon) => {
-    if (!apiKey) return;
     setAddressLoading(true);
     try {
-      let url = '';
+      const data = await reverseGeocode(lat, lon, apiProvider);
+
       if (apiProvider === 'locationiq') {
-        url = `https://us1.locationiq.com/v1/reverse.php?key=${apiKey}&lat=${lat}&lon=${lon}&format=json`;
-        const resp = await fetch(url);
-        const data = await resp.json();
         if (data && data.address) {
           const addr = data.address;
           setAddress({
@@ -28,10 +25,7 @@ export function useLocationWithAddress(apiKey, apiProvider) {
           });
         }
       } else {
-        // Default to OpenCage
-        url = `https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lon}&key=${apiKey}`;
-        const resp = await fetch(url);
-        const data = await resp.json();
+        // Default to OpenCage (assumes 'opencage' or fallback)
         if (data && data.results && data.results.length > 0) {
           const comp = data.results[0].components;
           setAddress({
@@ -49,7 +43,7 @@ export function useLocationWithAddress(apiKey, apiProvider) {
       setAddress(null);
     }
     setAddressLoading(false);
-  }, [apiKey, apiProvider]);
+  }, [apiProvider]); // apiKey removed from dependency
 
   const requestLocation = useCallback(() => {
     if (!navigator.geolocation) {

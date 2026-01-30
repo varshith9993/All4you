@@ -293,17 +293,16 @@ export default function WorkerDetail() {
     cacheInitializedRef.current = true;
 
     const cached = getPostDetailCache('worker', id);
-    if (cached && cached.data) {
+    if (cached && cached.data && cached.data.workerData) {
       dataFromCache.current = true;
       const { workerData, reviewsData, profilesData } = cached.data;
 
-      if (workerData) {
-        setWorker(workerData);
-        // Creator profile will be fetched separately if needed
-        if (workerData.createdBy) {
-          fetchCreatorProfile(workerData.createdBy);
-        }
+      setWorker(workerData);
+      // Creator profile will be fetched separately if needed
+      if (workerData.createdBy) {
+        fetchCreatorProfile(workerData.createdBy);
       }
+
       if (reviewsData && Array.isArray(reviewsData)) {
         allReviewsRef.current = reviewsData;
         setReviews(reviewsData);
@@ -866,11 +865,10 @@ export default function WorkerDetail() {
 
   const handleDownload = async (url, fileName) => {
     // Standard download for all files (including PDFs) using the force-download URL
-    // This relies on Cloudinary's "fl_attachment" flag which works correctly for raw files now
     const downloadUrl = getDownloadUrl(url);
     const link = document.createElement('a');
     link.href = downloadUrl;
-    link.download = fileName; // Hint to browser, though Cloudinary header takes precedence
+    link.download = fileName; // Hint to browser
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

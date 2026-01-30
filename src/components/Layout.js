@@ -76,9 +76,9 @@ export default function Layout({
     };
 
     return (
-        <div className="flex flex-col min-h-screen bg-white" style={{ maxWidth: 480, margin: "0 auto" }}>
+        <div className="flex flex-col h-screen bg-white overflow-hidden" style={{ maxWidth: 480, margin: "0 auto" }}>
             {/* --- Top Navigation Bar (Header) --- */}
-            <header className="flex flex-col px-4 py-3 border-b bg-white shadow-sm sticky top-0 z-30">
+            <header className="flex-none flex flex-col px-4 py-3 border-b bg-white shadow-sm z-30">
                 {/* Top Row: Title & Action Icons */}
                 <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2 overflow-hidden">
@@ -146,7 +146,7 @@ export default function Layout({
             </header>
 
             {/* --- Main Content Area --- */}
-            <main className="flex-1">
+            <main className="flex-1 overflow-y-auto no-scrollbar pb-20 scroll-smooth" style={{ touchAction: 'pan-y' }}>
                 {children}
             </main>
 

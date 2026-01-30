@@ -2,18 +2,18 @@ import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
-import axios from "axios";
 import { FiArrowLeft, FiX, FiMapPin, FiUploadCloud, FiRotateCcw, FiChevronDown } from "react-icons/fi";
 import LocationPickerModal from "../components/LocationPickerModal";
 import ActionMessageModal from "../components/ActionMessageModal";
-import { compressFile } from "../utils/compressor";
-import { countries } from "../utils/countries";
 
-const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
-const CLOUDINARY_UPLOAD_PRESET = "ml_default";
-const LOCATIONIQ_API_KEY = "pk.a9310b368752337ce215643e50ac0172";
+import { uploadFile } from "../utils/storage";
+import { countries } from "../utils/countries";
+import { compressFile } from "../utils/compressor";
+
+import { reverseGeocode } from "../utils/locationService";
 const suggestedTags = ["furniture", "mobile", "bike", "freelancing", "petrol pump", "farm house", "land", "car", "fridge", "T.V", "watch", "house", "apppartment", "gold shop", "loan", "restraunt", "hotel", "boutique", "cloth shop", "footwear shop", "A.C", "laptop", "iphone"];
 const MAX_PHOTOS = 4;
+// API Keys removed - handled by backend proxy via locationService
 
 export default function EditAd() {
   const { id } = useParams();
@@ -132,14 +132,11 @@ export default function EditAd() {
   const uploadFileToCloudinary = async (file) => {
     // Ads need better quality: <300KB max, 1600px
     const compressedFile = await compressFile(file, { maxSizeMB: 0.29, maxWidthOrHeight: 1600 }, 'EDIT_AD');
-    const formData = new FormData();
-    formData.append("file", compressedFile);
-    formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
     try {
-      const res = await axios.post(CLOUDINARY_UPLOAD_URL, formData);
-      return res.data.secure_url;
+      const url = await uploadFile(compressedFile, 'ads');
+      return url;
     } catch (err) {
-      throw new Error("Cloudinary upload failed: " + (err.response?.data?.error?.message || err.message));
+      throw new Error("Ad upload failed: " + (err.message));
     }
   };
 
@@ -168,15 +165,9 @@ export default function EditAd() {
         const { latitude: lat, longitude: lng } = pos.coords;
         setLatitude(lat.toString());
         setLongitude(lng.toString());
-        const geoRes = await axios.get(`https://us1.locationiq.com/v1/reverse.php`, {
-          params: {
-            key: LOCATIONIQ_API_KEY,
-            lat: lat,
-            lon: lng,
-            format: 'json'
-          },
-        });
-        const addr = geoRes.data.address;
+
+        const data = await reverseGeocode(lat, lng, 'locationiq');
+        const addr = data.address;
         setLocationArea(addr.suburb || addr.neighbourhood || addr.village || "");
         setLocationCity(addr.city || addr.town || addr.county || "");
         setPincode(addr.postcode || "");
@@ -624,7 +615,6 @@ export default function EditAd() {
       <LocationPickerModal
         show={showLocationPicker}
         initialPosition={{ lat: latitude, lng: longitude }}
-        apiKey={LOCATIONIQ_API_KEY}
         apiProvider="locationiq"
         onConfirm={(location) => {
           setLatitude(location.lat);

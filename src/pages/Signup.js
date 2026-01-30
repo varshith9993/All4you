@@ -16,8 +16,7 @@ import { FcGoogle } from "react-icons/fc";
 import LocationPickerModal from "../components/LocationPickerModal";
 
 
-const OPENCAGE_API_KEY = "43ac78a805af4868b01f3dc9dcae8556";
-
+import { reverseGeocode } from "../utils/locationService";
 
 export default function Signup() {
   const [email, setEmail] = useState("");
@@ -41,11 +40,10 @@ export default function Signup() {
   const [waitingForVerification, setWaitingForVerification] = useState(false);
 
   // New States for Google Signup
-  const [signupMethod, setSignupMethod] = useState("email"); // "email" | "google"
+  const [signupMethod, setSignupMethod] = useState("google"); // "email" | "google"
   const [googleUser, setGoogleUser] = useState(null);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [contentScope, setContentScope] = useState("local"); // "local" | "global"
-
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -140,7 +138,7 @@ export default function Signup() {
     const hasNumber = /[0-9]/.test(password);
 
     if (!hasLetter || !hasNumber) {
-      return "Password must contain at least one letter and one number.";
+      return "Password must be at least 6 characters long and contain at least one letter and one number.";
     }
 
     return "";
@@ -185,9 +183,7 @@ export default function Signup() {
 
         if (!locationEdited) {
           try {
-            const url = `https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lon}&key=${OPENCAGE_API_KEY}`;
-            const res = await fetch(url);
-            const data = await res.json();
+            const data = await reverseGeocode(lat, lon, 'opencage');
 
             if (data && data.results && data.results.length > 0) {
               const comp = data.results[0].components;
@@ -425,8 +421,16 @@ export default function Signup() {
     }
 
     try {
-      // Set the password for the Google user so they can also login with email/password
-      await updatePassword(googleUser, password);
+      // Try to set the password for the Google user so they can also login with email/password
+      // This is optional and might fail if the credential is not recent, but should not block signup
+      try {
+        if (password) {
+          await updatePassword(googleUser, password);
+        }
+      } catch (pwdErr) {
+        console.warn("Could not set password for Google user:", pwdErr);
+        // Continue anyway - this is not critical
+      }
 
       // Save Profile to Firestore
       await setDoc(doc(db, "profiles", googleUser.uid), {
@@ -448,6 +452,7 @@ export default function Signup() {
       navigate("/workers");
 
     } catch (err) {
+      console.error("Profile creation error:", err);
       setError("Failed to create profile. Please try again.");
     } finally {
       setSubmitting(false);
@@ -1097,7 +1102,6 @@ export default function Signup() {
         <LocationPickerModal
           show={showLocationPicker}
           initialPosition={{ lat: latitude, lng: longitude }}
-          apiKey={OPENCAGE_API_KEY}
           apiProvider="opencage"
           onConfirm={(location) => {
             setLatitude(location.lat);

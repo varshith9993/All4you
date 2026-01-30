@@ -78,6 +78,10 @@ function ChatCard({ chat, uid, profiles, navigate }) {
       } catch (error) {
       }
     }
+    // Save scroll position for "Authentic Back" experience
+    const main = document.querySelector('main');
+    if (main) sessionStorage.setItem('chats_scroll_pos', main.scrollTop);
+
     navigate(`/chat/${chat.id}`);
   };
 
@@ -263,8 +267,23 @@ export default function Chats() {
       if (!matchesName && !matchesMessage) return false;
     }
 
+    // Filter out chats deleted by user
+    if (c.deletedBy && c.deletedBy.includes(uid)) return false;
+
     return true;
   });
+
+  // Authentic Back Navigation: Restore scroll position
+  useEffect(() => {
+    const scrollPos = sessionStorage.getItem('chats_scroll_pos');
+    if (scrollPos) {
+      // Small timeout to allow layout to paint
+      setTimeout(() => {
+        const main = document.querySelector('main');
+        if (main) main.scrollTop = parseInt(scrollPos, 10);
+      }, 50);
+    }
+  }, []);
 
   // Show favorites at top, then sort by last update
   shownChats = shownChats.sort((a, b) => {

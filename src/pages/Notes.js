@@ -17,6 +17,8 @@ import {
     FiCalendar,
 } from "react-icons/fi";
 
+import ActionMessageModal from "../components/ActionMessageModal";
+
 /**
  * Notes Page - Optimized with GlobalDataCacheContext
  * 
@@ -37,6 +39,7 @@ export default function Notes() {
     const [menuOpenId, setMenuOpenId] = useState(null);
     const [showAboutModal, setShowAboutModal] = useState(false);
     const [selectedNote, setSelectedNote] = useState(null);
+    const [actionModal, setActionModal] = useState({ isOpen: false, title: "", message: "", type: "success" }); // Added Modal State
     const menuRef = useRef(null);
 
     // Close menu when clicking outside
@@ -50,18 +53,8 @@ export default function Notes() {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    // NOTE: Auth state and notes fetching are now handled by GlobalDataCacheContext
-    // The useNotesCache() hook provides:
-    // - notes: Pre-sorted list of user's notes (most recent first)
-    // - loading: Loading state
-    // - currentUserId: Current authenticated user ID
-    // 
-    // Benefits:
-    // - First visit: 1 Firestore read to initialize listener
-    // - Subsequent visits: 0 reads (cached data from persistent listener)
-    // - Real-time updates: Changes from AddNotes automatically reflected
+    // ... (memoized filteredNotes)
 
-    // Memoized filtered notes for search (avoids recalculation on every render)
     const filteredNotes = useMemo(() => {
         if (!searchQuery.trim()) return notes;
 
@@ -79,6 +72,7 @@ export default function Notes() {
                 await deleteDoc(doc(db, "notes", noteId));
                 setMenuOpenId(null);
             } catch (error) {
+                console.error("Error deleting note:", error);
             }
         }
     };
@@ -99,7 +93,13 @@ export default function Notes() {
 
     const startCreateNote = () => {
         if (notes.length >= 5) {
-            alert("Note Limit Reached: You can only have up to 5 notes. Please delete an existing note to create a new one.");
+            // Replaced alert with ActionMessageModal for better UX
+            setActionModal({
+                isOpen: true,
+                title: "Limit Reached",
+                message: "You have reached the limit of 5 notes. Please delete an existing note to create a new one.",
+                type: "error"
+            });
             return;
         }
         navigate("/add-notes");
@@ -119,9 +119,6 @@ export default function Notes() {
             hour12: true
         });
     };
-
-
-
 
     return (
         <div className="min-h-screen bg-gray-50 max-w-md mx-auto flex flex-col">
@@ -331,6 +328,15 @@ export default function Notes() {
                     </div>
                 </div>
             )}
+
+            {/* Action Message Modal */}
+            <ActionMessageModal
+                isOpen={actionModal.isOpen}
+                onClose={() => setActionModal({ ...actionModal, isOpen: false })}
+                title={actionModal.title}
+                message={actionModal.message}
+                type={actionModal.type}
+            />
         </div>
     );
 }

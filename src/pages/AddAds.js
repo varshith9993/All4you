@@ -7,19 +7,19 @@ import {
   collection,
   serverTimestamp
 } from "firebase/firestore";
-import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { FiMapPin, FiTag, FiFileText, FiImage, FiUpload, FiX, FiCheck, FiArrowLeft, FiChevronDown } from "react-icons/fi";
 import LocationPickerModal from "../components/LocationPickerModal";
 import ActionMessageModal from "../components/ActionMessageModal";
-import { compressFile } from "../utils/compressor";
-import { countries } from "../utils/countries";
 
+import { uploadFile } from "../utils/storage";
+import { countries } from "../utils/countries";
+import { compressFile } from "../utils/compressor";
+
+import { reverseGeocode } from "../utils/locationService";
 const suggestedTags = ["furniture", "mobile", "bike", "freelancing", "petrol pump", "farm house", "land", "car", "fridge", "T.V", "watch", "house", "apppartment", "gold shop", "loan", "restraunt", "hotel", "boutique", "cloth shop", "footwear shop", "A.C", "laptop", "iphone"];
-const LOCATIONIQ_API_KEY = "pk.a9310b368752337ce215643e50ac0172";
-const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/devs4x2aa/upload";
-const CLOUDINARY_UPLOAD_PRESET = "ml_default";
 const MAX_PHOTOS = 4;
+// API Keys removed - handled by backend proxy via locationService
 
 export default function AddAds() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -61,15 +61,11 @@ export default function AddAds() {
     // Ads need better quality: <300KB max, 1600px
     const compressedFile = await compressFile(file, { maxSizeMB: 0.29, maxWidthOrHeight: 1600 }, 'AD_POST');
 
-    const formData = new FormData();
-    formData.append("file", compressedFile);
-    formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
-
     try {
-      const res = await axios.post(CLOUDINARY_UPLOAD_URL, formData);
-      return res.data.secure_url;
+      const url = await uploadFile(compressedFile, 'ads');
+      return url;
     } catch (err) {
-      throw new Error("Cloudinary upload failed: " + (err.response?.data?.error?.message || err.message));
+      throw new Error("Ad upload failed: " + (err.message));
     }
   };
 
@@ -121,15 +117,8 @@ export default function AddAds() {
         setLongitude(lng.toString());
 
         try {
-          const geoRes = await axios.get(`https://us1.locationiq.com/v1/reverse.php`, {
-            params: {
-              key: LOCATIONIQ_API_KEY,
-              lat: lat,
-              lon: lng,
-              format: 'json'
-            },
-          });
-          const addr = geoRes.data.address;
+          const data = await reverseGeocode(lat, lng, 'locationiq');
+          const addr = data.address;
           setLocationArea(addr.suburb || addr.neighbourhood || addr.village || "");
           setLocationCity(addr.city || addr.town || addr.county || "");
           setPincode(addr.postcode || "");
@@ -564,7 +553,6 @@ export default function AddAds() {
         <LocationPickerModal
           show={showLocationPicker}
           initialPosition={{ lat: latitude, lng: longitude }}
-          apiKey={LOCATIONIQ_API_KEY}
           apiProvider="locationiq"
           onConfirm={(location) => {
             setLatitude(location.lat);

@@ -35,7 +35,7 @@ import {
   FiSlash
 } from "react-icons/fi";
 import { MdDone, MdDoneAll, MdAdd, MdMic } from "react-icons/md";
-import { uploadToCloudinary } from "../utils/cloudinaryUpload";
+import { uploadFile } from "../utils/storage";
 import { compressFile } from "../utils/compressor";
 import defaultProfile from "../assets/images/default_profile.svg";
 import { useGlobalDataCache } from "../contexts/GlobalDataCacheContext";
@@ -43,23 +43,74 @@ import { formatLastSeen } from "../utils/timeUtils";
 
 function formatTime(date) {
   if (!date) return "";
-  const d = date.toDate ? date.toDate() : new Date(date);
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+  try {
+    let d;
+    // Handle Firestore Timestamp
+    if (date.toDate && typeof date.toDate === 'function') {
+      d = date.toDate();
+    }
+    // Handle Date object
+    else if (date instanceof Date) {
+      d = date;
+    }
+    // Handle milliseconds or seconds timestamp
+    else if (typeof date === 'number') {
+      // If number is too small, it's likely in seconds, convert to milliseconds
+      d = new Date(date > 10000000000 ? date : date * 1000);
+    }
+    // Handle string or other formats
+    else {
+      d = new Date(date);
+    }
+
+    // Validate the date
+    if (!d || isNaN(d.getTime())) return "";
+
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+  } catch (e) {
+    console.error("Error formatting time:", e, date);
+    return "";
+  }
 }
 
 
 function getDateLabel(date) {
   if (!date) return "";
-  const d = date.toDate ? date.toDate() : new Date(date);
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const msgDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  try {
+    let d;
+    // Handle Firestore Timestamp
+    if (date.toDate && typeof date.toDate === 'function') {
+      d = date.toDate();
+    }
+    // Handle Date object
+    else if (date instanceof Date) {
+      d = date;
+    }
+    // Handle milliseconds or seconds timestamp
+    else if (typeof date === 'number') {
+      d = new Date(date > 10000000000 ? date : date * 1000);
+    }
+    // Handle string or other formats
+    else {
+      d = new Date(date);
+    }
 
-  if (msgDate.getTime() === today.getTime()) return "Today";
-  if (msgDate.getTime() === yesterday.getTime()) return "Yesterday";
-  return d.toLocaleDateString();
+    // Validate the date
+    if (!d || isNaN(d.getTime())) return "";
+
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const msgDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+    if (msgDate.getTime() === today.getTime()) return "Today";
+    if (msgDate.getTime() === yesterday.getTime()) return "Yesterday";
+    return d.toLocaleDateString();
+  } catch (e) {
+    console.error("Error getting date label:", e, date);
+    return "";
+  }
 }
 
 function isUserOnline(online, lastSeen) {
@@ -235,41 +286,145 @@ function MessageActionsComponent({ message, onReply, onCopy, onEdit, onDelete, i
 
 function AudioMessage({ fileUrl, isOwnMessage }) {
   const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [hasError, setHasError] = useState(false);
+  const [calculatedDuration, setCalculatedDuration] = useState(null);
   const audioRef = useRef(null);
 
-  const togglePlay = () => {
+  useEffect(() => {
+    // Force load metadata when component mounts
     if (audioRef.current) {
+      audioRef.current.load();
+    }
+  }, [fileUrl]);
+
+  const togglePlay = () => {
+    if (audioRef.current && !hasError) {
       if (isPlaying) {
         audioRef.current.pause();
       } else {
-        audioRef.current.play();
+        audioRef.current.play().catch(err => {
+          console.error("Audio play error:", err);
+          setHasError(true);
+        });
       }
-      setIsPlaying(!isPlaying);
     }
   };
 
+  const handleLoadedMetadata = () => {
+    if (audioRef.current) {
+      const dur = audioRef.current.duration;
+      if (!isNaN(dur) && isFinite(dur) && dur > 0) {
+        setDuration(dur);
+        setCalculatedDuration(dur);
+        setHasError(false);
+      } else {
+        setDuration(0);
+      }
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (audioRef.current) {
+      const time = audioRef.current.currentTime;
+      if (!isNaN(time) && isFinite(time)) {
+        setCurrentTime(time);
+
+        // If duration is still invalid, use currentTime as proxy
+        if ((!duration || !isFinite(duration)) && time > 0) {
+          setDuration(time);
+        }
+      }
+    }
+  };
+
+  const handleEnded = () => {
+    setIsPlaying(false);
+
+    // Calculate actual duration from playback
+    if (audioRef.current && !calculatedDuration) {
+      const finalTime = audioRef.current.currentTime;
+      if (finalTime > 0) {
+        setCalculatedDuration(finalTime);
+        setDuration(finalTime);
+      }
+    }
+
+    setCurrentTime(0);
+  };
+
+  const handleError = (e) => {
+    console.error("Audio error:", e);
+    setHasError(true);
+    setIsPlaying(false);
+  };
+
+  const formatTime = (seconds) => {
+    if (!seconds || isNaN(seconds) || !isFinite(seconds)) return "0:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Use calculated duration if metadata duration is invalid
+  const displayDuration = (duration && isFinite(duration) && duration > 0)
+    ? duration
+    : (calculatedDuration || 0);
+
+  const progress = displayDuration > 0 && !isNaN(displayDuration)
+    ? (currentTime / displayDuration) * 100
+    : 0;
+
   return React.createElement(
     "div",
-    { className: "flex items-center gap-2 min-w-[150px]" },
+    { className: "flex items-center gap-2 min-w-[180px] max-w-[250px]" },
     React.createElement(
       "button",
       {
         onClick: togglePlay,
-        className: `p-2 rounded-full ${isOwnMessage ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700'}`
+        disabled: hasError,
+        className: `p-2 rounded-full transition-all ${hasError
+          ? 'opacity-50 cursor-not-allowed bg-gray-300'
+          : isOwnMessage
+            ? 'bg-white/20 hover:bg-white/30 text-white'
+            : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+          }`
       },
-      isPlaying ? React.createElement(FiPause, { size: 16 }) : React.createElement(FiPlay, { size: 16 })
+      isPlaying ? React.createElement(FiPause, { size: 18 }) : React.createElement(FiPlay, { size: 18 })
     ),
     React.createElement(
       "div",
-      { className: "flex-1 h-1 bg-gray-300 rounded-full overflow-hidden mx-2" },
-      React.createElement("div", { className: `h-full ${isOwnMessage ? 'bg-blue-600' : 'bg-blue-500'} w-1/2 animate-pulse` })
+      { className: "flex-1 flex flex-col gap-1" },
+      React.createElement(
+        "div",
+        { className: "relative h-1 bg-gray-300 rounded-full overflow-hidden" },
+        React.createElement("div", {
+          className: `h-full ${isOwnMessage ? 'bg-white' : 'bg-blue-700'} transition-all`,
+          style: { width: `${Math.min(100, Math.max(0, progress))}%` }
+        })
+      ),
+      React.createElement(
+        "span",
+        { className: `text-[10px] font-medium ${isOwnMessage ? 'text-white/90' : 'text-gray-600'}` },
+        hasError ? "Error loading audio" : `${formatTime(currentTime)} / ${formatTime(displayDuration)}`
+      )
     ),
     React.createElement(
       "audio",
       {
         ref: audioRef,
         src: fileUrl,
-        onEnded: () => setIsPlaying(false),
+        preload: "metadata",
+        playsInline: true,
+        crossOrigin: "anonymous",
+        onLoadedMetadata: handleLoadedMetadata,
+        onTimeUpdate: handleTimeUpdate,
+        onPlay: () => setIsPlaying(true),
+        onPause: () => setIsPlaying(false),
+        onEnded: handleEnded,
+        onError: handleError,
+        onCanPlay: () => setHasError(false),
         className: "hidden"
       }
     )
@@ -368,7 +523,7 @@ export default function ChatDetail() {
   const otherUserId = chat?.participants?.find(p => p !== uid);
 
   // Global Message Cache
-  const { getMessageCache, setMessageCache } = useGlobalDataCache();
+  const { getMessageCache, setMessageCache, chats: globalChats } = useGlobalDataCache();
 
   // Initialize
   useEffect(() => {
@@ -388,7 +543,22 @@ export default function ChatDetail() {
   useEffect(() => {
     if (!chatId || !uid) return;
 
-    // Use onSnapshot for real-time chat updates (blocking, muting)
+    // OPTIMIZATION: Check Global Cache first (0 reads!)
+    // The GlobalDataCacheContext already maintains a real-time listener for all user's chats
+    if (globalChats) {
+      const cachedChat = globalChats.find(c => c.id === chatId);
+      if (cachedChat) {
+        setChat(cachedChat);
+        const otherId = cachedChat.participants?.find(x => x !== uid);
+        const themBlocked = otherId ? (cachedChat.blockedBy?.includes(otherId) || false) : false;
+
+        setIsBlockedByThem(themBlocked);
+        setIsMuted(cachedChat.mutedBy?.includes(uid) || false);
+        return; // Skip creating a new listener!
+      }
+    }
+
+    // Fallback: Create listener ONLY if not in cache (e.g. deep link to new chat)
     const unsubChat = onSnapshot(doc(db, "chats", chatId), (chatSnap) => {
       if (!chatSnap.exists()) {
         navigate("/chats");
@@ -406,7 +576,7 @@ export default function ChatDetail() {
     }, (err) => { });
 
     return () => unsubChat();
-  }, [chatId, uid, navigate]);
+  }, [chatId, uid, navigate, globalChats]);
 
   // Bug Fix: Unconditionally reset unseen count when entering chat
   // This handles specific edge cases where unread count > 0 but no unread messages exist (phantom red dot)
@@ -449,14 +619,20 @@ export default function ChatDetail() {
     const cachedData = getMessageCache(chatId);
     const lastChatUpdate = chat?.updatedAt?.toMillis?.() || 0;
 
-    // IF we have cache AND it matches precisely the last server update,
-    // AND we are not already loading more messages, we can SKIP the listener
-    // because the global chats listener already keeps us updated on whether something changed.
-    if (cachedData && cachedData.lastUpdate === lastChatUpdate && lastChatUpdate !== 0 && !isLoadingMore && cachedData.messages?.length >= limitCount) {
-      setMessages(cachedData.messages);
+    // Use cache if available, fresh, and has valid data
+    if (cachedData && cachedData.lastUpdate === lastChatUpdate && lastChatUpdate !== 0 && !isLoadingMore) {
+      // Validate that cached messages have timestamps
+      const hasValidTimestamps = cachedData.messages.length === 0 ||
+        cachedData.messages.every(msg => msg.createdAt);
 
-      setMessages(cachedData.messages);
-      return;
+      if (hasValidTimestamps) {
+        console.log('✅ Loading messages from cache:', cachedData.messages.length);
+        setMessages(cachedData.messages);
+        setHasMore(cachedData.messages.length >= limitCount);
+        // Continue to listener to get real-time updates (e.g. blue ticks)
+      } else {
+        console.log('⚠️ Cache has invalid timestamps, fetching fresh data');
+      }
     }
 
     // Otherwise, we need to subscribe to get the latest (or more) messages
@@ -482,30 +658,22 @@ export default function ChatDetail() {
       const isFromCache = snap.metadata.fromCache;
       const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
+      // Client-side filtering for cleared messages
+      const filteredMsgs = msgs.filter((msg, index) => {
+        // Skip messages without valid timestamps
+        if (!msg.createdAt) return false;
 
-      // Client-side filtering for cleared messages (Double check in case query hasn't updated yet)
-      const filteredMsgs = msgs.filter(msg => {
-        // Block check
-        if (!msg.isBlocked) {
-          if (msg.senderId !== uid) return false;
-        } else if (msg.senderId !== uid) {
-          // If message is not marked 'isBlocked', we keep it. 
-          // But wait, the original logic was:
-          // if (!msg.isBlocked) return true;
-          // return msg.senderId === uid;
-          // The query should generally filter blocked messages if we wanted to? 
-          // No, we store them with 'isBlocked: true' if they were sent while blocked.
-        }
-
-        // Cleared check
-        if (clearedTime) {
+        // 1. Filter out cleared messages
+        if (clearedTime && msg.createdAt) {
           const cTime = clearedTime.toDate ? clearedTime.toDate().getTime() : new Date(clearedTime).getTime();
           const mTime = msg.createdAt ? (msg.createdAt.toDate ? msg.createdAt.toDate().getTime() : new Date(msg.createdAt).getTime()) : Date.now();
           if (mTime <= cTime) return false;
         }
 
-        // Original logic preserved: if isBlocked is true, only show if I sent it
-        if (msg.isBlocked && msg.senderId !== uid) return false;
+        // 2. Filter blocked messages: only show blocked messages if I sent them
+        if (msg.isBlocked && msg.senderId !== uid) {
+          return false;
+        }
 
         return true;
       });
@@ -515,6 +683,7 @@ export default function ChatDetail() {
       setIsLoadingMore(false);
 
       // Persist to global cache for zero-read revisit
+      // Only save if data came from server (not from Firestore cache)
       if (!isFromCache && lastChatUpdate !== 0) {
         setMessageCache(chatId, filteredMsgs, lastChatUpdate);
       }
@@ -642,7 +811,6 @@ export default function ChatDetail() {
 
   const handleLoadMore = () => {
     if (!hasMore || isLoadingMore) return;
-
     setIsLoadingMore(true);
     // Capture current scroll state
     if (chatContainerRef.current) {
@@ -757,12 +925,23 @@ export default function ChatDetail() {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream);
+
+      // Determine best audio format
+      let mimeType = 'audio/webm';
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+        mimeType = 'audio/ogg;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      }
+
+      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
       audioChunksRef.current = [];
       isCancellingRef.current = false;
 
       mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
@@ -772,17 +951,30 @@ export default function ChatDetail() {
           stream.getTracks().forEach(track => track.stop());
           return;
         }
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        await sendAudioMessage(audioBlob);
+
+        const recordedMimeType = mediaRecorderRef.current.mimeType;
+        const audioBlob = new Blob(audioChunksRef.current, { type: recordedMimeType });
+
+        if (audioBlob.size === 0) {
+          setToastMessage('Recording failed - no audio data');
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
+
+        const extension = recordedMimeType.includes('mp4') ? 'mp4' : recordedMimeType.includes('ogg') ? 'ogg' : 'webm';
+        const audioFileName = `audio_${Date.now()}.${extension}`;
+        const audioFile = new File([audioBlob], audioFileName, { type: recordedMimeType });
+
+        await sendAudioMessage(audioFile);
         stream.getTracks().forEach(track => track.stop());
       };
 
-      mediaRecorderRef.current.start();
+      mediaRecorderRef.current.start(100);
       setIsRecording(true);
       setRecordingTime(0);
       timerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
     } catch (err) {
-      console.error("Error accessing microphone:", err);
+      console.error("Microphone error:", err);
       setToastMessage("Microphone access denied");
     }
   };
@@ -816,7 +1008,7 @@ export default function ChatDetail() {
     if (!audioBlob || audioBlob.size === 0) return;
     setUploading(true);
     try {
-      const url = await uploadToCloudinary(audioBlob, "video");
+      const url = await uploadFile(audioBlob, "chat-audio");
       await sendMessageInternal({ type: "audio", fileUrl: url, text: "Voice Message" });
     } catch (err) {
       console.error("Audio upload failed", err);
@@ -873,7 +1065,7 @@ export default function ChatDetail() {
       const compressedFile = await compressFile(file, {}, compressType);
 
       // Use 'auto' to let Cloudinary detect PDF/Docs vs Images
-      const url = await uploadToCloudinary(compressedFile, "auto");
+      const url = await uploadFile(compressedFile, "chat-files");
 
       const msgType = isImage ? "image" : "file";
       const msgText = isImage ? "Image" : file.name;
@@ -1025,7 +1217,7 @@ export default function ChatDetail() {
             "div",
             {
               className: `px-3 py-2 rounded-lg shadow-sm relative min-w-[100px] ${isOwn
-                ? 'bg-[#d1e4f9] text-gray-900 rounded-tr-none'
+                ? 'bg-[#c5e3f9] text-gray-900 rounded-tr-none'
                 : 'bg-white text-gray-900 rounded-tl-none border border-gray-100'
                 }`
             },
@@ -1118,7 +1310,10 @@ export default function ChatDetail() {
 
   return React.createElement(
     "div",
-    { className: "flex flex-col h-screen bg-white max-w-md mx-auto shadow-2xl relative" },
+    {
+      className: "flex flex-col fixed inset-0 z-50 bg-white max-w-md mx-auto shadow-2xl",
+      style: { touchAction: 'pan-y' }
+    },
     viewingImage && React.createElement(
       "div",
       { className: "fixed inset-0 bg-black/95 z-[60] flex items-center justify-center p-4 animate-fade-in" },
@@ -1314,7 +1509,12 @@ export default function ChatDetail() {
       {
         ref: chatContainerRef,
         onScroll: handleScroll,
-        className: "flex-1 overflow-y-auto bg-white p-4 space-y-2 flex flex-col-reverse"
+        className: "flex-1 overflow-y-auto bg-white p-4 space-y-2 flex flex-col-reverse",
+        style: {
+          touchAction: 'pan-y',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain'
+        }
       },
       messageElements,
       hasMore && React.createElement(
@@ -1343,7 +1543,13 @@ export default function ChatDetail() {
     ),
     React.createElement(
       "div",
-      { className: "bg-white border-t p-2" },
+      {
+        className: "bg-white border-t p-2 shrink-0",
+        style: {
+          paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))',
+          boxShadow: '0 -2px 10px rgba(0,0,0,0.1)'
+        }
+      },
       replyTo && React.createElement(
         "div",
         { className: "flex items-center justify-between bg-gray-50 p-2 rounded-lg mb-2 border-l-4 border-blue-500" },

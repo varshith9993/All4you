@@ -1,0 +1,16 @@
+name = "location-api"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+account_id = "0411029babd049b3415bf5fcfb6708a9"
+
+[vars]
+# LocationIQ API Keys (4 keys)
+LOCATIONIQ_KEY_1 = "pk.c46b235dc808aed78cb86bd70c83fab0"
+LOCATIONIQ_KEY_2 = "pk.a9310b368752337ce215643e50ac0172"
+LOCATIONIQ_KEY_3 = "pk.f85d97d836243abb9099ada5ebe13c73"
+LOCATIONIQ_KEY_4 = "pk.536f0094e894f807f37fc694c78c2f9e"
+
+# OpenCage API Keys (3 keys)
+OPENCAGE_KEY_1 = "988148bc222049e2831059ea74476abb"
+OPENCAGE_KEY_2 = "43ac78a805af4868b01f3dc9dcae8556"
+OPENCAGE_KEY_3 = "9f7a1b9327aa45e18cc7c1cd48dfb127"
