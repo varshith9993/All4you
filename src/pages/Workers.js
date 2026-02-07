@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { FiStar, FiMapPin, FiFilter, FiChevronDown, FiX, FiPlus, FiWifi, FiSearch, FiLoader } from "react-icons/fi";
 import Layout from "../components/Layout";
 import defaultAvatar from "../assets/images/default_profile.svg";
@@ -515,6 +515,20 @@ export default function Workers() {
   const debouncedFilters = useDebounce(filters, 500);
 
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [showMessage, setShowMessage] = useState(false);
+
+  // Check for "post unavailable" message from notification click
+  useEffect(() => {
+    const message = searchParams.get('message');
+    if (message === 'post_unavailable') {
+      setShowMessage(true);
+      // Remove the message parameter from URL
+      setSearchParams({});
+      // Auto-hide message after 5 seconds
+      setTimeout(() => setShowMessage(false), 5000);
+    }
+  }, [searchParams, setSearchParams]);
 
   // OPTIMIZATION: Use ProfileCache for batch profile fetching
   const { fetchProfiles, getAllCachedProfiles, subscribeToOnlineStatus } = useProfileCache();
@@ -922,6 +936,19 @@ export default function Workers() {
       }
     >      {/* Main Content */}
       <div className="px-4 py-3 pb-20" ref={listContainerRef}>
+        {/* Post Unavailable Message Toast */}
+        {showMessage && (
+          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 animate-fade-in">
+            <span className="text-sm font-medium">⚠️ Post unavailable - The post has been removed or disabled</span>
+            <button
+              onClick={() => setShowMessage(false)}
+              className="text-white hover:text-gray-200"
+            >
+              <FiX size={18} />
+            </button>
+          </div>
+        )}
+
         {displayedWorkers.length === 0 ? (
           <div className="text-center text-gray-500 mt-10">
             <p className="text-lg">No workers found.</p>

@@ -75,7 +75,7 @@ export async function deleteFile(publicUrlOrPath) {
         const deleteFn = httpsCallable(functions, 'deleteFile');
 
         await deleteFn({ filePath });
-        console.log("File deleted successfully");
+        // File deleted successfully
 
     } catch (error) {
         console.error("Delete failed:", error);

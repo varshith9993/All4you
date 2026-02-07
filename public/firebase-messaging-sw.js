@@ -26,50 +26,17 @@ messaging.onBackgroundMessage((payload) => {
 
     const notificationOptions = {
         body: payload.notification?.body || 'You have a new notification',
-        icon: payload.notification?.icon || '/aerosigil-logo-192x192.png', // AeroSigil logo
-        badge: '/aerosigil-logo-192x192.png', // AeroSigil logo badge
-        tag: notificationData.tag || notificationData.type || 'default',
+        icon: payload.notification?.icon || '/aerosigil-logo-192x192.png', // Uses Sender Image if provided
+        badge: '/aerosigil-logo-192x192.png', // Small App Logo
+        image: payload.notification?.image || notificationData.image, // Big Picture
+        tag: payload.notification?.tag || notificationData.tag || 'default', // Grouping
+        renotify: payload.notification?.renotify || false, // Alert again on update
         data: notificationData,
-        requireInteraction: notificationData.requireInteraction === 'true',
+        requireInteraction: payload.notification?.requireInteraction || false,
         vibrate: [200, 100, 200],
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        actions: payload.notification?.actions || [] // Action Buttons (Reply, etc.)
     };
-
-    // Add image if provided
-    if (payload.notification?.image) {
-        notificationOptions.image = payload.notification.image;
-    }
-
-    // Add action buttons based on notification type
-    const notificationType = notificationData.type;
-
-    if (notificationType === 'chat' || notificationType === 'chat_offline') {
-        notificationOptions.actions = [
-            { action: 'open_chat', title: 'Open Chat', icon: '/aerosigil-logo-192x192.png' },
-            { action: 'dismiss', title: 'Later' }
-        ];
-    } else if (notificationType === 'new_post' || notificationType === 'favorite_enabled') {
-        notificationOptions.actions = [
-            { action: 'view_post', title: 'View Post', icon: '/aerosigil-logo-192x192.png' },
-            { action: 'dismiss', title: 'Later' }
-        ];
-    } else if (notificationType === 'expiring_favorite' || notificationType === 'expiring_post') {
-        notificationOptions.actions = [
-            { action: 'view_post', title: 'View Now', icon: '/aerosigil-logo-192x192.png' },
-            { action: 'dismiss', title: 'Remind Later' }
-        ];
-        notificationOptions.requireInteraction = true; // Keep visible
-    } else if (notificationType === 'review' || notificationType === 'review_reply') {
-        notificationOptions.actions = [
-            { action: 'view_post', title: 'View Review', icon: '/aerosigil-logo-192x192.png' },
-            { action: 'dismiss', title: 'Later' }
-        ];
-    } else if (notificationType === 'inactive_reminder') {
-        notificationOptions.actions = [
-            { action: 'open_app', title: 'Open App', icon: '/aerosigil-logo-192x192.png' },
-            { action: 'dismiss', title: 'Later' }
-        ];
-    }
 
     return self.registration.showNotification(notificationTitle, notificationOptions);
 });
@@ -81,44 +48,53 @@ self.addEventListener('notificationclick', (event) => {
     event.notification.close();
 
     const notificationData = event.notification.data || {};
-    const action = event.action;
-
-    // Handle dismiss action
-    if (action === 'dismiss') {
-        return;
-    }
-
-    // Determine URL based on notification type and action
-    let urlToOpen = '/workers'; // Default fallback
-
     const notificationType = notificationData.type;
     const postId = notificationData.postId;
     const collection = notificationData.collection;
-    const chatId = notificationData.chatId;
 
-    // Smart navigation based on notification type
-    if (action === 'open_chat' || notificationType === 'chat' || notificationType === 'chat_offline') {
-        urlToOpen = chatId ? `/chat/${chatId}` : '/chats';
-    } else if (action === 'view_post' || notificationType === 'new_post' || notificationType === 'favorite_enabled' ||
-        notificationType === 'expiring_favorite' || notificationType === 'expiring_post' ||
-        notificationType === 'review' || notificationType === 'review_reply') {
-        // Navigate to specific post detail page
-        if (collection && postId) {
-            if (collection === 'workers') {
-                urlToOpen = `/worker/${postId}`;
-            } else if (collection === 'ads') {
-                urlToOpen = `/ad/${postId}`;
-            } else if (collection === 'services') {
-                urlToOpen = `/service/${postId}`;
-            }
-        } else if (notificationData.url) {
-            urlToOpen = notificationData.url;
+    // Determine URL based on notification type
+    let urlToOpen = '/workers'; // Default
+    let needsPostCheck = false; // Flag to check if post is active
+
+    // 1. Check Action Button Click
+    if (event.action === 'open') {
+        urlToOpen = '/workers'; // Explicitly requested to open app home/workers
+    }
+    // 2. For "New Post Within 50km" - navigate to post detail
+    else if (notificationType === 'new_post' && collection && postId) {
+        needsPostCheck = true; // Need to check if post is still active
+
+        if (collection === 'workers') {
+            urlToOpen = `/worker-detail/${postId}`;
+        } else if (collection === 'ads') {
+            urlToOpen = `/ad-detail/${postId}`;
+        } else if (collection === 'services') {
+            urlToOpen = `/service-detail/${postId}`;
         }
-    } else if (notificationType === 'inactive_reminder' || action === 'open_app') {
+    }
+    // For Chat Messages (Real-time and Offline)
+    else if ((notificationType === 'chat_message' || notificationType === 'chat_offline') && notificationData.chatId) {
+        urlToOpen = `/chat/${notificationData.chatId}`;
+    }
+    // For Reviews and Replies
+    else if ((notificationType === 'review' || notificationType === 'review_reply') && collection && postId) {
+        if (collection === 'workers') {
+            urlToOpen = `/worker-detail/${postId}`;
+        } else if (collection === 'ads') {
+            urlToOpen = `/ad-detail/${postId}`;
+        } else if (collection === 'services') {
+            urlToOpen = `/service-detail/${postId}`;
+        }
+    }
+    // For Expiring Favorites - navigate to List Page
+    else if (notificationType === 'expiring_favorite' && collection) {
+        if (collection === 'ads') urlToOpen = '/ads';
+        else if (collection === 'services') urlToOpen = '/services';
+        else urlToOpen = '/workers';
+    }
+    // For all other notifications - navigate to /workers
+    else {
         urlToOpen = '/workers';
-    } else if (notificationData.url) {
-        // Use custom URL if provided
-        urlToOpen = notificationData.url;
     }
 
     // Open the app or focus existing window
@@ -130,10 +106,16 @@ self.addEventListener('notificationclick', (event) => {
                     const client = clientList[i];
                     if (client.url.includes(self.location.origin) && 'focus' in client) {
                         return client.focus().then(client => {
-                            // Navigate to the specific URL
-                            if (urlToOpen && client.navigate) {
-                                return client.navigate(urlToOpen);
-                            }
+                            // Send message to client to handle navigation
+                            client.postMessage({
+                                type: 'NOTIFICATION_CLICK',
+                                action: 'navigate',
+                                url: urlToOpen,
+                                needsPostCheck: needsPostCheck,
+                                postId: postId,
+                                collection: collection,
+                                notificationType: notificationType
+                            });
                             return client;
                         });
                     }

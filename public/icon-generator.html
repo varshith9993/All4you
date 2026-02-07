@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AeroSigil Icon Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 32px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 16px;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 30px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f8f9ff;
+        }
+
+        .upload-area.dragover {
+            background: #f0f0ff;
+            border-color: #764ba2;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .preview {
+            display: none;
+            margin: 30px 0;
+        }
+
+        .preview img {
+            max-width: 200px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .sizes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+
+        .size-card {
+            background: #f8f9ff;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            border: 2px solid #e0e0e0;
+        }
+
+        .size-card canvas {
+            width: 100%;
+            height: auto;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            background: white;
+        }
+
+        .size-label {
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .download-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+
+        .download-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .download-btn:active {
+            transform: translateY(0);
+        }
+
+        .download-all {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 18px;
+            font-weight: bold;
+            width: 100%;
+            margin-top: 20px;
+            transition: transform 0.2s;
+        }
+
+        .download-all:hover {
+            transform: translateY(-2px);
+        }
+
+        .instructions {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 30px;
+        }
+
+        .instructions h3 {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+
+        .instructions ol {
+            margin-left: 20px;
+            color: #856404;
+        }
+
+        .instructions li {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🦢 AeroSigil Icon Generator</h1>
+        <p class="subtitle">Generate all required icon sizes for your app</p>
+
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📁</div>
+            <h3>Click or drag your logo here</h3>
+            <p>Upload aerosigil-logo.jpg</p>
+            <input type="file" id="fileInput" accept="image/*">
+        </div>
+
+        <div class="preview" id="preview">
+            <h3>Original Logo:</h3>
+            <img id="previewImg" alt="Logo preview">
+        </div>
+
+        <div class="sizes-grid" id="sizesGrid" style="display: none;">
+            <!-- Icons will be generated here -->
+        </div>
+
+        <button class="download-all" id="downloadAll" style="display: none;">
+            📥 Download All Icons as ZIP
+        </button>
+
+        <div class="instructions">
+            <h3>📝 Instructions:</h3>
+            <ol>
+                <li>Upload your AeroSigil logo (aerosigil-logo.jpg)</li>
+                <li>Wait for all icons to be generated</li>
+                <li>Click "Download All Icons as ZIP"</li>
+                <li>Extract the ZIP file</li>
+                <li>Copy all files to your <code>public</code> folder</li>
+                <li>Restart your dev server</li>
+                <li>Clear browser cache (Ctrl+Shift+Delete)</li>
+                <li>Done! Your logo will appear everywhere! 🎉</li>
+            </ol>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const preview = document.getElementById('preview');
+        const previewImg = document.getElementById('previewImg');
+        const sizesGrid = document.getElementById('sizesGrid');
+        const downloadAll = document.getElementById('downloadAll');
+
+        const sizes = [
+            { name: 'logo192.png', size: 192, description: 'Push Notifications & Android' },
+            { name: 'aerosigil-logo-192x192.png', size: 192, description: 'Notification Icon' },
+            { name: 'logo512.png', size: 512, description: 'PWA Splash Screen' },
+            { name: 'apple-touch-icon.png', size: 180, description: 'iOS Home Screen' },
+            { name: 'favicon-48x48.png', size: 48, description: 'Browser Tab (Medium)' }
+        ];
+
+        let generatedIcons = {};
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('image/')) {
+                handleFile(file);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                handleFile(file);
+            }
+        });
+
+        function handleFile(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                previewImg.src = e.target.result;
+                preview.style.display = 'block';
+                generateIcons(e.target.result);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function generateIcons(imageSrc) {
+            sizesGrid.innerHTML = '';
+            sizesGrid.style.display = 'grid';
+            generatedIcons = {};
+
+            const img = new Image();
+            img.onload = () => {
+                sizes.forEach(({ name, size, description }) => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = size;
+                    canvas.height = size;
+                    const ctx = canvas.getContext('2d');
+
+                    // TRANSPARENT BACKGROUND (no white background!)
+                    // This makes the icon look authentic on any background color
+
+                    // Calculate dimensions to maintain aspect ratio with padding
+                    const padding = size * 0.05; // 5% padding (less padding for better look)
+                    const availableSize = size - (padding * 2);
+                    const scale = Math.min(availableSize / img.width, availableSize / img.height);
+                    const scaledWidth = img.width * scale;
+                    const scaledHeight = img.height * scale;
+                    const x = (size - scaledWidth) / 2;
+                    const y = (size - scaledHeight) / 2;
+
+                    // Draw image with transparent background
+                    ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
+
+                    // Create card with checkerboard pattern to show transparency
+                    const card = document.createElement('div');
+                    card.className = 'size-card';
+                    card.innerHTML = `
+                        <div class="size-label">${size}x${size}</div>
+                        <div style="background: repeating-conic-gradient(#e0e0e0 0% 25%, #f5f5f5 0% 50%) 50% / 20px 20px; border-radius: 5px; padding: 10px;">
+                            <canvas width="${size}" height="${size}"></canvas>
+                        </div>
+                        <p style="font-size: 12px; color: #666; margin: 10px 0;">${description}</p>
+                        <p style="font-size: 10px; color: #999; margin: 5px 0;">✨ Transparent background</p>
+                        <button class="download-btn" onclick="downloadIcon('${name}')">
+                            Download
+                        </button>
+                    `;
+
+                    const cardCanvas = card.querySelector('canvas');
+                    cardCanvas.getContext('2d').drawImage(canvas, 0, 0);
+
+                    sizesGrid.appendChild(card);
+
+                    // Store for ZIP download
+                    canvas.toBlob((blob) => {
+                        generatedIcons[name] = blob;
+                    }, 'image/png');
+                });
+
+                downloadAll.style.display = 'block';
+            };
+            img.src = imageSrc;
+        }
+
+        function downloadIcon(name) {
+            const canvas = Array.from(sizesGrid.querySelectorAll('canvas'))
+                .find(c => c.parentElement.querySelector('.size-label').textContent === name.match(/\d+/)[0] + 'x' + name.match(/\d+/)[0]);
+
+            if (canvas) {
+                canvas.toBlob((blob) => {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = name;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                }, 'image/png');
+            }
+        }
+
+        downloadAll.addEventListener('click', async () => {
+            const zip = new JSZip();
+
+            // Wait for all icons to be generated
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            for (const [name, blob] of Object.entries(generatedIcons)) {
+                if (blob) {
+                    zip.file(name, blob);
+                }
+            }
+
+            // Generate ZIP
+            const content = await zip.generateAsync({ type: 'blob' });
+            const url = URL.createObjectURL(content);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'aerosigil-icons.zip';
+            a.click();
+            URL.revokeObjectURL(url);
+
+            alert('✅ Icons downloaded! Extract the ZIP and copy all files to your public folder.');
+        });
+    </script>
+</body>
+
+</html>

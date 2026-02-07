@@ -5,11 +5,23 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const cors = require('cors')({ origin: true });
 const axios = require('axios');
 
+// Load environment variables from .env file
+// This works in both local development and Firebase Functions
+require('dotenv').config();
+
 admin.initializeApp();
 
 // Import advanced notification functions
 const advancedNotifications = require('./advancedNotifications');
 Object.assign(exports, advancedNotifications);
+
+// Import admin notification functions
+const adminNotifications = require('./adminNotifications');
+Object.assign(exports, adminNotifications);
+
+// Import scheduled notification functions (favorites expiry & offline reminders)
+const scheduledNotifications = require('./scheduledNotifications');
+Object.assign(exports, scheduledNotifications);
 
 
 /**
@@ -29,7 +41,7 @@ exports.reverseGeocode = functions.https.onCall(async (data, context) => {
     try {
         let response;
         if (provider === 'opencage') {
-            const key = process.env.OPENCAGE_API_KEY;
+            const key = appConfig.opencage.api_key;
             if (!key) throw new functions.https.HttpsError('internal', 'OpenCage API Key not configured');
 
             const url = `https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lon}&key=${key}`;
@@ -61,12 +73,15 @@ exports.autocomplete = functions.https.onCall(async (data, context) => {
     }
 
     try {
+        // Detect if query is a pincode (6 digits)
+        const isPincode = /^\d{6}$/.test(query.trim());
+
         if (provider === 'opencage') {
-            const key = process.env.OPENCAGE_API_KEY;
+            const key = appConfig.opencage.api_key;
             if (!key) throw new functions.https.HttpsError('internal', 'OpenCage API Key not configured');
 
             // OpenCage Search (Geocoding API also handles forward search)
-            const url = `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(query)}&key=${key}&limit=5&countrycode=in&no_dedupe=1`;
+            const url = `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(query)}&key=${key}&limit=10&countrycode=in&no_dedupe=1`;
             const response = await axios.get(url);
             return response.data;
         } else {
@@ -74,12 +89,29 @@ exports.autocomplete = functions.https.onCall(async (data, context) => {
             const key = process.env.LOCATIONIQ_API_KEY;
             if (!key) throw new functions.https.HttpsError('internal', 'LocationIQ API Key not configured');
 
-            const url = `https://api.locationiq.com/v1/autocomplete.php?key=${key}&q=${encodeURIComponent(query)}&limit=5&format=json&countrycodes=in&dedupe=1&match_all_queries=0&tag=place:city,place:town,place:village,boundary:administrative,postal_code`;
+            let url;
+            if (isPincode) {
+                // For pincode searches, use the search API instead of autocomplete
+                // This provides better results for postal codes
+                url = `https://us1.locationiq.com/v1/search.php?key=${key}&q=${encodeURIComponent(query)}&format=json&countrycodes=in&limit=10&addressdetails=1`;
+                console.log('Using search API for pincode:', query);
+            } else {
+                // For place name searches, use autocomplete with broader tags
+                // Removed restrictive tags to allow more results
+                url = `https://api.locationiq.com/v1/autocomplete.php?key=${key}&q=${encodeURIComponent(query)}&limit=10&format=json&countrycodes=in&dedupe=0&addressdetails=1`;
+                console.log('Using autocomplete API for place:', query);
+            }
+
             const response = await axios.get(url);
             return response.data;
         }
     } catch (error) {
         console.error(`Error in autocomplete ${provider}:`, error.response?.data || error.message);
+        // Log more details for debugging
+        if (error.response) {
+            console.error('Response status:', error.response.status);
+            console.error('Response data:', JSON.stringify(error.response.data));
+        }
         throw new functions.https.HttpsError('internal', 'Failed to fetch autocomplete data');
     }
 });
@@ -206,167 +238,129 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
  * Admin only function
  */
 exports.sendNotificationToAll = functions.https.onCall(async (data, context) => {
-    // Verify admin authentication
-    if (!context.auth) {
-        throw new functions.https.HttpsError('unauthenticated', 'Must be authenticated');
-    }
-
-    // TODO: Add admin role check
-    // const userDoc = await admin.firestore().doc(`profiles/${context.auth.uid}`).get();
-    // if (!userDoc.data()?.isAdmin) {
-    //     throw new functions.https.HttpsError('permission-denied', 'Admin access required');
-    // }
+    if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Must be authenticated');
 
     const { title, body, imageUrl, data: notificationData } = data;
-
-    if (!title || !body) {
-        throw new functions.https.HttpsError('invalid-argument', 'Title and body are required');
-    }
+    if (!title || !body) throw new functions.https.HttpsError('invalid-argument', 'Title and body are required');
 
     try {
-        // Get all FCM tokens
-        const tokensSnapshot = await admin.firestore().collection('fcmTokens').get();
+        // OPTIMIZED: only fetch tokens
+        const tokensSnapshot = await admin.firestore().collection('fcmTokens').select('token').get();
         const tokens = [];
+        const tokenToDocMap = new Map();
 
         tokensSnapshot.forEach(doc => {
-            const tokenData = doc.data();
-            if (tokenData.token) {
-                tokens.push(tokenData.token);
-            }
+            const t = doc.data().token;
+            if (t) { tokens.push(t); tokenToDocMap.set(t, doc.id); }
         });
 
-        if (tokens.length === 0) {
-            return { success: true, message: 'No tokens found', sent: 0 };
-        }
+        if (tokens.length === 0) return { success: true, message: 'No tokens', sent: 0 };
 
-        // Prepare notification payload
         const payload = {
-            notification: {
-                title,
-                body,
-                ...(imageUrl && { imageUrl })
+            notification: { title, body, ...(imageUrl && { image: imageUrl }) },
+            android: {
+                priority: 'high',
+                notification: { sound: 'default', channelId: 'default_channel', icon: 'https://servepure-fav.web.app/logo192.png', ...(imageUrl && { image: imageUrl }) }
             },
-            data: {
-                type: 'broadcast',
-                ...(notificationData || {})
-            }
+            apns: { payload: { aps: { 'mutable-content': 1, sound: 'default' } }, fcm_options: { image: imageUrl } },
+            webpush: { notification: { title, body, icon: '/logo192.png', image: imageUrl, requireInteraction: true } },
+            data: { type: 'broadcast', ...(notificationData || {}) }
         };
 
-        // Send in batches of 500 (FCM limit)
         const batchSize = 500;
-        let totalSent = 0;
-        let totalFailed = 0;
+        let totalSent = 0, totalFailed = 0;
 
         for (let i = 0; i < tokens.length; i += batchSize) {
             const batch = tokens.slice(i, i + batchSize);
-            const response = await admin.messaging().sendEachForMulticast({
-                tokens: batch,
-                ...payload
-            });
+            const response = await admin.messaging().sendEachForMulticast({ tokens: batch, ...payload });
 
             totalSent += response.successCount;
             totalFailed += response.failureCount;
 
-            // Remove invalid tokens
+            // BATCH CLEANUP: Remove invalid tokens efficiently
             if (response.failureCount > 0) {
-                const invalidTokens = [];
+                const cleanupBatch = admin.firestore().batch();
                 response.responses.forEach((resp, idx) => {
                     if (!resp.success) {
-                        invalidTokens.push(batch[idx]);
+                        const code = resp.error?.code;
+                        if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
+                            const docId = tokenToDocMap.get(batch[idx]);
+                            if (docId) cleanupBatch.delete(admin.firestore().doc(`fcmTokens/${docId}`));
+                        }
                     }
                 });
-
-                // Delete invalid tokens from Firestore
-                const deletePromises = invalidTokens.map(token =>
-                    admin.firestore().collection('fcmTokens')
-                        .where('token', '==', token)
-                        .get()
-                        .then(snapshot => {
-                            snapshot.forEach(doc => doc.ref.delete());
-                        })
-                );
-                await Promise.all(deletePromises);
+                await cleanupBatch.commit().catch(() => { });
             }
         }
 
-        return {
-            success: true,
-            sent: totalSent,
-            failed: totalFailed,
-            total: tokens.length
-        };
+        return { success: true, sent: totalSent, failed: totalFailed, total: tokens.length };
     } catch (error) {
-        console.error('Error sending notification to all:', error);
+        console.error('Error in sendNotificationToAll:', error);
         throw new functions.https.HttpsError('internal', error.message);
     }
 });
 
 /**
  * Send notification to users in specific regions/cities
- * For regional festivals or offers
  */
 exports.sendNotificationToRegion = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError('unauthenticated', 'Must be authenticated');
-    }
+    if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Must be authenticated');
 
     const { title, body, cities, countries, imageUrl, data: notificationData } = data;
-
     if (!title || !body || (!cities && !countries)) {
-        throw new functions.https.HttpsError('invalid-argument', 'Title, body, and at least one location filter required');
+        throw new functions.https.HttpsError('invalid-argument', 'Missing metadata');
     }
 
     try {
         let query = admin.firestore().collection('fcmTokens');
+        if (cities?.length > 0) query = query.where('city', 'in', cities);
+        else if (countries?.length > 0) query = query.where('country', 'in', countries);
 
-        // Filter by cities or countries
-        if (cities && cities.length > 0) {
-            query = query.where('city', 'in', cities);
-        } else if (countries && countries.length > 0) {
-            query = query.where('country', 'in', countries);
-        }
-
-        const tokensSnapshot = await query.get();
+        const tokensSnapshot = await query.select('token').get();
         const tokens = [];
+        const tokenToDocMap = new Map();
 
         tokensSnapshot.forEach(doc => {
-            const tokenData = doc.data();
-            if (tokenData.token) {
-                tokens.push(tokenData.token);
-            }
+            const t = doc.data().token;
+            if (t) { tokens.push(t); tokenToDocMap.set(t, doc.id); }
         });
 
-        if (tokens.length === 0) {
-            return { success: true, message: 'No tokens found for specified region', sent: 0 };
-        }
+        if (tokens.length === 0) return { success: true, sent: 0 };
 
         const payload = {
-            notification: {
-                title,
-                body,
-                ...(imageUrl && { imageUrl })
+            notification: { title, body, ...(imageUrl && { image: imageUrl }) },
+            android: {
+                priority: 'high',
+                notification: { sound: 'default', channelId: 'default_channel', icon: 'https://servepure-fav.web.app/logo192.png', ...(imageUrl && { image: imageUrl }) }
             },
-            data: {
-                type: 'regional',
-                ...(notificationData || {})
-            }
+            data: { type: 'regional', ...(notificationData || {}) }
         };
 
         const batchSize = 500;
         let totalSent = 0;
-
         for (let i = 0; i < tokens.length; i += batchSize) {
             const batch = tokens.slice(i, i + batchSize);
-            const response = await admin.messaging().sendEachForMulticast({
-                tokens: batch,
-                ...payload
-            });
+            const response = await admin.messaging().sendEachForMulticast({ tokens: batch, ...payload });
             totalSent += response.successCount;
+
+            if (response.failureCount > 0) {
+                const cleanupBatch = admin.firestore().batch();
+                response.responses.forEach((resp, idx) => {
+                    if (!resp.success) {
+                        const code = resp.error?.code;
+                        if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
+                            const docId = tokenToDocMap.get(batch[idx]);
+                            if (docId) cleanupBatch.delete(admin.firestore().doc(`fcmTokens/${docId}`));
+                        }
+                    }
+                });
+                await cleanupBatch.commit().catch(() => { });
+            }
         }
 
         return { success: true, sent: totalSent, total: tokens.length };
     } catch (error) {
-        console.error('Error sending regional notification:', error);
+        console.error('Error in sendNotificationToRegion:', error);
         throw new functions.https.HttpsError('internal', error.message);
     }
 });
@@ -375,240 +369,129 @@ exports.sendNotificationToRegion = functions.https.onCall(async (data, context) 
  * Send notification to specific user
  */
 exports.sendNotificationToUser = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError('unauthenticated', 'Must be authenticated');
-    }
+    if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Must be authenticated');
 
     const { userId, title, body, imageUrl, url, data: notificationData } = data;
-
-    if (!userId || !title || !body) {
-        throw new functions.https.HttpsError('invalid-argument', 'userId, title, and body are required');
-    }
+    if (!userId || !title || !body) throw new functions.https.HttpsError('invalid-argument', 'Missing fields');
 
     try {
         const tokenDoc = await admin.firestore().doc(`fcmTokens/${userId}`).get();
-
-        if (!tokenDoc.exists || !tokenDoc.data().token) {
-            return { success: false, message: 'No FCM token found for user' };
-        }
+        if (!tokenDoc.exists || !tokenDoc.data().token) return { success: false, message: 'No token' };
 
         const token = tokenDoc.data().token;
-
         const message = {
             token,
-            notification: {
-                title,
-                body,
-                ...(imageUrl && { imageUrl })
-            },
-            data: {
-                ...(url && { url }),
-                ...(notificationData || {})
-            },
-            webpush: {
-                fcmOptions: {
-                    ...(url && { link: url })
-                }
-            }
+            notification: { title, body, ...(imageUrl && { image: imageUrl }) },
+            android: { notification: { icon: 'https://servepure-fav.web.app/logo192.png' } },
+            data: { ...(url && { url }), ...(notificationData || {}) },
+            webpush: { fcmOptions: { ...(url && { link: url }) } }
         };
 
-        await admin.messaging().send(message);
+        await admin.messaging().send(message).catch(err => {
+            if (err.code === 'messaging/registration-token-not-registered') {
+                tokenDoc.ref.delete();
+            }
+        });
 
-        return { success: true, message: 'Notification sent successfully' };
+        return { success: true, message: 'Sent' };
     } catch (error) {
-        console.error('Error sending notification to user:', error);
+        console.error('Error in sendNotificationToUser:', error);
         throw new functions.https.HttpsError('internal', error.message);
     }
 });
 
-/**
- * Trigger: Send notification when new chat message is received
- */
-exports.onNewChatMessage = functions.firestore
-    .document('chats/{chatId}/messages/{messageId}')
-    .onCreate(async (snap, context) => {
-        const message = snap.data();
-        const { chatId } = context.params;
+// /**
+//  * Trigger: Send notification when new chat message is received
+//  * MOVED TO advancedNotifications.js
+//  */
+// exports.onNewChatMessage = functions.firestore
+//     .document('chats/{chatId}/messages/{messageId}')
+//     .onCreate(async (snap, context) => {
+//         // ... (Logic moved to advancedNotifications.js)
+//         console.log('Use advancedNotifications.js implementation');
+//     });
 
-        try {
-            // Get chat document to find recipient
-            const chatDoc = await admin.firestore().doc(`chats/${chatId}`).get();
-            if (!chatDoc.exists) return;
-
-            const chatData = chatDoc.data();
-            const participants = chatData.participants || [];
-
-            // Find recipient (not the sender)
-            const recipientId = participants.find(id => id !== message.senderId);
-            if (!recipientId) return;
-
-            // Get sender profile for notification
-            const senderDoc = await admin.firestore().doc(`profiles/${message.senderId}`).get();
-            const senderName = senderDoc.exists ? senderDoc.data().username : 'Someone';
-
-            // Get recipient's FCM token
-            const tokenDoc = await admin.firestore().doc(`fcmTokens/${recipientId}`).get();
-            if (!tokenDoc.exists || !tokenDoc.data().token) return;
-
-            const token = tokenDoc.data().token;
-
-            // Send notification
-            await admin.messaging().send({
-                token,
-                notification: {
-                    title: `New message from ${senderName}`,
-                    body: message.text || 'Sent an attachment',
-                },
-                data: {
-                    type: 'chat',
-                    chatId,
-                    senderId: message.senderId,
-                    url: `/chat/${chatId}`
-                },
-                webpush: {
-                    fcmOptions: {
-                        link: `/chat/${chatId}`
-                    }
-                }
-            });
-
-            console.log(`Chat notification sent to ${recipientId}`);
-        } catch (error) {
-            console.error('Error sending chat notification:', error);
-        }
-    });
-
-/**
- * Trigger: Send notification to nearby users when new post is created
- */
-exports.onNewPost = functions.firestore
-    .document('{collection}/{postId}')
-    .onCreate(async (snap, context) => {
-        const { collection, postId } = context.params;
-
-        // Only trigger for workers, ads, services
-        if (!['workers', 'ads', 'services'].includes(collection)) return;
-
-        const post = snap.data();
-        if (!post.latitude || !post.longitude) return;
-
-        try {
-            // Get all FCM tokens with location data
-            const tokensSnapshot = await admin.firestore().collection('fcmTokens')
-                .where('latitude', '!=', null)
-                .get();
-
-            const nearbyTokens = [];
-
-            // Filter users within 75km
-            tokensSnapshot.forEach(doc => {
-                const tokenData = doc.data();
-                if (!tokenData.token || !tokenData.latitude || !tokenData.longitude) return;
-
-                // Don't notify the creator
-                if (tokenData.userId === post.createdBy) return;
-
-                const distance = calculateDistance(
-                    post.latitude,
-                    post.longitude,
-                    tokenData.latitude,
-                    tokenData.longitude
-                );
-
-                if (distance <= 75) {
-                    nearbyTokens.push(tokenData.token);
-                }
-            });
-
-            if (nearbyTokens.length === 0) return;
-
-            // Get post type label
-            const typeLabel = collection === 'workers' ? 'Worker' :
-                collection === 'ads' ? 'Ad' : 'Service';
-
-            const payload = {
-                notification: {
-                    title: `New ${typeLabel} Posted Nearby!`,
-                    body: post.title || post.name || `Check out this new ${typeLabel.toLowerCase()}`,
-                    ...(post.images && post.images[0] && { imageUrl: post.images[0] })
-                },
-                data: {
-                    type: 'new_post',
-                    collection,
-                    postId,
-                    url: `/${collection}/${postId}`
-                }
-            };
-
-            // Send in batches
-            const batchSize = 500;
-            for (let i = 0; i < nearbyTokens.length; i += batchSize) {
-                const batch = nearbyTokens.slice(i, i + batchSize);
-                await admin.messaging().sendEachForMulticast({
-                    tokens: batch,
-                    ...payload
-                });
-            }
-
-            console.log(`New post notification sent to ${nearbyTokens.length} nearby users`);
-        } catch (error) {
-            console.error('Error sending new post notification:', error);
-        }
-    });
+// /**
+//  * Trigger: Send notification to nearby users when new post is created
+//  * MOVED TO advancedNotifications.js
+//  */
+// exports.onNewPost = functions.firestore
+//     .document('{collection}/{postId}')
+//     .onCreate(async (snap, context) => {
+//        // ... (Logic moved to advancedNotifications.js)
+//        console.log('Use advancedNotifications.js implementation');
+//     });
 
 /**
  * Scheduled function: Check for expiring posts and notify creators
- * Runs daily at 9 AM
+ * Runs every 6 hours for global coverage
+ * Optimization: Sends ONLY ONCE per post (prevents duplicates)
  */
 exports.checkExpiringPosts = functions.pubsub
-    .schedule('0 9 * * *')
-    .timeZone('Asia/Kolkata')
+    .schedule('0 */6 * * *') // Every 6 hours (global coverage)
+    .timeZone('UTC') // Global: Works for all timezones
     .onRun(async (context) => {
         const collections = ['workers', 'ads', 'services'];
         const now = admin.firestore.Timestamp.now();
         const threeDaysFromNow = new Date(now.toDate().getTime() + (3 * 24 * 60 * 60 * 1000));
 
+        let notificationsSent = 0;
+        let skippedDuplicates = 0;
+
         try {
             for (const collection of collections) {
+                // OPTIMIZED: only fetch needed fields
                 const expiringPosts = await admin.firestore()
                     .collection(collection)
                     .where('expiresAt', '<=', admin.firestore.Timestamp.fromDate(threeDaysFromNow))
                     .where('expiresAt', '>', now)
+                    .select('createdBy', 'title', 'name', 'expiresAt')
                     .get();
 
                 for (const postDoc of expiringPosts.docs) {
                     const post = postDoc.data();
                     const creatorId = post.createdBy;
-
                     if (!creatorId) continue;
 
-                    // Get creator's FCM token
+                    const notificationKey = `expiring_post_${collection}_${postDoc.id}`;
+                    const notificationDoc = await admin.firestore().doc(`notificationsSent/${notificationKey}`).get();
+                    if (notificationDoc.exists) { skippedDuplicates++; continue; }
+
                     const tokenDoc = await admin.firestore().doc(`fcmTokens/${creatorId}`).get();
                     if (!tokenDoc.exists || !tokenDoc.data().token) continue;
 
                     const token = tokenDoc.data().token;
                     const daysLeft = Math.ceil((post.expiresAt.toDate() - now.toDate()) / (1000 * 60 * 60 * 24));
 
-                    // Send notification
                     await admin.messaging().send({
                         token,
                         notification: {
                             title: 'Post Expiring Soon!',
-                            body: `Your ${collection.slice(0, -1)} "${post.title || post.name}" expires in ${daysLeft} day(s)`,
+                            body: `Your ${collection.slice(0, -1)} "${post.title || post.name || 'Post'}" expires in ${daysLeft} day(s)`,
                         },
-                        data: {
-                            type: 'expiring_post',
-                            collection,
-                            postId: postDoc.id,
-                            url: `/${collection}/${postDoc.id}`
-                        }
+                        android: { notification: { icon: 'https://servepure-fav.web.app/logo192.png' } },
+                        data: { type: 'expiring_post', collection, postId: postDoc.id, url: `/${collection}/${postDoc.id}` }
+                    }).catch(err => {
+                        if (err.code === 'messaging/registration-token-not-registered') tokenDoc.ref.delete();
                     });
+
+                    await admin.firestore().doc(`notificationsSent/${notificationKey}`).set({
+                        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+                        postId: postDoc.id,
+                        collection,
+                        creatorId,
+                        daysLeft
+                    });
+
+                    notificationsSent++;
                 }
             }
-
-            console.log('Expiring posts check completed');
+            console.log(`✅ Expiring posts check completed. Sent: ${notificationsSent}, Skipped: ${skippedDuplicates}`);
         } catch (error) {
             console.error('Error checking expiring posts:', error);
         }
     });
 
+
+// Payment functions (Razorpay/Stripe) removed as requested
+// Will be added back later when needed

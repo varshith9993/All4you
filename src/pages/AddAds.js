@@ -56,7 +56,7 @@ export default function AddAds() {
     return () => unsubscribe();
   }, [navigate]);
 
-  const uploadFileToCloudinary = async (file) => {
+  const uploadFileToStorage = async (file) => {
     // Compress file before upload (images only, SVGs skipped)
     // Ads need better quality: <300KB max, 1600px
     const compressedFile = await compressFile(file, { maxSizeMB: 0.29, maxWidthOrHeight: 1600 }, 'AD_POST');
@@ -173,7 +173,7 @@ export default function AddAds() {
       // Upload photos
       const uploadedUrls = [];
       for (const photo of photos) {
-        const url = await uploadFileToCloudinary(photo);
+        const url = await uploadFileToStorage(photo);
         uploadedUrls.push(url);
       }
 

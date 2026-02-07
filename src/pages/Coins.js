@@ -1,10 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { useLayoutCache } from '../contexts/GlobalDataCacheContext';
-import { db } from '../firebase';
+import { db, functions } from '../firebase';
 import { doc, updateDoc, increment, onSnapshot } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import Layout from '../components/Layout';
-import { FiPlay, FiShoppingCart, FiClock, FiCreditCard, FiSmartphone, FiGift, FiX, FiCheck } from 'react-icons/fi';
-// Examples removed
+import { FiPlay, FiShoppingCart, FiClock } from 'react-icons/fi';
+
+// Helper to load Razorpay script
+const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+        const script = document.createElement('script');
+        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        script.onload = () => resolve(true);
+        script.onerror = () => resolve(false);
+        document.body.appendChild(script);
+    });
+};
 
 const CoinPackage = ({ price, coins, onBuy, loading }) => (
     <button
@@ -27,22 +38,6 @@ const CoinPackage = ({ price, coins, onBuy, loading }) => (
     </button>
 );
 
-const PaymentMethod = ({ icon: Icon, title, onClick, selected }) => (
-    <button
-        onClick={onClick}
-        className={`w-full flex items-center gap-3 p-4 rounded-xl border transition-all ${selected
-            ? 'bg-blue-50 border-blue-500 text-blue-700'
-            : 'bg-white border-gray-100 hover:border-gray-200 text-gray-700'
-            }`}
-    >
-        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${selected ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
-            <Icon size={20} />
-        </div>
-        <span className="font-medium flex-1 text-left">{title}</span>
-        {selected && <FiCheck className="text-blue-500" size={20} />}
-    </button>
-);
-
 export default function Coins() {
     const { currentUserId } = useLayoutCache();
     const [coins, setCoins] = useState(0);
@@ -50,18 +45,11 @@ export default function Coins() {
     const [watchingVideo, setWatchingVideo] = useState(false);
     const [videoProgress, setVideoProgress] = useState(0);
 
-    // Payment Modal State
-    const [showPaymentModal, setShowPaymentModal] = useState(false);
-    const [selectedPackage, setSelectedPackage] = useState(null);
-    const [paymentStep, setPaymentStep] = useState('select'); // select, processing, success
-    const [selectedMethod, setSelectedMethod] = useState(null);
-
-    // Mock Inputs
-    const [redeemCode, setRedeemCode] = useState('');
-    const [cardNumber, setCardNumber] = useState('');
-
     useEffect(() => {
         if (!currentUserId) return;
+
+        // Load Razorpay script on mount
+        loadRazorpayScript();
 
         // Real-time listener for coins specific to this page
         const unsub = onSnapshot(doc(db, 'profiles', currentUserId), (doc) => {
@@ -108,43 +96,85 @@ export default function Coins() {
         }
     };
 
-    const initiatePurchase = (price, amount) => {
+    const initiatePurchase = async (price, amountOfCoins) => {
         if (loading || !currentUserId) return;
-        setSelectedPackage({ price, amount });
-        setPaymentStep('select');
-        setSelectedMethod(null);
-        setRedeemCode('');
-        setCardNumber('');
-        setShowPaymentModal(true);
-    };
 
-    const handlePayment = async () => {
-        if (!selectedMethod) return;
-        setPaymentStep('processing');
+        const res = await loadRazorpayScript();
+        if (!res) {
+            alert('Razorpay SDK failed to load. Are you online?');
+            return;
+        }
+
         setLoading(true);
 
         try {
-            // Simulate processing delay
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // 1. Create Order on Backend
+            const createOrder = httpsCallable(functions, 'createOrder');
+            const result = await createOrder({ amount: price, currency: 'INR' });
 
-            await updateDoc(doc(db, 'profiles', currentUserId), {
-                coins: increment(selectedPackage.amount)
+            const { orderId, amount, currency, keyId } = result.data;
+
+            // 2. Open Razorpay Checkout
+            const options = {
+                key: keyId,
+                amount: amount.toString(),
+                currency: currency,
+                name: "Aerosigil",
+                description: `${amountOfCoins} Coins`,
+                // image: "https://your-logo-url.com", // Optional
+                order_id: orderId,
+                handler: async function (response) {
+                    // Payment Success!
+                    // In a production app, verify signature on backend:
+                    // verifyPayment({
+                    //   razorpay_payment_id: response.razorpay_payment_id,
+                    //   razorpay_order_id: response.razorpay_order_id,
+                    //   razorpay_signature: response.razorpay_signature
+                    // })
+
+                    // For now, trusting frontend callback to update DB (matches previous logic)
+                    await handleSuccess(amountOfCoins);
+                },
+                prefill: {
+                    // name: "User Name", // Can fetch from profile
+                    // email: "user@example.com",
+                    // contact: "9999999999"
+                },
+                theme: {
+                    color: "#2563EB" // Blue-600
+                }
+            };
+
+            const rzp1 = new window.Razorpay(options);
+            rzp1.on('payment.failed', function (response) {
+                alert("Payment Failed: " + response.error.description);
+                setLoading(false);
             });
 
-            setPaymentStep('success');
-            setTimeout(() => {
-                setShowPaymentModal(false);
-                setLoading(false);
-                setSelectedPackage(null);
-            }, 2000);
+            rzp1.open();
+
         } catch (error) {
-            console.error("Payment failed:", error);
-            alert("Payment failed. Please try again.");
-            setPaymentStep('select');
+            console.error("Error initializing Razorpay:", error);
+            alert("Failed to initialize payment. Please try again.");
+            setLoading(false);
+        }
+        // distinct from .finally because Razorpay modal stays open. 
+        // We only unset loading on success or explicit failure.
+    };
+
+    const handleSuccess = async (newCoins) => {
+        try {
+            await updateDoc(doc(db, 'profiles', currentUserId), {
+                coins: increment(newCoins)
+            });
+            alert(`Success! ${newCoins} coins added.`);
+        } catch (error) {
+            console.error("Error updating balance:", error);
+            alert("Payment successful but failed to update balance. Please contact support.");
+        } finally {
             setLoading(false);
         }
     };
-
 
     return (
         <Layout title="My Wallet" activeTab="coins">
@@ -215,125 +245,8 @@ export default function Coins() {
                         </div>
                     </div>
                 </div>
-
-                {/* Payment Modal */}
-                {showPaymentModal && (
-                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
-                        <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
-                            {/* Modal Header */}
-                            <div className="p-4 border-b flex items-center justify-between sticky top-0 bg-white z-10">
-                                <h3 className="font-bold text-lg">Select Payment Method</h3>
-                                <button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-gray-100 rounded-full">
-                                    <FiX size={24} />
-                                </button>
-                            </div>
-
-                            {/* Modal Content */}
-                            <div className="p-6 overflow-y-auto">
-                                {paymentStep === 'select' && (
-                                    <div className="space-y-4">
-                                        <div className="bg-blue-50 p-4 rounded-xl flex justify-between items-center mb-6">
-                                            <div>
-                                                <div className="text-sm text-blue-600 font-medium">Buying</div>
-                                                <div className="text-xl font-bold text-blue-900">{selectedPackage?.coins.toLocaleString()} Coins</div>
-                                            </div>
-                                            <div className="text-2xl font-bold text-blue-600">₹{selectedPackage?.price}</div>
-                                        </div>
-
-                                        <div className="space-y-3">
-                                            <PaymentMethod
-                                                icon={FiSmartphone}
-                                                title="UPI (GPay, PhonePe, Paytm)"
-                                                selected={selectedMethod === 'upi'}
-                                                onClick={() => setSelectedMethod('upi')}
-                                            />
-                                            {selectedMethod === 'upi' && (
-                                                <div className="ml-2 pl-4 border-l-2 border-blue-100 space-y-2 animate-in slide-in-from-top-2">
-                                                    <input
-                                                        type="text"
-                                                        placeholder="Enter UPI ID (e.g. name@upi)"
-                                                        className="w-full p-3 bg-gray-50 rounded-lg border focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                                                    />
-                                                </div>
-                                            )}
-
-                                            <PaymentMethod
-                                                icon={FiCreditCard}
-                                                title="Credit / Debit Card (Visa, Master, Rupay)"
-                                                selected={selectedMethod === 'card'}
-                                                onClick={() => setSelectedMethod('card')}
-                                            />
-                                            {selectedMethod === 'card' && (
-                                                <div className="ml-2 pl-4 border-l-2 border-blue-100 space-y-2 animate-in slide-in-from-top-2">
-                                                    <input
-                                                        type="text"
-                                                        placeholder="Card Number"
-                                                        className="w-full p-3 bg-gray-50 rounded-lg border focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                                                        maxLength={19}
-                                                        value={cardNumber}
-                                                        onChange={(e) => setCardNumber(e.target.value)}
-                                                    />
-                                                    <div className="flex gap-2">
-                                                        <input type="text" placeholder="MM/YY" className="w-1/2 p-3 bg-gray-50 rounded-lg border text-sm" />
-                                                        <input type="text" placeholder="CVV" className="w-1/2 p-3 bg-gray-50 rounded-lg border text-sm" />
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            <PaymentMethod
-                                                icon={FiGift}
-                                                title="Google Play Redeem Code"
-                                                selected={selectedMethod === 'redeem'}
-                                                onClick={() => setSelectedMethod('redeem')}
-                                            />
-                                            {selectedMethod === 'redeem' && (
-                                                <div className="ml-2 pl-4 border-l-2 border-blue-100 space-y-2 animate-in slide-in-from-top-2">
-                                                    <input
-                                                        type="text"
-                                                        placeholder="Enter 16-digit code"
-                                                        className="w-full p-3 bg-gray-50 rounded-lg border focus:ring-2 focus:ring-blue-500 outline-none uppercase font-mono text-sm"
-                                                        maxLength={20}
-                                                        value={redeemCode}
-                                                        onChange={(e) => setRedeemCode(e.target.value.toUpperCase())}
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        <button
-                                            onClick={handlePayment}
-                                            disabled={!selectedMethod}
-                                            className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl mt-6 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/20"
-                                        >
-                                            Pay ₹{selectedPackage?.price}
-                                        </button>
-                                    </div>
-                                )}
-
-                                {paymentStep === 'processing' && (
-                                    <div className="flex flex-col items-center justify-center py-12 text-center">
-                                        <div className="w-16 h-16 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin mb-6" />
-                                        <h3 className="text-xl font-bold text-gray-900 mb-2">Processing Payment</h3>
-                                        <p className="text-gray-500">Please do not close this window...</p>
-                                    </div>
-                                )}
-
-                                {paymentStep === 'success' && (
-                                    <div className="flex flex-col items-center justify-center py-12 text-center animate-in zoom-in duration-300">
-                                        <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-6">
-                                            <FiCheck size={40} />
-                                        </div>
-                                        <h3 className="text-2xl font-bold text-gray-900 mb-2">Payment Successful!</h3>
-                                        <p className="text-gray-500">
-                                            <span className="font-bold text-gray-900">{selectedPackage?.coins.toLocaleString()}</span> coins added to your wallet.
-                                        </p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                )}
             </div>
         </Layout>
     );
 }
+

@@ -50,16 +50,14 @@ export const reverseGeocode = async (lat, lon, provider = 'locationiq') => {
         clearTimeout(timeoutId);
 
         if (response.ok) {
-            console.log('✅ Using Cloudflare Worker');
             return await response.json();
         }
     } catch (error) {
-        console.log('⚠️ Worker unavailable, using Firebase fallback');
     }
 
     // Fallback to Firebase Functions
+    // Fallback to Firebase Functions
     try {
-        console.log(`🔄 Using Firebase Functions (${provider})`);
         const reverseGeocodeFn = httpsCallable(functions, 'reverseGeocode');
         const response = await reverseGeocodeFn({ lat, lon, provider });
         return response.data;
@@ -98,16 +96,13 @@ export const autocomplete = async (query, provider = 'locationiq') => {
         clearTimeout(timeoutId);
 
         if (response.ok) {
-            console.log('✅ Using Cloudflare Worker');
             return await response.json();
         }
     } catch (error) {
-        console.log('⚠️ Worker unavailable, using Firebase fallback');
     }
 
     // Fallback to Firebase Functions
     try {
-        console.log(`🔄 Using Firebase Functions (${provider})`);
         const autocompleteFn = httpsCallable(functions, 'autocomplete');
         const response = await autocompleteFn({ query, provider });
         return response.data;

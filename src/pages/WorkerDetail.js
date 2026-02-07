@@ -50,28 +50,9 @@ function ManualStars({ value, onChange, size = 46 }) {
 
 
 
-// Function to get download URL with forced download
+// Function to get download URL
 function getDownloadUrl(url) {
   if (!url) return "";
-
-  // For Cloudinary URLs, we need to add fl_attachment flag properly
-  if (url.includes("cloudinary.com") && url.includes("/upload/")) {
-    // If fl_attachment is already present, return as is
-    if (url.includes("fl_attachment")) {
-      return url;
-    }
-
-    // Add fl_attachment flag to force download
-    // Find the position of '/upload/' and insert 'fl_attachment/' after it
-    const uploadIndex = url.indexOf("/upload/");
-    if (uploadIndex !== -1) {
-      const prefix = url.substring(0, uploadIndex + 8); // '/upload/' is 8 characters
-      const suffix = url.substring(uploadIndex + 8);
-      return `${prefix}fl_attachment/${suffix}`;
-    }
-  }
-
-  // For Firebase Storage URLs, return as-is (they already have download tokens)
   return url;
 }
 
@@ -799,7 +780,6 @@ export default function WorkerDetail() {
 
   const startChat = async () => {
     if (!currentUserId || !worker) {
-      console.log("Missing user or worker data");
       return;
     }
     const recipientId = worker.createdBy;
@@ -843,7 +823,7 @@ export default function WorkerDetail() {
       }
 
       // Create new chat only if none exists
-      console.log("Creating new chat...");
+      // Create new chat only if none exists
       const newDoc = await addDoc(chatsRef, {
         participants: [currentUserId, recipientId],
         initiatorId: currentUserId,

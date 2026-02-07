@@ -129,7 +129,7 @@ export default function EditAd() {
     setPhotoPreviews(photoPreviews.filter((_, i) => i !== idx));
   };
 
-  const uploadFileToCloudinary = async (file) => {
+  const uploadFileToStorage = async (file) => {
     // Ads need better quality: <300KB max, 1600px
     const compressedFile = await compressFile(file, { maxSizeMB: 0.29, maxWidthOrHeight: 1600 }, 'EDIT_AD');
     try {
@@ -240,7 +240,7 @@ export default function EditAd() {
 
       for (const photo of photos) {
         if (photo === "PENDING_UPLOAD") {
-          const url = await uploadFileToCloudinary(newPhotoFiles[newFileIndex]);
+          const url = await uploadFileToStorage(newPhotoFiles[newFileIndex]);
           finalPhotos.push(url);
           newFileIndex++;
         } else {

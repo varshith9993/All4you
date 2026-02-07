@@ -159,45 +159,128 @@ export default function LocationPickerModal({ show, initialPosition, onConfirm, 
         searchTimeoutRef.current = setTimeout(async () => {
             setSearching(true);
             try {
-                let formattedQuery = query;
-                const pincodeMatch = query.match(/\b\d{6}\b/);
-                const isPincode = pincodeMatch !== null;
+                const trimmedQuery = query.trim();
 
-                // If query contains a 6-digit Pincode, ensure we bias towards India strongly
-                if (isPincode) {
-                    // If it's JUST a pincode, help the API by adding 'India'
-                    if (query.trim() === pincodeMatch[0]) {
-                        formattedQuery = `${query}, India`;
-                    }
+                // Detect if query is a pincode (6 consecutive digits)
+                const pincodeMatch = trimmedQuery.match(/\b(\d{6})\b/);
+                const isPureNumber = /^\d+$/.test(trimmedQuery.replace(/\s/g, ''));
+
+                let formattedQuery = trimmedQuery;
+                let searchType = 'general';
+
+                // Determine search type and format query accordingly
+                if (pincodeMatch && isPureNumber) {
+                    // Pure pincode search (e.g., "560001" or "560 001")
+                    const pincode = pincodeMatch[1];
+                    formattedQuery = pincode; // Just use the pincode
+                    searchType = 'pincode';
+                    console.log('Pincode search detected:', pincode);
+                } else if (pincodeMatch) {
+                    // Mixed query with pincode (e.g., "Bangalore 560001")
+                    formattedQuery = trimmedQuery;
+                    searchType = 'mixed';
+                    console.log('Mixed search with pincode:', formattedQuery);
+                } else {
+                    // Place name search (e.g., "Bangalore", "Koramangala")
+                    formattedQuery = trimmedQuery;
+                    searchType = 'place';
+                    console.log('Place search:', formattedQuery);
                 }
 
                 let results = [];
-                // Use backend proxy via locationService
-                const data = await import('../utils/locationService').then(mod => mod.autocomplete(formattedQuery, apiProvider));
 
-                if (apiProvider === 'locationiq') {
-                    if (Array.isArray(data)) {
-                        results = data.map(item => ({
-                            display_name: item.display_name,
-                            lat: item.lat,
-                            lon: item.lon,
-                            type: item.type,
-                            address: item.address,
-                            pincode: item.address?.postcode
-                        }));
+                // Try primary search
+                try {
+                    const data = await import('../utils/locationService').then(mod =>
+                        mod.autocomplete(formattedQuery, apiProvider)
+                    );
+
+                    if (apiProvider === 'locationiq') {
+                        if (Array.isArray(data)) {
+                            results = data.map(item => ({
+                                display_name: item.display_name,
+                                lat: item.lat,
+                                lon: item.lon,
+                                type: item.type,
+                                address: item.address,
+                                pincode: item.address?.postcode
+                            }));
+                        }
+                    } else {
+                        // OpenCage
+                        if (data && data.results) {
+                            results = data.results.map(item => ({
+                                display_name: item.formatted,
+                                lat: item.geometry.lat,
+                                lon: item.geometry.lng,
+                                type: item.components._type || 'location',
+                                pincode: item.components.postcode
+                            }));
+                        }
                     }
-                } else {
-                    // OpenCage
-                    if (data && data.results) {
-                        results = data.results.map(item => ({
-                            display_name: item.formatted,
-                            lat: item.geometry.lat,
-                            lon: item.geometry.lng,
-                            type: item.components._type || 'location',
-                            pincode: item.components.postcode
-                        }));
+                } catch (primaryError) {
+                    console.warn('Primary search failed, trying fallback:', primaryError);
+
+                    // Fallback: If pincode search failed, try with "India" suffix
+                    if (searchType === 'pincode') {
+                        try {
+                            const fallbackQuery = `${formattedQuery} India`;
+                            console.log('Trying fallback query:', fallbackQuery);
+                            const fallbackData = await import('../utils/locationService').then(mod =>
+                                mod.autocomplete(fallbackQuery, apiProvider)
+                            );
+
+                            if (apiProvider === 'locationiq') {
+                                if (Array.isArray(fallbackData)) {
+                                    results = fallbackData.map(item => ({
+                                        display_name: item.display_name,
+                                        lat: item.lat,
+                                        lon: item.lon,
+                                        type: item.type,
+                                        address: item.address,
+                                        pincode: item.address?.postcode
+                                    }));
+                                }
+                            } else {
+                                if (fallbackData && fallbackData.results) {
+                                    results = fallbackData.results.map(item => ({
+                                        display_name: item.formatted,
+                                        lat: item.geometry.lat,
+                                        lon: item.geometry.lng,
+                                        type: item.components._type || 'location',
+                                        pincode: item.components.postcode
+                                    }));
+                                }
+                            }
+                        } catch (fallbackError) {
+                            console.error('Fallback search also failed:', fallbackError);
+                        }
                     }
                 }
+
+                // Filter and sort results for better relevance
+                if (results.length > 0) {
+                    // For pincode searches, prioritize results that match the pincode
+                    if (searchType === 'pincode') {
+                        const pincode = pincodeMatch[1];
+                        results = results.filter(r => {
+                            // Keep results that have the matching pincode or are in India
+                            return r.pincode === pincode ||
+                                r.display_name.toLowerCase().includes('india') ||
+                                r.display_name.includes(pincode);
+                        });
+                    }
+
+                    // Remove duplicates based on coordinates
+                    const seen = new Set();
+                    results = results.filter(item => {
+                        const key = `${item.lat},${item.lon}`;
+                        if (seen.has(key)) return false;
+                        seen.add(key);
+                        return true;
+                    });
+                }
+
                 setSuggestions(results);
             } catch (error) {
                 console.error("Search error:", error);
@@ -280,16 +363,15 @@ export default function LocationPickerModal({ show, initialPosition, onConfirm, 
                     setPosition({ lat, lng });
                     setMapCenter([lat, lng]);
                     setMapZoom(15);
-                } else {
-                    getCurrentLocation();
                 }
-            } else {
-                getCurrentLocation();
+                // Removed automatic getCurrentLocation() call
             }
+            // Removed automatic getCurrentLocation() call when no initial position
+            // User must now manually click the location button to detect their position
         } else {
             setMapReady(false);
         }
-    }, [show, initialPosition, getCurrentLocation]);
+    }, [show, initialPosition]);
 
     const reverseGeocode = useCallback(async (lat, lng) => {
         setGeocoding(true);

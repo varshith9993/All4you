@@ -128,7 +128,7 @@ function ChatCard({ chat, uid, profiles, navigate }) {
               className="p-1 hover:bg-gray-100 rounded"
             >
               <FiStar
-                size={16}
+                size={18}
                 className={chat.isFavorite ? "text-yellow-500 fill-yellow-500" : "text-gray-400"}
               />
             </button>

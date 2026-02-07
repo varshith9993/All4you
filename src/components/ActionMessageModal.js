@@ -23,7 +23,7 @@ export default function ActionMessageModal({ isOpen, onClose, title, message, ty
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in" style={{ zIndex: 9999 }}>
-            <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-sm w-full text-center relative animate-slide-up border border-gray-100">
+            <div className="bg-white p-6 rounded-[30px] shadow-2xl max-w-sm w-full text-center relative animate-slide-up border border-gray-100">
                 <div className={`mx-auto mb-4 w-14 h-14 rounded-full flex items-center justify-center ${type === 'success' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
                     {type === 'success' ? <FiCheckCircle size={28} /> : <FiAlertCircle size={28} />}
                 </div>

@@ -5,7 +5,7 @@ import { userStatusManager } from "../auth/UserStatusManager";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { useGlobalDataCache } from "../contexts/GlobalDataCacheContext";
-import NotificationSettings from '../components/NotificationSettings';
+import { checkNotificationPermission, requestNotificationPermission } from '../utils/fcmService';
 import {
   FiArrowLeft,
   FiUser,
@@ -24,7 +24,7 @@ import {
   FiGlobe,
   FiMap
 } from "react-icons/fi";
-import { doc, updateDoc } from "firebase/firestore";
+import { doc, updateDoc, getDoc } from "firebase/firestore";
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -42,6 +42,8 @@ export default function Settings() {
   const [showScopeConfirm, setShowScopeConfirm] = useState(false);
   const [pendingScope, setPendingScope] = useState(null);
   const [showFinalConfirm, setShowFinalConfirm] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState('checking');
+  const [showPermissionDenied, setShowPermissionDenied] = useState(false);
 
   // OPTIMIZATION: Use GlobalDataCache instead of fetching profile separately
   const { userProfile } = useGlobalDataCache();
@@ -62,7 +64,49 @@ export default function Settings() {
         setUserName(user.displayName || user.email?.split('@')[0] || "Anonymous");
       }
     }
+
+    // Check notification permission status
+    const checkPermission = async () => {
+      const status = await checkNotificationPermission();
+      setNotificationPermission(status);
+    };
+    checkPermission();
   }, [userProfile]);
+
+  const handleEnableNotifications = async () => {
+    try {
+      if (!auth.currentUser) return;
+
+      // Get location for optimization
+      let userLocation = null;
+      try {
+        const profileDoc = await getDoc(doc(db, 'profiles', auth.currentUser.uid));
+        if (profileDoc.exists()) {
+          const data = profileDoc.data();
+          userLocation = {
+            latitude: data.latitude,
+            longitude: data.longitude,
+            city: data.city,
+            country: data.country
+          };
+        }
+      } catch (e) {
+        console.error("Error fetching location for permission request:", e);
+      }
+
+      const token = await requestNotificationPermission(auth.currentUser.uid, userLocation);
+      if (token) {
+        setNotificationPermission('granted');
+        // Optional: Show success toast instead of alert
+        // alert("Notifications enabled successfully!");
+      } else {
+        setNotificationPermission('denied');
+        setShowPermissionDenied(true);
+      }
+    } catch (error) {
+      console.error("Error enabling notifications:", error);
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -215,12 +259,24 @@ export default function Settings() {
               onClick={() => navigate("/favorites")}
               color="text-red-500"
             />
-            <SettingItem
-              icon={FiBell}
-              label="Notifications"
-              onClick={() => navigate("/notifications")}
-              color="text-yellow-500"
-            />
+            {/* Notifications Logic */}
+            {notificationPermission === 'granted' ? (
+              <SettingItem
+                icon={FiBell}
+                label="Notifications"
+                onClick={() => navigate("/notifications")}
+                color="text-yellow-500"
+              />
+            ) : (
+              (notificationPermission !== 'checking') && (
+                <SettingItem
+                  icon={FiBell}
+                  label="Enable Notifications"
+                  onClick={handleEnableNotifications}
+                  color="text-gray-400"
+                />
+              )
+            )}
             <SettingItem
               icon={FiEdit3}
               label="My Notes"
@@ -235,11 +291,6 @@ export default function Settings() {
               color={contentScope === 'global' ? "text-indigo-600" : "text-green-600"}
             />
           </div>
-        </div>
-
-        {/* Push Notifications Section */}
-        <div className="mb-6 px-4">
-          <NotificationSettings />
         </div>
 
         {/* Support & Legal Section */}
@@ -398,6 +449,27 @@ export default function Settings() {
         </div>
       )}
 
+
+      {/* Permission Denied Modal */}
+      {showPermissionDenied && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowPermissionDenied(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl p-6 text-center animate-scale-in" onClick={e => e.stopPropagation()}>
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FiBell size={32} className="text-red-500" />
+            </div>
+            <h3 className="font-bold text-xl mb-2 text-gray-900">Notifications Blocked</h3>
+            <p className="text-gray-600 mb-6 text-sm">
+              We can't ask for permission because it was blocked. Please check your browser settings (lock icon 🔒) to allow notifications.
+            </p>
+            <button
+              onClick={() => setShowPermissionDenied(false)}
+              className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors"
+            >
+              OK, I understand
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Logout Confirmation Modal */}
       {showLogoutConfirm && (

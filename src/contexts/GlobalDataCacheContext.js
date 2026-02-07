@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { db, auth } from '../firebase';
 import { collection, query, onSnapshot, doc, where, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
+import { requestNotificationPermission } from '../utils/fcmService';
 
 // Post Detail Cache Constants
 const POST_DETAIL_CACHE_KEY = 'post_detail_cache';
@@ -233,6 +234,17 @@ export function GlobalDataCacheProvider({ children }) {
         const data = docSnap.data();
         localStorage.setItem('global_user_profile', JSON.stringify(data));
         setUserProfile(data); // Update state to trigger re-renders
+
+        // AUTO-SYNC LOCATION for Geolocation Notifications
+        // This ensures the FCM token has the correct lat/long from the profile
+        if (data.latitude && data.longitude && Notification.permission === 'granted') {
+          console.log("[GlobalData] Syncing location to FCM Token...");
+          requestNotificationPermission(currentUserId, {
+            latitude: data.latitude,
+            longitude: data.longitude,
+            city: data.city
+          }).catch(err => console.error("LocSync Error:", err));
+        }
       }
     }, (error) => {
     });
@@ -371,16 +383,35 @@ export function GlobalDataCacheProvider({ children }) {
     if (listenerStateRef.current.notificationsData.initialized) return;
     listenerStateRef.current.notificationsData.initialized = true;
 
-    // Load initial map from existing cache, but filter out removed types
+    // Load initial map from existing cache, but filter out removed types AND corrupted notifications
     notificationsCache.forEach(n => {
       const type = n.type || "system";
       const title = n.title || "";
       const msg = n.message?.toLowerCase() || "";
+
       // Filter out chats and the redundant generic "Post Status Changed" message.
       // We KEEP detailed ones that were previously generated.
       if (type === "chat" ||
         (title === "Post Status Changed" && msg.includes("update regarding your favorited post")) ||
         msg.includes("message")) return;
+
+      // CRITICAL FIX: Filter out corrupted notifications where heading doesn't match message
+      // This removes old cached notifications with wrong headings (e.g., "Favorites Enabled" with deletion message)
+      const isCorrupted =
+        (title === "Favorites Enabled" && msg.includes("deleted")) ||
+        (title === "Favorites Enabled" && msg.includes("disabled")) ||
+        (title === "Favorites Enabled" && msg.includes("expired")) ||
+        (title === "Favorites Disabled" && msg.includes("deleted")) ||
+        (title === "Favorites Disabled" && msg.includes("enabled")) ||
+        (title === "Favorites Expired" && msg.includes("deleted")) ||
+        (title === "Favorites Expired" && msg.includes("enabled")) ||
+        (title === "Favorites Deleted" && msg.includes("enabled")) ||
+        (title === "Favorites Deleted" && msg.includes("available"));
+
+      if (isCorrupted) {
+        return;
+      }
+
       notificationsMapRef.current.set(n.id, n);
     });
 
@@ -566,29 +597,47 @@ export function GlobalDataCacheProvider({ children }) {
             // Process changes to detect status updates and generate detailed notifications
             for (const change of postSnap.docChanges()) {
               if (change.type === "modified" || change.type === "removed") {
-                hasNew = true;
-
                 const postData = change.doc.data();
                 const postId = change.doc.id;
                 const postType = config.type;
                 const displayType = postType === 'ad' ? 'ads' : postType;
                 const name = postData?.name || postData?.title || "Post";
-                const status = postData?.status || (change.type === 'removed' ? 'deleted' : 'unknown');
 
                 // Check old status to prevent spamming notifications when other fields change
                 const typeMap = favPostsRealtimeRef.current[`${config.stateKey}_map`];
                 const oldPost = typeMap ? typeMap.get(postId) : null;
-                const oldStatus = oldPost ? oldPost.status : 'unknown';
+                const oldStatus = oldPost ? (oldPost.status || 'active') : 'active';
 
-                // Skip if status hasn't changed (unless it's a removal)
-                if (change.type === 'modified' && oldStatus === status) {
-                  continue;
-                }
-
+                let status = null;
                 let msg = "";
+
+                // HANDLE DELETION
                 if (change.type === 'removed') {
-                  msg = `a ${displayType} post is deleted by the post owner and the post is vanished from favorites`;
-                } else if (change.type === 'modified') {
+                  // REQUIREMENT: Only notify about deletion if the post was active/enabled when deleted
+                  // If it was already disabled or expired, do NOTHING (keep old notification visible)
+                  if (oldStatus === 'active') {
+                    status = 'deleted';
+                    msg = `a ${displayType} post is deleted by the post owner and the post is vanished from favorites`;
+                    hasNew = true;
+
+                    // Remove any old status notifications for this post to prevent wrong headings
+                    notificationsMapRef.current.delete(`status_${postId}_active`);
+                    notificationsMapRef.current.delete(`status_${postId}_disabled`);
+                    notificationsMapRef.current.delete(`status_${postId}_expired`);
+                  }
+                  // else: Do absolutely nothing - no new notification, no removal of old notification
+                  // The old "Favorites Disabled" or "Favorites Expired" notification stays visible
+                }
+                // HANDLE STATUS MODIFICATIONS
+                else if (change.type === 'modified') {
+                  const newStatus = postData?.status || 'active';
+
+                  // Skip if status hasn't actually changed
+                  if (oldStatus === newStatus) {
+                    continue;
+                  }
+
+                  status = newStatus;
                   const ownerId = postData?.createdBy;
                   const ownerName = ownerId ? await getProfileName(ownerId) : "Owner";
 
@@ -599,9 +648,17 @@ export function GlobalDataCacheProvider({ children }) {
                   } else if (status === 'expired') {
                     msg = `${ownerName} expired "${name}" post and the ${displayType} post is removed from favorites`;
                   }
+
+                  if (msg) {
+                    hasNew = true;
+                    // Remove old status notifications when status changes to prevent duplicates
+                    const oldStatuses = ['active', 'disabled', 'expired', 'deleted'].filter(s => s !== status);
+                    oldStatuses.forEach(s => notificationsMapRef.current.delete(`status_${postId}_${s}`));
+                  }
                 }
 
-                if (msg) {
+                // Create notification if we have a message
+                if (msg && status) {
                   const titleMap = {
                     'active': 'Favorites Enabled',
                     'disabled': 'Favorites Disabled',

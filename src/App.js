@@ -6,10 +6,12 @@ import { ProfileCacheProvider } from "./contexts/ProfileCacheContext";
 import { GlobalDataCacheProvider } from "./contexts/GlobalDataCacheContext";
 import { PaginatedDataCacheProvider } from "./contexts/PaginatedDataCacheContext";
 import { requestNotificationPermission, checkNotificationPermission } from "./utils/fcmService";
+import NotificationPermissionModal from "./components/NotificationPermissionModal";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgetPassword from "./pages/ForgetPassword";
 import ResetPassword from "./pages/ResetPassword";
+import VersionUpdateManager from "./components/VersionUpdateManager";
 import Workers from "./pages/Workers";
 import AddAds from "./pages/AddAds";
 import Services from "./pages/Services";
@@ -42,6 +44,8 @@ export default function App() {
     const [user, setUser] = useState(null);
     const [authLoading, setAuthLoading] = useState(true);
 
+    const [showNotifModal, setShowNotifModal] = useState(false);
+
     useEffect(() => {
         const unsub = onAuthStateChanged(auth, (u) => {
             setUser(u);
@@ -50,32 +54,108 @@ export default function App() {
         return () => unsub();
     }, []);
 
-    // Auto-request notification permission on app open
+    // Check notification permission on app open
     useEffect(() => {
-        const requestNotifications = async () => {
-            if (!user) return;
+        const checkPermission = async () => {
+            // Wait for user authentication to settle
+            if (authLoading || !user) return;
 
-            // Check current permission status
-            const permission = await checkNotificationPermission();
+            try {
+                // Check current status
+                const permission = await checkNotificationPermission();
 
-            // If already granted, do nothing
-            if (permission === 'granted') {
-                return;
-            }
-
-            // If denied or default, ask again (every time app opens)
-            // Wait a bit for user to see the app first
-            setTimeout(async () => {
-                try {
+                // If already granted, ensure token is saved
+                if (permission === 'granted') {
+                    console.log('✅ Notification permission already granted');
                     const userLocation = JSON.parse(localStorage.getItem('userLocation') || '{}');
                     await requestNotificationPermission(user.uid, userLocation);
-                } catch (error) {
-                    console.error('Error requesting notification permission:', error);
+                    return;
                 }
-            }, 3000); // Wait 3 seconds after login
+
+                // If permission is 'default' (not yet asked), show custom modal
+                if (permission === 'default') {
+                    // Check if user previously dismissed valid for session/day? For now, we show it.
+                    // Or check localStorage for 'notificationModalDismissed' if you want to delay it.
+                    // User request implies "when user opens app", so we show it.
+                    console.log('📢 Permission is default, showing custom modal');
+                    setShowNotifModal(true);
+                }
+
+            } catch (error) {
+                console.error('❌ Error checking notification permission:', error);
+            }
         };
 
-        requestNotifications();
+        checkPermission();
+    }, [user, authLoading]);
+
+    const handleEnableNotifications = async () => {
+        setShowNotifModal(false);
+        try {
+            const userLocation = JSON.parse(localStorage.getItem('userLocation') || '{}');
+            const token = await requestNotificationPermission(user.uid, userLocation);
+            if (token) {
+                console.log('✅ Notification permission granted via modal!');
+            }
+        } catch (error) {
+            console.error('❌ Error enabling notifications:', error);
+        }
+    };
+
+    // Listen for service worker messages (notification clicks)
+    useEffect(() => {
+        const handleServiceWorkerMessage = async (event) => {
+            if (event.data && event.data.type === 'NOTIFICATION_CLICK') {
+                console.log('[App] Notification click message received:', event.data);
+
+                const { url, needsPostCheck, postId, collection } = event.data;
+
+                // Check if user is logged in
+                if (!user) {
+                    // User is not logged in, navigate to /login
+                    window.location.href = '/login';
+                    return;
+                }
+
+                // If this is a new post notification, check if post is still active
+                if (needsPostCheck && postId && collection) {
+                    try {
+                        // Import Firestore dynamically
+                        const { doc, getDoc } = await import('firebase/firestore');
+                        const { db } = await import('./firebase');
+
+                        // Check if post exists and is active
+                        const postRef = doc(db, collection, postId);
+                        const postSnap = await getDoc(postRef);
+
+                        if (!postSnap.exists() || postSnap.data().isDisabled === true) {
+                            // Post is unavailable (deleted or disabled)
+                            // Navigate to /workers and show message
+                            window.location.href = '/workers?message=post_unavailable';
+                            return;
+                        }
+
+                        // Post is active, navigate to post detail
+                        window.location.href = url;
+                    } catch (error) {
+                        console.error('[App] Error checking post availability:', error);
+                        // On error, navigate to /workers
+                        window.location.href = '/workers';
+                    }
+                } else {
+                    // For all other notifications, navigate to /workers
+                    window.location.href = url || '/workers';
+                }
+            }
+        };
+
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+
+            return () => {
+                navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
+            };
+        }
     }, [user]);
 
     useEffect(() => {
@@ -175,42 +255,50 @@ export default function App() {
             <GlobalDataCacheProvider>
                 <PaginatedDataCacheProvider>
                     <ProfileCacheProvider>
-                        <Routes>
-                            <Route path="/" element={user ? <Navigate to="/workers" replace /> : <Navigate to="/login" replace />} />
-                            <Route path="/login" element={<Login />} />
-                            <Route path="/signup" element={<Signup />} />
-                            <Route path="/worker-detail/:id" element={<WorkerDetail />} />
-                            <Route path="/workers" element={<Workers />} />
-                            <Route path="/services" element={<Services />} />
-                            <Route path="/chat/:chatId" element={<ChatDetail />} />
-                            <Route path="/ad-detail/:adId" element={<AdDetail />} />
-                            <Route path="/add-workers" element={<AddWorkers />} />
-                            <Route path="/add-services" element={<AddServices />} />
-                            <Route path="/add-ads" element={<AddAds />} />
-                            <Route path="/editad/:id" element={<EditAd />} />
-                            <Route path="/ads" element={<Ads />} />
-                            <Route path="/chats" element={<Chats />} />
-                            <Route path="/profile" element={<Profile />} />
-                            <Route path="/settings" element={<Settings />} />
-                            <Route path="/add-notes" element={<AddNotes />} />
-                            <Route path="/favorites" element={<Favorites />} />
-                            <Route path="/notifications" element={<Notifications />} />
-                            <Route path="/editworker/:id" element={<EditWorker />} />
-                            <Route path="/editservice/:id" element={<EditService />} />
-                            <Route path="/service-detail/:id" element={<ServiceDetail />} />
-                            <Route path="/forgot-password" element={<ForgetPassword />} />
-                            <Route path="/reset-password" element={<ResetPassword />} />
-                            <Route path="/get-user-id" element={<GetUserId />} />
-                            <Route path="/notes" element={<Notes />} />
-                            <Route path="/terms" element={<TermsAndConditions />} />
-                            <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-                            <Route path="/verify-email" element={<VerifyEmail />} />
-                            <Route path="/coins" element={<Coins />} />
-                            <Route path="*" element={<div>404 Page Not Found</div>} />
-                        </Routes>
+                        <VersionUpdateManager>
+                            <Routes>
+                                <Route path="/" element={user ? <Navigate to="/workers" replace /> : <Navigate to="/login" replace />} />
+                                <Route path="/login" element={<Login />} />
+                                <Route path="/signup" element={<Signup />} />
+                                <Route path="/worker-detail/:id" element={<WorkerDetail />} />
+                                <Route path="/workers" element={<Workers />} />
+                                <Route path="/services" element={<Services />} />
+                                <Route path="/chat/:chatId" element={<ChatDetail />} />
+                                <Route path="/ad-detail/:adId" element={<AdDetail />} />
+                                <Route path="/add-workers" element={<AddWorkers />} />
+                                <Route path="/add-services" element={<AddServices />} />
+                                <Route path="/add-ads" element={<AddAds />} />
+                                <Route path="/editad/:id" element={<EditAd />} />
+                                <Route path="/ads" element={<Ads />} />
+                                <Route path="/chats" element={<Chats />} />
+                                <Route path="/profile" element={<Profile />} />
+                                <Route path="/settings" element={<Settings />} />
+                                <Route path="/add-notes" element={<AddNotes />} />
+                                <Route path="/favorites" element={<Favorites />} />
+                                <Route path="/notifications" element={<Notifications />} />
+                                <Route path="/editworker/:id" element={<EditWorker />} />
+                                <Route path="/editservice/:id" element={<EditService />} />
+                                <Route path="/service-detail/:id" element={<ServiceDetail />} />
+                                <Route path="/forgot-password" element={<ForgetPassword />} />
+                                <Route path="/reset-password" element={<ResetPassword />} />
+                                <Route path="/get-user-id" element={<GetUserId />} />
+                                <Route path="/notes" element={<Notes />} />
+                                <Route path="/terms" element={<TermsAndConditions />} />
+                                <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+                                <Route path="/verify-email" element={<VerifyEmail />} />
+                                <Route path="/coins" element={<Coins />} />
+                                <Route path="*" element={<div>404 Page Not Found</div>} />
+                            </Routes>
+                        </VersionUpdateManager>
                     </ProfileCacheProvider>
                 </PaginatedDataCacheProvider>
-            </GlobalDataCacheProvider>
+            </GlobalDataCacheProvider >
+
+            <NotificationPermissionModal
+                isOpen={showNotifModal}
+                onClose={() => setShowNotifModal(false)}
+                onEnable={handleEnableNotifications}
+            />
 
             {showOfflineScreen && <NoInternet onRefresh={handleRefresh} />}
         </>

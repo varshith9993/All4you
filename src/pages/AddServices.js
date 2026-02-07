@@ -59,7 +59,7 @@ export default function AddServices() {
     return () => unsubscribe();
   }, []);
 
-  const uploadFileToCloudinary = async (file) => {
+  const uploadFileToStorage = async (file) => {
     const compressedFile = await compressFile(file, {}, 'SERVICE_POST');
     try {
       const url = await uploadFile(compressedFile, 'services');
@@ -140,7 +140,7 @@ export default function AddServices() {
 
       const newUploadedFiles = [];
       for (const file of selectedFiles) {
-        const url = await uploadFileToCloudinary(file);
+        const url = await uploadFileToStorage(file);
         newUploadedFiles.push({ name: file.name, url });
       }
 

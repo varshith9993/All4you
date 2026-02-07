@@ -107,7 +107,7 @@ export default function EditWorker() {
     fetchWorker();
   }, [id]);
 
-  const uploadFileToCloudinary = async (file) => {
+  const uploadFileToStorage = async (file) => {
     const compressedFile = await compressFile(file, {}, 'EDIT_WORKER');
     // Using R2 Storage
     try {
@@ -236,8 +236,8 @@ export default function EditWorker() {
       // Upload Profile Photo if changed
       let profilePhotoUrl = existingProfilePhotoUrl;
       if (profilePhoto) {
-        // Use Cloudinary for consistency with AddWorkers
-        profilePhotoUrl = await uploadFileToCloudinary(profilePhoto);
+        // Use consistent storage function
+        profilePhotoUrl = await uploadFileToStorage(profilePhoto);
       }
 
       // Upload New Files
@@ -246,7 +246,7 @@ export default function EditWorker() {
         if (f.isExisting) {
           finalFiles.push(f.url);
         } else if (f.file) {
-          const fileUrl = await uploadFileToCloudinary(f.file);
+          const fileUrl = await uploadFileToStorage(f.file);
           finalFiles.push(fileUrl);
         }
       }

@@ -48,7 +48,7 @@ export default function AddWorkers() {
     return () => unsubscribe();
   }, [navigate]);
 
-  const uploadFileToCloudinary = async (file) => {
+  const uploadFileToStorage = async (file) => {
     const compressedFile = await compressFile(file, {}, 'WORKER_POST');
     try {
       const url = await uploadFile(compressedFile, 'workers');
@@ -76,7 +76,7 @@ export default function AddWorkers() {
       setUploading(true);
       const urls = [];
       for (const file of files) {
-        const url = await uploadFileToCloudinary(file);
+        const url = await uploadFileToStorage(file);
         urls.push(url);
       }
       setUploadedFiles([...uploadedFiles, ...urls]);

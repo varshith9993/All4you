@@ -587,7 +587,6 @@ export default function ChatDetail() {
     const count = (chat.unseenCounts && chat.unseenCounts[uid]) || 0;
 
     if (count > 0) {
-      console.log("Fixing phantom unread count...");
       updateDoc(doc(db, "chats", chatId), {
         [`unseenCounts.${uid}`]: 0
       }).catch(err => { });
@@ -626,12 +625,9 @@ export default function ChatDetail() {
         cachedData.messages.every(msg => msg.createdAt);
 
       if (hasValidTimestamps) {
-        console.log('✅ Loading messages from cache:', cachedData.messages.length);
         setMessages(cachedData.messages);
         setHasMore(cachedData.messages.length >= limitCount);
         // Continue to listener to get real-time updates (e.g. blue ticks)
-      } else {
-        console.log('⚠️ Cache has invalid timestamps, fetching fresh data');
       }
     }
 
@@ -1064,7 +1060,7 @@ export default function ChatDetail() {
 
       const compressedFile = await compressFile(file, {}, compressType);
 
-      // Use 'auto' to let Cloudinary detect PDF/Docs vs Images
+      // Upload file directly to storage
       const url = await uploadFile(compressedFile, "chat-files");
 
       const msgType = isImage ? "image" : "file";
@@ -1172,7 +1168,7 @@ export default function ChatDetail() {
       { key: msg.id },
       React.createElement(
         "div",
-        { className: `flex w-full ${isOwn ? 'justify-end' : 'justify-start'} group mb-0.5` },
+        { className: `flex w-full ${isOwn ? 'justify-end' : 'justify-start'} group` },
         // For non-deleted messages from others
         !msg.isDeleted && !isOwn && React.createElement(
           MessageActionsComponent,
@@ -1509,7 +1505,7 @@ export default function ChatDetail() {
       {
         ref: chatContainerRef,
         onScroll: handleScroll,
-        className: "flex-1 overflow-y-auto bg-white p-4 space-y-2 flex flex-col-reverse",
+        className: "flex-1 overflow-y-auto bg-white p-4 flex flex-col-reverse gap-3",
         style: {
           touchAction: 'pan-y',
           WebkitOverflowScrolling: 'touch',

@@ -30,13 +30,11 @@ export const requestNotificationPermission = async (userId, userLocation) => {
         const permission = await Notification.requestPermission();
 
         if (permission !== 'granted') {
-            console.log('Notification permission denied');
             return null;
         }
 
         // Register service worker
         const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-        console.log('Service Worker registered:', registration);
 
         // Get FCM token
         const messaging = getMessaging();
@@ -46,14 +44,13 @@ export const requestNotificationPermission = async (userId, userLocation) => {
         });
 
         if (token) {
-            console.log('FCM Token obtained:', token);
+
 
             // Save token to Firestore with user location
             await saveFCMToken(userId, token, userLocation);
 
             return token;
         } else {
-            console.log('No registration token available');
             return null;
         }
     } catch (error) {
@@ -72,19 +69,22 @@ export const saveFCMToken = async (userId, token, userLocation) => {
     try {
         const tokenRef = doc(db, 'fcmTokens', userId);
 
+        const lat = userLocation?.latitude ? parseFloat(userLocation.latitude) : null;
+        const lng = userLocation?.longitude ? parseFloat(userLocation.longitude) : null;
+
+        console.log(`[FCM] Saving token for ${userId} with Location:`, lat, lng);
+
         await setDoc(tokenRef, {
             token,
             userId,
-            latitude: userLocation?.latitude || null,
-            longitude: userLocation?.longitude || null,
+            latitude: lat || null,
+            longitude: lng || null,
             city: userLocation?.city || null,
             country: userLocation?.country || null,
             platform: getPlatform(),
             updatedAt: serverTimestamp(),
             createdAt: serverTimestamp()
         }, { merge: true });
-
-        console.log('FCM token saved to Firestore');
     } catch (error) {
         console.error('Error saving FCM token:', error);
     }
@@ -116,7 +116,7 @@ export const onForegroundMessage = (callback) => {
         const messaging = getMessaging();
 
         return onMessage(messaging, (payload) => {
-            console.log('Foreground message received:', payload);
+
 
             // Show browser notification
             if (Notification.permission === 'granted') {
@@ -131,7 +131,29 @@ export const onForegroundMessage = (callback) => {
                     vibrate: [200, 100, 200],
                 };
 
-                new Notification(notificationTitle, notificationOptions);
+                const notification = new Notification(notificationTitle, notificationOptions);
+
+                notification.onclick = function (event) {
+                    event.preventDefault();
+                    window.focus();
+
+                    const data = payload.data || {};
+
+                    // Handle Navigation
+                    if ((data.type === 'chat_message' || data.type === 'chat_offline') && data.chatId) {
+                        window.location.href = `/chat/${data.chatId}`;
+                    } else if ((data.type === 'review' || data.type === 'review_reply') && data.postId && data.collection) {
+                        const target = data.collection === 'workers' ? 'worker-detail' :
+                            data.collection === 'ads' ? 'ad-detail' : 'service-detail';
+                        window.location.href = `/${target}/${data.postId}`;
+                    } else if (data.url) {
+                        window.location.href = data.url;
+                    } else {
+                        window.location.href = '/notifications';
+                    }
+
+                    notification.close();
+                };
             }
 
             // Call custom callback
@@ -156,8 +178,6 @@ export const deleteFCMToken = async (userId) => {
             token: null,
             updatedAt: serverTimestamp()
         }, { merge: true });
-
-        console.log('FCM token deleted');
     } catch (error) {
         console.error('Error deleting FCM token:', error);
     }

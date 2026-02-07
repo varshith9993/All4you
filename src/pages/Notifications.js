@@ -21,23 +21,23 @@ const getIcon = (notif) => {
     const type = notif.type;
     const msg = notif.message?.toLowerCase() || "";
 
-    if (msg.includes("deleted")) return <FiInfo className="text-red-500" size={20} />;
-    if (msg.includes("disabled")) return <FiInfo className="text-gray-500" size={20} />;
-    if (msg.includes("expired")) return <FiInfo className="text-purple-500" size={20} />;
-    if (msg.includes("back online") || msg.includes("enabled") || msg.includes("active")) return <FiCheckCircle className="text-green-500" size={20} />;
+    if (msg.includes("deleted")) return <FiInfo className="text-red-500" size={24} />;
+    if (msg.includes("disabled")) return <FiInfo className="text-gray-500" size={24} />;
+    if (msg.includes("expired")) return <FiInfo className="text-purple-500" size={24} />;
+    if (msg.includes("back online") || msg.includes("enabled") || msg.includes("active")) return <FiCheckCircle className="text-green-500" size={24} />;
 
-    if (type === "rating" || type === "rate" || notif.rating || msg.includes("rating")) return <FiStar className="text-yellow-500" size={20} />;
-    if (type === "reply" || notif.title === "Review Reply" || msg.includes("replied")) return <FiMessageCircle className="text-blue-500" size={20} />;
-    if (type === "review" || msg.includes("review")) return <FiMessageSquare className="text-blue-500" size={20} />;
+    if (type === "rating" || type === "rate" || notif.rating || msg.includes("rating")) return <FiStar className="text-yellow-500" size={24} />;
+    if (type === "reply" || notif.title === "Review Reply" || msg.includes("replied")) return <FiMessageCircle className="text-blue-500" size={24} />;
+    if (type === "review" || msg.includes("review")) return <FiMessageSquare className="text-blue-500" size={24} />;
 
-    if (type === "alert") return <FiInfo className="text-red-500" size={20} />;
-    if (type === "alert_good") return <FiCheckCircle className="text-green-500" size={20} />;
-    if (type === "system") return <FiInfo className="text-purple-500" size={20} />;
+    if (type === "alert") return <FiInfo className="text-red-500" size={24} />;
+    if (type === "alert_good") return <FiCheckCircle className="text-green-500" size={24} />;
+    if (type === "system") return <FiInfo className="text-purple-500" size={24} />;
 
-    if (notif.status === 'expiring_5min') return <FiClock className="text-red-600" size={20} />;
-    if (notif.status === 'expiring_1hr') return <FiClock className="text-blue-600" size={20} />;
+    if (notif.status === 'expiring_5min') return <FiClock className="text-red-600" size={24} />;
+    if (notif.status === 'expiring_1hr') return <FiClock className="text-blue-600" size={24} />;
 
-    return <FiBell className="text-gray-500" size={20} />;
+    return <FiBell className="text-gray-500" size={24} />;
 };
 
 /* ---------------- ITEM ---------------- */
@@ -129,7 +129,7 @@ const NotificationItem = ({ notif, viewTime, setActionModal }) => {
 
     return (
         <div
-            className={`p-4 rounded-xl bg-white border border-gray-100 shadow-sm flex gap-4 relative overflow-hidden transition-shadow ${isNavigable ? "cursor-pointer hover:shadow-md" : ""} ${notif.type === 'post_status' ? 'bg-orange-50 border-orange-100' : ''}`}
+            className={`p-4 rounded-[30px] bg-white border border-gray-100 shadow-sm flex gap-4 relative overflow-hidden transition-shadow ${isNavigable ? "cursor-pointer hover:shadow-md" : ""} ${notif.type === 'post_status' ? 'bg-orange-50 border-orange-100' : ''}`}
             onClick={handleClick}
         >
             <div className="flex-shrink-0 mt-1">

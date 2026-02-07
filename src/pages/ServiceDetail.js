@@ -51,17 +51,9 @@ function ManualStars({ value, onChange, size = 46 }) {
 }
 
 
-// Function to get download URL with forced download for Cloudinary
+// Function to get download URL
 function getDownloadUrl(url) {
     if (!url) return "";
-
-    // For Cloudinary files
-    if (url.includes("cloudinary.com") && url.includes("/upload/")) {
-        // For all files, add attachment flag if not present
-        if (!url.includes("fl_attachment")) {
-            return url.replace("/upload/", "/upload/fl_attachment/");
-        }
-    }
     return url;
 }
 
@@ -811,7 +803,7 @@ function ServiceDetail() {
             }
 
             // Create new chat only if none exists
-            console.log("Creating new chat...");
+            // Create new chat only if none exists
             const newDoc = await addDoc(chatsRef, {
                 participants: [currentUserId, recipientId],
                 initiatorId: currentUserId,
@@ -1556,7 +1548,6 @@ function ServiceDetail() {
                                         {currentFile.isOversized && (
                                             <span className="bg-red-500 text-white px-2 py-0.5 rounded-full text-xs">Large File</span>
                                         )}
-                                        {/* Cloudinary label removed */}
                                     </div>
                                 </div>
                             </div>
@@ -1596,7 +1587,6 @@ function ServiceDetail() {
                                             <h4 className="text-xl font-bold text-gray-900 mb-2">PDF Document</h4>
                                             <p className="text-gray-600 mb-2">{currentFile.name}</p>
                                             <p className="text-gray-500 text-sm mb-2">{currentFile.size}</p>
-                                            {/* Cloudinary text removed */}
                                         </div>
 
                                         <div className="flex flex-col gap-3 max-w-sm mx-auto">

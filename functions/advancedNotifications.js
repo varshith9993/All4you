@@ -2,363 +2,426 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 
 // ============================================================================
-// ADVANCED NOTIFICATION FUNCTIONS
+// IN-MEMORY CACHE (Optimizes Warm Boots & Parallel Executes)
 // ============================================================================
+const cache = {
+    tokens: new Map(),
+    profiles: new Map(),
+    status: new Map(),
+    TTL: 5 * 60 * 1000 // 5 Minutes
+};
 
 /**
- * Check for offline users with pending chat messages
- * Runs every hour
+ * Helper to get document with in-memory caching
  */
-exports.checkOfflineChatMessages = functions.pubsub
-    .schedule('0 * * * *') // Every hour
-    .timeZone('Asia/Kolkata')
-    .onRun(async (context) => {
-        try {
-            const now = admin.firestore.Timestamp.now();
-            const oneHourAgo = new Date(now.toDate().getTime() - (60 * 60 * 1000));
+async function getCachedDoc(collection, docId) {
+    const now = Date.now();
+    const cacheMap = collection === 'fcmTokens' ? cache.tokens :
+        collection === 'profiles' ? cache.profiles :
+            collection === 'userStatus' ? cache.status : null;
 
-            // Get all chats
-            const chatsSnapshot = await admin.firestore().collection('chats').get();
-
-            for (const chatDoc of chatsSnapshot.docs) {
-                const chatData = chatDoc.data();
-                const participants = chatData.participants || [];
-
-                // Check messages in last hour
-                const messagesSnapshot = await admin.firestore()
-                    .collection('chats').doc(chatDoc.id).collection('messages')
-                    .where('timestamp', '>', admin.firestore.Timestamp.fromDate(oneHourAgo))
-                    .get();
-
-                if (messagesSnapshot.empty) continue;
-
-                // Check each participant's last seen
-                for (const userId of participants) {
-                    const userStatusDoc = await admin.firestore().doc(`userStatus/${userId}`).get();
-
-                    if (!userStatusDoc.exists) continue;
-
-                    const userStatus = userStatusDoc.data();
-                    const lastSeen = userStatus.lastSeen?.toDate();
-
-                    // If user was offline for more than 1 hour
-                    if (lastSeen && (now.toDate() - lastSeen) > (60 * 60 * 1000)) {
-                        // Count unread messages
-                        const unreadMessages = messagesSnapshot.docs.filter(
-                            msg => msg.data().senderId !== userId
-                        );
-
-                        if (unreadMessages.length > 0) {
-                            // Get FCM token
-                            const tokenDoc = await admin.firestore().doc(`fcmTokens/${userId}`).get();
-                            if (!tokenDoc.exists || !tokenDoc.data().token) continue;
-
-                            const token = tokenDoc.data().token;
-                            const lastMessage = unreadMessages[unreadMessages.length - 1].data();
-
-                            // Send notification
-                            await admin.messaging().send({
-                                token,
-                                notification: {
-                                    title: `${unreadMessages.length} New Message${unreadMessages.length > 1 ? 's' : ''}`,
-                                    body: lastMessage.text || 'You have new messages',
-                                },
-                                data: {
-                                    type: 'chat_offline',
-                                    chatId: chatDoc.id,
-                                    messageCount: unreadMessages.length.toString()
-                                }
-                            });
-                        }
-                    }
-                }
-            }
-
-            console.log('Offline chat messages check completed');
-        } catch (error) {
-            console.error('Error checking offline chat messages:', error);
+    if (cacheMap && cacheMap.has(docId)) {
+        const entry = cacheMap.get(docId);
+        if (now - entry.timestamp < cache.TTL) {
+            return entry.data;
         }
-    });
-
-/**
- * Check for expiring favorite posts (1 hour and 5 minutes before expiry)
- * Runs every 15 minutes
- */
-exports.checkExpiringFavorites = functions.pubsub
-    .schedule('*/15 * * * *') // Every 15 minutes
-    .timeZone('Asia/Kolkata')
-    .onRun(async (context) => {
-        try {
-            const now = admin.firestore.Timestamp.now();
-            const oneHourFromNow = new Date(now.toDate().getTime() + (60 * 60 * 1000));
-            const fiveMinutesFromNow = new Date(now.toDate().getTime() + (5 * 60 * 1000));
-
-            const collections = ['workers', 'ads', 'services'];
-            const favoriteCollections = ['favoriteWorkers', 'favoriteAds', 'favoriteServices'];
-
-            for (let i = 0; i < collections.length; i++) {
-                const collection = collections[i];
-                const favoriteCollection = favoriteCollections[i];
-
-                // Get all favorites
-                const favoritesSnapshot = await admin.firestore().collection(favoriteCollection).get();
-
-                for (const favoriteDoc of favoritesSnapshot.docs) {
-                    const favoriteData = favoriteDoc.data();
-                    const postId = favoriteData.workerId || favoriteData.adId || favoriteData.serviceId;
-                    const userId = favoriteData.userId;
-
-                    if (!postId || !userId) continue;
-
-                    // Get the post
-                    const postDoc = await admin.firestore().doc(`${collection}/${postId}`).get();
-                    if (!postDoc.exists) continue;
-
-                    const post = postDoc.data();
-                    if (!post.expiresAt) continue;
-
-                    const expiryTime = post.expiresAt.toDate();
-                    const timeUntilExpiry = expiryTime - now.toDate();
-
-                    // Check if expiring in 1 hour (send once)
-                    if (timeUntilExpiry > 0 && timeUntilExpiry <= (60 * 60 * 1000) && timeUntilExpiry > (55 * 60 * 1000)) {
-                        await sendExpiryNotification(userId, post, postId, collection, '1 hour');
-                    }
-                    // Check if expiring in 5 minutes (send once)
-                    else if (timeUntilExpiry > 0 && timeUntilExpiry <= (5 * 60 * 1000) && timeUntilExpiry > (3 * 60 * 1000)) {
-                        await sendExpiryNotification(userId, post, postId, collection, '5 minutes');
-                    }
-                }
-            }
-
-            console.log('Expiring favorites check completed');
-        } catch (error) {
-            console.error('Error checking expiring favorites:', error);
-        }
-    });
-
-async function sendExpiryNotification(userId, post, postId, collection, timeLeft) {
-    try {
-        const tokenDoc = await admin.firestore().doc(`fcmTokens/${userId}`).get();
-        if (!tokenDoc.exists || !tokenDoc.data().token) return;
-
-        const token = tokenDoc.data().token;
-
-        await admin.messaging().send({
-            token,
-            notification: {
-                title: `⏰ Favorite Post Expiring Soon!`,
-                body: `"${post.title || post.name}" expires in ${timeLeft}!`,
-            },
-            data: {
-                type: 'expiring_favorite',
-                collection,
-                postId,
-                timeLeft,
-                requireInteraction: 'true'
-            }
-        });
-    } catch (error) {
-        console.error('Error sending expiry notification:', error);
     }
+
+    const doc = await admin.firestore().doc(`${collection}/${docId}`).get();
+    const data = doc.exists ? doc.data() : null;
+
+    if (cacheMap) {
+        cacheMap.set(docId, { data, timestamp: now });
+    }
+    return data;
 }
 
 /**
- * Trigger: Send notification when review is added
+ * 1. NEW POST WITHIN 50KM ✅
+ */
+exports.onNewPost = functions.firestore
+    .document('{collection}/{postId}')
+    .onCreate(async (snap, context) => {
+        const { collection, postId } = context.params;
+        if (!['workers', 'ads', 'services'].includes(collection)) return;
+
+        const post = snap.data();
+        if (!post.latitude || !post.longitude) return;
+
+        try {
+            const city = post.location?.city;
+            const country = post.location?.country || post.country;
+
+            let query = admin.firestore().collection('fcmTokens');
+
+            if (city) {
+                query = query.where('city', '==', city);
+            } else if (country) {
+                query = query.where('country', '==', country);
+            } else {
+                query = query.where('latitude', '!=', null);
+            }
+
+            // OPTIMIZATION: Only fetch needed fields
+            const tokensSnapshot = await query.select('token', 'latitude', 'longitude', 'userId').get();
+            if (tokensSnapshot.empty) return;
+
+            const nearbyTokens = [];
+            const tokenToDocMap = new Map(); // For cleanup
+
+            tokensSnapshot.forEach(doc => {
+                const tokenData = doc.data();
+                if (!tokenData.token || !tokenData.latitude || !tokenData.longitude) return;
+                if (tokenData.userId === post.createdBy) return;
+
+                const distance = calculateDistance(
+                    Number(post.latitude),
+                    Number(post.longitude),
+                    Number(tokenData.latitude),
+                    Number(tokenData.longitude)
+                );
+
+                if (distance <= 50) {
+                    nearbyTokens.push(tokenData.token);
+                    tokenToDocMap.set(tokenData.token, doc.id);
+                }
+            });
+
+            if (nearbyTokens.length === 0) return;
+
+            const typeLabel = collection === 'workers' ? 'Worker' : collection === 'ads' ? 'Ad' : 'Service';
+            const title = `📍 New ${typeLabel} Nearby!`;
+            const body = post.title || post.name ? `${post.title || post.name} is now available near you.` : `A new ${typeLabel.toLowerCase()} has been posted near you.`;
+
+            const payload = {
+                notification: { title, body },
+                android: {
+                    priority: 'high',
+                    notification: {
+                        sound: 'default',
+                        channelId: 'default_channel',
+                        icon: 'https://servepure-fav.web.app/logo192.png'
+                    }
+                },
+                apns: { payload: { aps: { sound: 'default', 'mutable-content': 1 } } },
+                webpush: {
+                    headers: { Urgency: 'high' },
+                    notification: { title, body, icon: '/logo192.png', requireInteraction: true },
+                    fcmOptions: { link: `/${collection}/${postId}` }
+                },
+                data: {
+                    type: 'new_post',
+                    collection,
+                    postId,
+                    url: `/${collection}/${postId}`
+                }
+            };
+
+            const batchSize = 500;
+            for (let i = 0; i < nearbyTokens.length; i += batchSize) {
+                const batch = nearbyTokens.slice(i, i + batchSize);
+                const response = await admin.messaging().sendEachForMulticast({ tokens: batch, ...payload });
+
+                // TOKEN CLEANUP: Remove invalid tokens to save future read costs
+                if (response.failureCount > 0) {
+                    const batchCleanup = admin.firestore().batch();
+                    response.responses.forEach((res, idx) => {
+                        if (!res.success) {
+                            const errorCode = res.error?.code;
+                            if (errorCode === 'messaging/registration-token-not-registered' ||
+                                errorCode === 'messaging/invalid-registration-token') {
+                                const docId = tokenToDocMap.get(batch[idx]);
+                                if (docId) batchCleanup.delete(admin.firestore().doc(`fcmTokens/${docId}`));
+                            }
+                        }
+                    });
+                    await batchCleanup.commit().catch(err => console.error('Cleanup error:', err));
+                }
+            }
+        } catch (error) {
+            console.error('[onNewPost] Error:', error);
+        }
+    });
+
+/**
+ * 2. NEW REVIEW/RATING ✅
  */
 exports.onNewReview = functions.firestore
     .document('{reviewCollection}/{reviewId}')
     .onCreate(async (snap, context) => {
         const { reviewCollection } = context.params;
-
-        // Only trigger for review collections
         if (!['workerReviews', 'adReviews', 'serviceReviews'].includes(reviewCollection)) return;
 
         const review = snap.data();
-        const postOwnerId = review.postOwnerId || review.createdBy;
+        let postOwnerId = review.postOwnerId;
+
+        if (!postOwnerId) {
+            try {
+                const collectionMap = { 'workerReviews': 'workers', 'adReviews': 'ads', 'serviceReviews': 'services' };
+                const parentCollection = collectionMap[reviewCollection];
+                const postId = review.workerId || review.adId || review.serviceId;
+
+                if (parentCollection && postId) {
+                    const postDoc = await admin.firestore().doc(`${parentCollection}/${postId}`).get();
+                    if (postDoc.exists) {
+                        const postData = postDoc.data();
+                        postOwnerId = postData.createdBy || postData.userId || postData.ownerId;
+                    }
+                }
+            } catch (err) {
+                console.error('Error fetching parent post for review:', err);
+            }
+        }
 
         if (!postOwnerId) return;
 
         try {
-            const tokenDoc = await admin.firestore().doc(`fcmTokens/${postOwnerId}`).get();
-            if (!tokenDoc.exists || !tokenDoc.data().token) return;
+            // CACHED: Get Token
+            const tokenData = await getCachedDoc('fcmTokens', postOwnerId);
+            if (!tokenData || !tokenData.token) return;
 
-            const token = tokenDoc.data().token;
+            const token = tokenData.token;
 
-            // Get reviewer profile
-            const reviewerDoc = await admin.firestore().doc(`profiles/${review.userId}`).get();
-            const reviewerName = reviewerDoc.exists ? reviewerDoc.data().username : 'Someone';
+            // CACHED: Get Reviewer Name
+            const reviewerId = review.userId || review.createdBy;
+            let reviewerName = 'Someone';
+
+            if (reviewerId) {
+                const reviewerProfile = await getCachedDoc('profiles', reviewerId);
+                if (reviewerProfile) {
+                    reviewerName = reviewerProfile.username || 'Someone';
+                }
+            }
+
+            const title = review.rating ? `⭐ New ${review.rating}-Star Rating!` : `💬 New Review Comment`;
+            const reviewText = review.text || review.comment || '';
+            const body = reviewText ? `${reviewerName}: "${reviewText.substring(0, 50)}..."` : `${reviewerName} rated you ${review.rating} stars.`;
+
+            const targetCollection = reviewCollection.replace('Reviews', 's');
+            const targetRoute = targetCollection === 'workers' ? 'worker-detail' : targetCollection === 'ads' ? 'ad-detail' : 'service-detail';
+            const targetId = review.workerId || review.adId || review.serviceId;
 
             await admin.messaging().send({
                 token,
-                notification: {
-                    title: `⭐ New ${review.rating}-Star Review!`,
-                    body: `${reviewerName} left a review: "${review.comment?.substring(0, 50)}..."`,
+                notification: { title, body },
+                android: {
+                    priority: 'high',
+                    notification: {
+                        sound: 'default',
+                        channelId: 'default_channel',
+                        icon: 'https://servepure-fav.web.app/logo192.png'
+                    }
+                },
+                apns: {
+                    payload: {
+                        aps: {
+                            sound: 'default',
+                            'mutable-content': 1,
+                            badge: 1
+                        }
+                    }
+                },
+                webpush: {
+                    headers: { Urgency: 'high' },
+                    notification: { title, body, icon: '/logo192.png' },
+                    fcmOptions: { link: `/${targetRoute}/${targetId}` }
                 },
                 data: {
                     type: 'review',
                     reviewId: snap.id,
-                    postId: review.workerId || review.adId || review.serviceId,
-                    collection: reviewCollection.replace('Reviews', 's')
+                    postId: targetId,
+                    collection: targetCollection
+                }
+            }).catch(err => {
+                if (err.code === 'messaging/registration-token-not-registered' || err.code === 'messaging/invalid-registration-token') {
+                    admin.firestore().doc(`fcmTokens/${postOwnerId}`).delete().catch(() => { });
                 }
             });
-
-            console.log(`Review notification sent to ${postOwnerId}`);
         } catch (error) {
-            console.error('Error sending review notification:', error);
+            console.error('❌ Error sending review notification:', error);
         }
     });
 
 /**
- * Trigger: Send notification when someone replies to a review
+ * 3. REVIEW REPLY ✅
  */
 exports.onReviewReply = functions.firestore
     .document('{reviewCollection}/{reviewId}')
     .onUpdate(async (change, context) => {
         const { reviewCollection } = context.params;
-
         if (!['workerReviews', 'adReviews', 'serviceReviews'].includes(reviewCollection)) return;
 
         const before = change.before.data();
         const after = change.after.data();
+        const beforeReplies = before.replies || (before.reply ? [{ text: before.reply }] : []);
+        const afterReplies = after.replies || (after.reply ? [{ text: after.reply }] : []);
 
-        // Check if reply was added
-        if (!before.reply && after.reply) {
-            const reviewerId = after.userId;
+        if (afterReplies.length > beforeReplies.length) {
+            const latestReply = afterReplies[afterReplies.length - 1];
+            const replyText = latestReply.text || latestReply;
+            const reviewerId = after.userId || after.createdBy;
 
             try {
-                const tokenDoc = await admin.firestore().doc(`fcmTokens/${reviewerId}`).get();
-                if (!tokenDoc.exists || !tokenDoc.data().token) return;
+                // CACHED: Get Token
+                const tokenData = await getCachedDoc('fcmTokens', reviewerId);
+                if (!tokenData || !tokenData.token) return;
 
-                const token = tokenDoc.data().token;
+                const token = tokenData.token;
+                const targetCollection = reviewCollection.replace('Reviews', 's');
+                const targetRoute = targetCollection === 'workers' ? 'worker-detail' : targetCollection === 'ads' ? 'ad-detail' : 'service-detail';
+                const targetId = after.workerId || after.adId || after.serviceId;
 
                 await admin.messaging().send({
                     token,
                     notification: {
                         title: `💬 Reply to Your Review`,
-                        body: `The owner replied: "${after.reply.substring(0, 50)}..."`,
+                        body: `The owner replied: "${replyText.substring(0, 50)}..."`
+                    },
+                    android: {
+                        priority: 'high',
+                        notification: {
+                            sound: 'default',
+                            channelId: 'default_channel',
+                            icon: 'https://servepure-fav.web.app/logo192.png'
+                        }
+                    },
+                    apns: {
+                        payload: {
+                            aps: {
+                                sound: 'default',
+                                'mutable-content': 1,
+                                badge: 1
+                            }
+                        }
+                    },
+                    webpush: {
+                        headers: { Urgency: 'high' },
+                        notification: {
+                            title: `💬 Reply to Your Review`,
+                            body: `The owner replied: "${replyText.substring(0, 50)}..."`,
+                            icon: '/logo192.png'
+                        },
+                        fcmOptions: { link: `/${targetRoute}/${targetId}` }
                     },
                     data: {
                         type: 'review_reply',
                         reviewId: change.after.id,
-                        postId: after.workerId || after.adId || after.serviceId,
-                        collection: reviewCollection.replace('Reviews', 's')
+                        postId: targetId,
+                        collection: targetCollection
+                    }
+                }).catch(err => {
+                    if (err.code === 'messaging/registration-token-not-registered' || err.code === 'messaging/invalid-registration-token') {
+                        admin.firestore().doc(`fcmTokens/${reviewerId}`).delete().catch(() => { });
                     }
                 });
-
-                console.log(`Review reply notification sent to ${reviewerId}`);
             } catch (error) {
-                console.error('Error sending review reply notification:', error);
+                console.error('❌ Error sending review reply notification:', error);
             }
         }
     });
 
 /**
- * Trigger: Send notification when favorite post is re-enabled
+ * 4. INSTANT CHAT MESSAGE ✅
  */
-exports.onPostStatusChange = functions.firestore
-    .document('{collection}/{postId}')
-    .onUpdate(async (change, context) => {
-        const { collection, postId } = context.params;
+exports.onNewChatMessage = functions.firestore
+    .document('chats/{chatId}/messages/{messageId}')
+    .onCreate(async (snap, context) => {
+        const message = snap.data();
+        const { chatId } = context.params;
+        if (!message.senderId) return;
 
-        if (!['workers', 'ads', 'services'].includes(collection)) return;
-
-        const before = change.before.data();
-        const after = change.after.data();
-
-        // Check if post was re-enabled
-        if (before.disabled === true && after.disabled === false) {
-            try {
-                // Get all users who favorited this post
-                const favoriteCollection = collection === 'workers' ? 'favoriteWorkers' :
-                    collection === 'ads' ? 'favoriteAds' : 'favoriteServices';
-                const idField = collection === 'workers' ? 'workerId' :
-                    collection === 'ads' ? 'adId' : 'serviceId';
-
-                const favoritesSnapshot = await admin.firestore()
-                    .collection(favoriteCollection)
-                    .where(idField, '==', postId)
-                    .get();
-
-                for (const favoriteDoc of favoritesSnapshot.docs) {
-                    const userId = favoriteDoc.data().userId;
-
-                    const tokenDoc = await admin.firestore().doc(`fcmTokens/${userId}`).get();
-                    if (!tokenDoc.exists || !tokenDoc.data().token) continue;
-
-                    const token = tokenDoc.data().token;
-
-                    await admin.messaging().send({
-                        token,
-                        notification: {
-                            title: `✅ Favorite Post is Back!`,
-                            body: `"${after.title || after.name}" is now available again!`,
-                        },
-                        data: {
-                            type: 'favorite_enabled',
-                            collection,
-                            postId
-                        }
-                    });
-                }
-
-                console.log(`Post re-enabled notifications sent for ${postId}`);
-            } catch (error) {
-                console.error('Error sending post re-enabled notification:', error);
-            }
-        }
-    });
-
-/**
- * Check for inactive users and send reminder notifications
- * Runs daily at 10 AM
- */
-exports.checkInactiveUsers = functions.pubsub
-    .schedule('0 10 * * *') // Daily at 10 AM
-    .timeZone('Asia/Kolkata')
-    .onRun(async (context) => {
         try {
-            const now = admin.firestore.Timestamp.now();
-            const userStatusSnapshot = await admin.firestore().collection('userStatus').get();
+            const chatDoc = await admin.firestore().doc(`chats/${chatId}`).get();
+            if (!chatDoc.exists) return;
 
-            for (const statusDoc of userStatusSnapshot.docs) {
-                const userId = statusDoc.id;
-                const userStatus = statusDoc.data();
-                const lastSeen = userStatus.lastSeen?.toDate();
+            const chatData = chatDoc.data();
+            const recipientId = (chatData.participants || []).find(id => id && id !== message.senderId);
+            if (!recipientId || (chatData.mutedBy && chatData.mutedBy.includes(recipientId))) return;
 
-                if (!lastSeen) continue;
+            // CACHED: Status, Token, Profile
+            const [userStatus, tokenData, senderProfile] = await Promise.all([
+                getCachedDoc('userStatus', recipientId),
+                getCachedDoc('fcmTokens', recipientId),
+                getCachedDoc('profiles', message.senderId)
+            ]);
 
-                const daysSinceLastSeen = Math.floor((now.toDate() - lastSeen) / (1000 * 60 * 60 * 24));
+            if (userStatus?.isOnline) return;
+            if (!tokenData?.token) return;
 
-                // Send notification at 24, 48, 72, 96... hours
-                if (daysSinceLastSeen > 0 && daysSinceLastSeen % 1 === 0) {
-                    const tokenDoc = await admin.firestore().doc(`fcmTokens/${userId}`).get();
-                    if (!tokenDoc.exists || !tokenDoc.data().token) continue;
+            const senderName = senderProfile?.username || 'User';
+            const notificationBody = message.text || (message.type === 'image' ? '📷 Photo' : '📎 Attachment');
+            const notificationTitle = `🗨️ New message(s) from ${senderName}`;
 
-                    const token = tokenDoc.data().token;
-
-                    // Get user profile
-                    const profileDoc = await admin.firestore().doc(`profiles/${userId}`).get();
-                    const userName = profileDoc.exists ? profileDoc.data().username : 'there';
-
-                    await admin.messaging().send({
-                        token,
-                        notification: {
-                            title: `We Miss You! 👋`,
-                            body: `Hey ${userName}, it's been ${daysSinceLastSeen} day${daysSinceLastSeen > 1 ? 's' : ''}! Check out what's new on AeroSigil.`,
-                        },
-                        data: {
-                            type: 'inactive_reminder',
-                            daysSinceLastSeen: daysSinceLastSeen.toString()
+            await admin.messaging().send({
+                token: tokenData.token,
+                notification: { title: notificationTitle, body: notificationBody },
+                android: {
+                    priority: 'high',
+                    notification: {
+                        channelId: 'default_channel',
+                        sound: 'default',
+                        tag: `chat_${chatId}`,
+                        icon: 'https://servepure-fav.web.app/logo192.png',
+                        color: '#4A90E2',
+                    }
+                },
+                apns: {
+                    payload: {
+                        aps: {
+                            sound: 'default',
+                            threadId: `chat_${chatId}`,
+                            alert: { title: notificationTitle, body: notificationBody },
+                            'mutable-content': 1,
+                            badge: 1
                         }
-                    });
+                    }
+                },
+                webpush: {
+                    headers: { Urgency: 'high' },
+                    notification: {
+                        title: notificationTitle,
+                        body: notificationBody,
+                        tag: `chat_${chatId}`,
+                        icon: '/logo192.png',
+                        badge: '/logo192.png',
+                        renotify: true,
+                        requireInteraction: true,
+                        actions: [{ action: 'open', title: 'Open' }]
+                    },
+                    fcmOptions: { link: `/chat/${chatId}` }
+                },
+                data: {
+                    type: 'chat_message',
+                    chatId: chatId,
+                    senderId: message.senderId,
+                    stackedBody: notificationBody
                 }
-            }
-
-            console.log('Inactive users check completed');
+            }).catch(err => {
+                if (err.code === 'messaging/registration-token-not-registered' || err.code === 'messaging/invalid-registration-token') {
+                    admin.firestore().doc(`fcmTokens/${recipientId}`).delete().catch(() => { });
+                }
+            });
         } catch (error) {
-            console.error('Error checking inactive users:', error);
+            console.error('[onNewChatMessage] Error:', error);
         }
     });
+
+/**
+ * Helper: Calculate distance
+ */
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
+
+function toRad(degrees) {
+    return degrees * (Math.PI / 180);
+}
 
 module.exports = exports;

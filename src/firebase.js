@@ -4,6 +4,8 @@ import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
 import { getDatabase } from "firebase/database";
 import { getStorage } from "firebase/storage";
 import { getMessaging, isSupported } from "firebase/messaging";
+import { getFunctions } from "firebase/functions";
+
 
 const firebaseConfig = {
   apiKey: "AIzaSyDn52J3u3BZicSgsLBDGoZ0kjPZIHtVutk",
@@ -40,6 +42,7 @@ enableIndexedDbPersistence(db).catch((err) => {
 
 export const rtdb = getDatabase(app);
 export const storage = getStorage(app);
+export const functions = getFunctions(app);
 
 // Initialize messaging only if supported (not supported in all browsers)
 let messaging = null;
@@ -50,6 +53,11 @@ isSupported().then(supported => {
 }).catch(err => {
   console.warn("Firebase Messaging not supported:", err);
 });
+
+// Initialize In-App Messaging
+// Note: In-App Messaging works out of the box once initialized.
+// You configure the actual messages in the Firebase Console.
+
 
 export { messaging };
 

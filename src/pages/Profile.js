@@ -51,7 +51,7 @@ import { formatLastSeen } from "../utils/timeUtils";
 
 // API Keys removed - handled by backend proxy via locationService
 
-async function uploadToCloudinary(file) {
+async function uploadProfileImage(file) {
   try {
     const url = await uploadFile(file, 'profiles');
     return url;
@@ -515,7 +515,7 @@ export default function Profile() {
       // Convert Blob to File
       const file = new File([croppedBlob], "profile_pic.jpg", { type: "image/jpeg" });
       const compressedFile = await compressProfileImage(file);
-      const url = await uploadToCloudinary(compressedFile);
+      const url = await uploadProfileImage(compressedFile);
 
       setEditingProfile((prev) => ({ ...prev, profileImage: url }));
       setImagePreview(url);
@@ -908,6 +908,42 @@ export default function Profile() {
       statusText = isOnline ? "Online" : formatLastSeen(displayLastSeen);
     }
 
+    // Check if it's "Until I change" option
+    const isUntilIChange = () => {
+      if (!expiry) return false;
+      try {
+        const expiryDate = expiry.toDate ? expiry.toDate() : new Date(expiry);
+        const year = expiryDate.getFullYear();
+        return year === 9999 || year > 9000;
+      } catch (error) {
+        return false;
+      }
+    };
+
+    // Get until text for all posts
+    const getUntilText = () => {
+      if (!expiry) return "";
+      try {
+        const expiryDate = expiry.toDate ? expiry.toDate() : new Date(expiry);
+        if (isUntilIChange()) {
+          return "Expiry: N/A";
+        } else {
+          return `Until: ${expiryDate.toLocaleString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true
+          })}`;
+        }
+      } catch (error) {
+        return "Until: Unknown";
+      }
+    };
+
+    const untilText = getUntilText();
+
     return React.createElement("div", {
       className: "bg-white p-3 rounded-lg border border-gray-200 shadow-sm mb-2.5 cursor-pointer hover:shadow-md transition-all",
       onClick: () => navigate(`/service-detail/${post.id}`)
@@ -1018,16 +1054,9 @@ export default function Profile() {
           React.createElement("div", {
             className: "flex items-center justify-between text-[10px]"
           },
-            expiry.toDate && React.createElement("span", {
+            untilText && React.createElement("span", {
               className: "text-gray-500 whitespace-nowrap"
-            }, "Until: " + expiry.toDate().toLocaleString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-              hour: 'numeric',
-              minute: '2-digit',
-              hour12: true
-            })),
+            }, untilText),
             expiryText && React.createElement("span", {
               className: expiryColor + " whitespace-nowrap font-medium " + (isExpiringNow ? "animate-pulse bg-red-100 px-1 rounded" : "")
             }, expiryText)
